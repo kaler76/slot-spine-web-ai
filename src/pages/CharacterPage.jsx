@@ -544,10 +544,8 @@ export default function CharacterPage() {
                         <option key={pp.id} value={pp.part_key}>{pp.part_key}</option>
                       ))}
                     </select>
-                    <span className="tech-edit-pair">
-                      <input type="number" value={editValues.width} onChange={(e) => setEditValues((v) => ({ ...v, width: e.target.value }))} />
-                      ×
-                      <input type="number" value={editValues.height} onChange={(e) => setEditValues((v) => ({ ...v, height: e.target.value }))} />
+                    <span className="tech-edit-pair" title="Le dimensioni riflettono sempre il file immagine reale: per cambiarle serve ricaricare/ritagliare di nuovo l'immagine, non sono modificabili qui per evitare che l'export risulti disallineato dal PNG effettivo.">
+                      {editValues.width}×{editValues.height}px 🔒
                     </span>
                     <span className="tech-edit-pair">
                       <input type="number" value={editValues.offsetX} onChange={(e) => setEditValues((v) => ({ ...v, offsetX: e.target.value }))} />
@@ -676,19 +674,10 @@ export default function CharacterPage() {
       {workingBlob && (
         <>
           <div className="hint" style={{ color: "#9fc4ff" }}>
-            📐 Dimensioni rilevate automaticamente dall'immagine caricata — se le tue tessere vengono dalla stessa
-            sprite sheet, le proporzioni tra loro sono già corrette: modifica questi due campi solo se sai
-            esattamente cosa vuoi ottenere, altrimenti lascia i valori rilevati.
-          </div>
-          <div className="row">
-            <label className="field-label">
-              Larghezza (px)
-              <input type="number" value={width} onChange={(e) => setWidth(e.target.value)} />
-            </label>
-            <label className="field-label">
-              Altezza (px)
-              <input type="number" value={height} onChange={(e) => setHeight(e.target.value)} />
-            </label>
+            📐 Dimensioni rilevate automaticamente dall'immagine caricata: {width}×{height}px. Non sono modificabili
+            a mano — se le dimensioni non sono quelle giuste, ricarica o ritaglia di nuovo l'immagine. Questo evita
+            che l'export dichiari una dimensione diversa dal PNG reale, che è la causa più comune di export Spine
+            che sembrano vuoti o con parti mancanti quando aperti nell'editor.
           </div>
           <div className="row">
             <label className="field-label">
