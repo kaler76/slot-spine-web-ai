@@ -31,7 +31,7 @@ export default function Home() {
   }, []);
 
   function thumbFor(item, kind) {
-    if (kind === "symbol") return item.animations.find((a) => a.image_url)?.image_url || null;
+    if (kind === "symbol") return item.animations.find((a) => a.image_url)?.image_url || item.source_image_url || null;
     if (kind === "character") return item.parts[0]?.image_url || null;
     if (kind === "background") return item.layers[0]?.image_url || null;
     return null;

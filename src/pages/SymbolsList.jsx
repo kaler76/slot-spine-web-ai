@@ -90,11 +90,10 @@ export default function SymbolsList() {
               ✕
             </button>
             <div className="symbol-card-thumb">
-              {s.animations[0] ? (
-                <img src={s.animations.find((a) => a.image_url)?.image_url} alt={s.name} />
-              ) : (
-                <span className="symbol-card-empty">vuoto</span>
-              )}
+              {(() => {
+                const thumb = s.animations.find((a) => a.image_url)?.image_url || s.source_image_url;
+                return thumb ? <img src={thumb} alt={s.name} /> : <span className="symbol-card-empty">vuoto</span>;
+              })()}
             </div>
             <div className="symbol-card-name">{s.name}</div>
             <div className="symbol-card-anims">

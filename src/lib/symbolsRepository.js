@@ -7,7 +7,7 @@ import { supabase, SYMBOLS_TABLE, ANIMATIONS_TABLE, STORAGE_BUCKET } from "./sup
 export async function listSymbolsWithAnimations() {
   const { data: symbols, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at")
+    .select("id, name, created_at, source_image_url")
     .order("created_at", { ascending: false });
   if (symErr) throw symErr;
 
