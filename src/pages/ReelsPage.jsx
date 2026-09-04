@@ -3,14 +3,12 @@ import { Link } from "react-router-dom";
 import { listSymbolsForReels } from "../lib/symbolsRepository.js";
 import { listCharactersForReels } from "../lib/charactersRepository.js";
 import { getLastAztecProject } from "../lib/appSettingsRepository.js";
+import { extractAztecSymbols } from "../lib/aztecImport.js";
 import { totalDuration } from "../lib/animationPreview.js";
 import { pickRandom } from "../lib/reelEngine.js";
 import { playSpinStart, playReelStop, playWin } from "../lib/reelSound.js";
 import ReelColumn from "../components/ReelColumn.jsx";
 
-const REEL_COUNT_OPTIONS = [3, 5];
-const DEFAULT_VISIBLE_ROWS = 3;
-const NO_STAGE_CELL_SIZE = 150;
 const WIN_HOLD_MS = 900;
 
 function makeRestingCells(pool, count) {
@@ -36,7 +34,7 @@ function estimateDurationMs(landedItems, animationType) {
   return max || (animationType === "win" ? 800 : 400);
 }
 
-/** Geometria dello stage (sfondo/cornice/rulli) dall'ultimo progetto aztec-preview importato, se presente e completa. */
+/** Geometria dello stage (sfondo/cornice/rulli) dell'ultimo progetto aztec-preview importato, se completa. */
 function stageGeometryFrom(project) {
   const cfg = project?.cfg;
   if (!cfg?.doc?.w || !cfg?.doc?.h || !Array.isArray(cfg.reelX) || !cfg.reelX.length || !cfg.reelY || !cfg.cell || !cfg.rows) {
@@ -49,24 +47,28 @@ function stageGeometryFrom(project) {
     rows: cfg.rows,
     reelX: cfg.reelX,
     reelY: cfg.reelY,
-    frame: cfg.frame || null,
     bgUrl: project.assets?.bg || null,
     frameUrl: project.assets?.frame || null
   };
 }
 
+/** Nomi dei simboli che appartengono al progetto aztec (stessa logica di ImportAztecPage: nome = cfg.names[key] || key). */
+function projectSymbolNames(project) {
+  return new Set(extractAztecSymbols(project).map((s) => s.name));
+}
+
 /**
- * Vista indipendente: compone in una scena a rulli i simboli e i character già
- * animati nelle sezioni "Simboli"/"Character" (idle in rotazione, land all'atterraggio,
- * win a richiesta). Se è stato importato un progetto aztec-preview, usa il suo sfondo,
- * la sua cornice e le coordinate reali dei rulli; altrimenti usa un riquadro semplice.
+ * Vista indipendente: compone in una scena a rulli SOLO i simboli/character che
+ * appartengono all'ultimo progetto aztec-preview importato (stesso sfondo, cornice e
+ * coordinate reali dei rulli) — mai un mix con altri simboli/character presenti nel
+ * database ma di altri progetti o test.
  */
 export default function ReelsPage() {
-  const [symbols, setSymbols] = useState(null);
-  const [characters, setCharacters] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [symbols, setSymbols] = useState([]);
+  const [characters, setCharacters] = useState([]);
   const [stageProject, setStageProject] = useState(null);
   const [error, setError] = useState(null);
-  const [reelsCount, setReelsCount] = useState(5);
   const [baseDuration, setBaseDuration] = useState(1600);
   const [stagger, setStagger] = useState(220);
   const [spinning, setSpinning] = useState(false);
@@ -83,26 +85,37 @@ export default function ReelsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [symData, charData, lastProject] = await Promise.all([
-          listSymbolsForReels(),
-          listCharactersForReels(),
-          getLastAztecProject()
-        ]);
-        setSymbols(symData.filter((s) => s.animations.length > 0).map((s) => ({ ...s, kind: "symbol" })));
-        setCharacters(charData.filter((c) => c.parts.length > 0).map((c) => ({ ...c, kind: "character" })));
+        const lastProject = await getLastAztecProject();
+        if (!lastProject) {
+          setStageProject(null);
+          setLoading(false);
+          return;
+        }
+        const [symData, charData] = await Promise.all([listSymbolsForReels(), listCharactersForReels()]);
+        const validNames = projectSymbolNames(lastProject);
+        setSymbols(
+          symData
+            .filter((s) => s.animations.length > 0 && validNames.has(s.name))
+            .map((s) => ({ ...s, kind: "symbol" }))
+        );
+        setCharacters(
+          charData
+            .filter((c) => c.parts.length > 0 && validNames.has(c.name))
+            .map((c) => ({ ...c, kind: "character" }))
+        );
         setStageProject(lastProject);
       } catch (err) {
         setError(err.message);
+      } finally {
+        setLoading(false);
       }
     })();
   }, []);
 
-  const pool = [...(symbols || []), ...(characters || [])];
+  const pool = [...symbols, ...characters];
   const stageGeo = stageGeometryFrom(stageProject);
-  const effectiveReelsCount = stageGeo ? stageGeo.reelX.length : reelsCount;
-  const effectiveVisibleRows = stageGeo ? stageGeo.rows : DEFAULT_VISIBLE_ROWS;
   const stageScale = stageGeo && stageWidthPx ? stageWidthPx / stageGeo.docW : 0;
-  const cellSize = stageGeo ? Math.round(stageGeo.cell * stageScale) : NO_STAGE_CELL_SIZE;
+  const cellSize = stageGeo ? Math.round(stageGeo.cell * stageScale) : 0;
 
   useEffect(() => {
     if (!stageGeo || !stageRef.current) return;
@@ -116,10 +129,10 @@ export default function ReelsPage() {
   }, [!!stageGeo]);
 
   useEffect(() => {
-    if (pool.length === 0) return;
-    setCellStates((prev) => Array.from({ length: effectiveReelsCount }, (_, i) => prev[i] || makeRestingCells(pool, effectiveVisibleRows)));
+    if (!stageGeo || pool.length === 0) return;
+    setCellStates((prev) => Array.from({ length: stageGeo.reelX.length }, (_, i) => prev[i] || makeRestingCells(pool, stageGeo.rows)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pool.length, effectiveReelsCount, effectiveVisibleRows]);
+  }, [pool.length, stageGeo?.reelX.length, stageGeo?.rows]);
 
   useEffect(() => {
     return () => {
@@ -133,7 +146,7 @@ export default function ReelsPage() {
   }
 
   function startSpin(forceWinItem) {
-    if (spinning || pool.length === 0 || (stageGeo && !cellSize)) return;
+    if (spinning || pool.length === 0 || !cellSize) return;
     clearTimers();
     settledRef.current = 0;
     forcedRef.current = forceWinItem || null;
@@ -178,7 +191,7 @@ export default function ReelsPage() {
         return next;
       });
       settledRef.current += 1;
-      if (settledRef.current === effectiveReelsCount) {
+      if (settledRef.current === stageGeo.reelX.length) {
         setSpinning(false);
         if (forcedRef.current) triggerWin();
       }
@@ -189,40 +202,43 @@ export default function ReelsPage() {
   const winItem = pool.find((it) => it.id === winItemId) || null;
 
   if (error) return <div className="page status error">❌ {error}</div>;
-  if (!symbols || !characters) return <div className="page status">⏳ Carico simboli e character...</div>;
+  if (loading) return <div className="page status">⏳ Carico il progetto...</div>;
+
+  if (!stageGeo) {
+    return (
+      <div className="page">
+        <Link to="/" className="back-link">← Home</Link>
+        <h1>🎰 Rulli animati</h1>
+        <div className="subtitle">
+          Compone in una scena a rulli i simboli e i character del progetto aztec-preview importato, sul suo sfondo e
+          la sua cornice reali.
+        </div>
+        <div className="hint">
+          Nessun progetto aztec importato ancora. Vai su <Link to="/import-aztec">Importa da Aztec</Link>, cerca il tuo
+          progetto e importa i simboli: questa pagina userà automaticamente quel progetto (sfondo, cornice e rulli
+          inclusi).
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="page">
       <Link to="/" className="back-link">← Home</Link>
       <h1>🎰 Rulli animati</h1>
       <div className="subtitle">
-        Compone in una scena a rulli i simboli e i character già animati — vista indipendente, senza legami con
-        l'anteprima statica di Aztec.
-        {stageGeo ? (
-          <> Sfondo e cornice presi dal progetto <strong>{stageProject.name}</strong> (ultimo importato).</>
-        ) : (
-          <> Nessun progetto aztec importato ancora: riquadro semplice finché non ne importi uno da <Link to="/import-aztec">Importa da Aztec</Link>.</>
-        )}
+        Sfondo, cornice e simboli/character presi dal progetto <strong>{stageProject.name}</strong> (ultimo importato
+        da Aztec) — solo gli elementi di questo progetto, niente altro.
       </div>
 
       {pool.length === 0 ? (
         <div className="hint">
-          Nessun simbolo o character pronto. Vai su <Link to="/symbols">Simboli</Link> o{" "}
-          <Link to="/characters">Character</Link> e prepara almeno un elemento animato.
+          Il progetto <strong>{stageProject.name}</strong> non ha ancora nessun simbolo animato (idle/land/win). Vai
+          su <Link to="/symbols">Simboli</Link> e crea almeno un'animazione per uno dei simboli importati.
         </div>
       ) : (
         <>
           <div className="row reels-controls">
-            {!stageGeo && (
-              <label className="field-label">
-                Rulli
-                <select value={reelsCount} onChange={(e) => setReelsCount(Number(e.target.value))} disabled={spinning}>
-                  {REEL_COUNT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </label>
-            )}
             <label className="field-label">
               Velocità base
               <input
@@ -251,52 +267,34 @@ export default function ReelsPage() {
             </label>
           </div>
 
-          {stageGeo ? (
-            <div className="reel-stage" ref={stageRef} style={{ aspectRatio: `${stageGeo.docW} / ${stageGeo.docH}` }}>
-              {stageGeo.bgUrl && <img src={stageGeo.bgUrl} alt="" className="reel-stage-bg" />}
-              {stageScale > 0 &&
-                stageGeo.reelX.map((x, i) => (
-                  <div
-                    key={i}
-                    className="reel-stage-reel-slot"
-                    style={{
-                      left: Math.round(x * stageScale),
-                      top: Math.round(stageGeo.reelY * stageScale),
-                      width: cellSize,
-                      height: cellSize * stageGeo.rows
-                    }}
-                  >
-                    <ReelColumn
-                      pool={pool}
-                      visibleRows={stageGeo.rows}
-                      spinToken={spinToken}
-                      duration={baseDuration + i * stagger}
-                      forcedResult={forcedRef.current ? Array(stageGeo.rows).fill(forcedRef.current) : null}
-                      onLanded={(landed) => handleReelLanded(i, landed)}
-                      cells={cellStates[i] || []}
-                      cellSize={cellSize}
-                    />
-                  </div>
-                ))}
-              {stageGeo.frameUrl && <img src={stageGeo.frameUrl} alt="" className="reel-stage-frame" />}
-            </div>
-          ) : (
-            <div className="reel-frame" style={{ height: NO_STAGE_CELL_SIZE * effectiveVisibleRows, width: NO_STAGE_CELL_SIZE * reelsCount }}>
-              {Array.from({ length: reelsCount }).map((_, i) => (
-                <ReelColumn
+          <div className="reel-stage" ref={stageRef} style={{ aspectRatio: `${stageGeo.docW} / ${stageGeo.docH}` }}>
+            {stageGeo.bgUrl && <img src={stageGeo.bgUrl} alt="" className="reel-stage-bg" />}
+            {stageScale > 0 &&
+              stageGeo.reelX.map((x, i) => (
+                <div
                   key={i}
-                  pool={pool}
-                  visibleRows={DEFAULT_VISIBLE_ROWS}
-                  spinToken={spinToken}
-                  duration={baseDuration + i * stagger}
-                  forcedResult={forcedRef.current ? Array(DEFAULT_VISIBLE_ROWS).fill(forcedRef.current) : null}
-                  onLanded={(landed) => handleReelLanded(i, landed)}
-                  cells={cellStates[i] || []}
-                  cellSize={NO_STAGE_CELL_SIZE}
-                />
+                  className="reel-stage-reel-slot"
+                  style={{
+                    left: Math.round(x * stageScale),
+                    top: Math.round(stageGeo.reelY * stageScale),
+                    width: cellSize,
+                    height: cellSize * stageGeo.rows
+                  }}
+                >
+                  <ReelColumn
+                    pool={pool}
+                    visibleRows={stageGeo.rows}
+                    spinToken={spinToken}
+                    duration={baseDuration + i * stagger}
+                    forcedResult={forcedRef.current ? Array(stageGeo.rows).fill(forcedRef.current) : null}
+                    onLanded={(landed) => handleReelLanded(i, landed)}
+                    cells={cellStates[i] || []}
+                    cellSize={cellSize}
+                  />
+                </div>
               ))}
-            </div>
-          )}
+            {stageGeo.frameUrl && <img src={stageGeo.frameUrl} alt="" className="reel-stage-frame" />}
+          </div>
 
           <div className="btn-row">
             <button type="button" className="btn" onClick={() => startSpin(null)} disabled={spinning}>
@@ -309,14 +307,14 @@ export default function ReelsPage() {
               Test vincita (forza tutti i rulli su un elemento)
               <select value={winItemId} onChange={(e) => setWinItemId(e.target.value)} disabled={spinning}>
                 <option value="">— scegli simbolo o character —</option>
-                {(symbols || []).length > 0 && (
+                {symbols.length > 0 && (
                   <optgroup label="Simboli">
                     {symbols.map((s) => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </optgroup>
                 )}
-                {(characters || []).length > 0 && (
+                {characters.length > 0 && (
                   <optgroup label="Character">
                     {characters.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
