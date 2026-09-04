@@ -3,6 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { listSymbolsWithAnimations, createSymbol, deleteSymbol } from "../lib/symbolsRepository.js";
 
 const ANIMATION_ICONS = { idle: "💤", win: "✨", land: "📍", spinBlur: "🌀" };
+const ANIMATION_TYPES = [
+  { key: "idle", label: "Idle" },
+  { key: "win", label: "Win" },
+  { key: "land", label: "Land" },
+  { key: "spinBlur", label: "SpinBlur" }
+];
 
 export default function SymbolsList() {
   const [symbols, setSymbols] = useState([]);
@@ -106,6 +112,25 @@ export default function SymbolsList() {
                 );
               })}
             </div>
+            <select
+              className="symbol-card-type-select"
+              value=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const type = e.target.value;
+                if (type) navigate(`/symbol/${s.id}?type=${type}`);
+              }}
+            >
+              <option value="">Apri animazione...</option>
+              {ANIMATION_TYPES.map(({ key, label }) => {
+                const has = s.animations.some((a) => a.animation_type === key);
+                return (
+                  <option key={key} value={key}>
+                    {ANIMATION_ICONS[key]} {label}{has ? " ✓" : ""}
+                  </option>
+                );
+              })}
+            </select>
           </Link>
         ))}
         {!loading && symbols.length === 0 && (

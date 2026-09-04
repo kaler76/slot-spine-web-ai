@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, Link } from "react-router-dom";
 import CropTool from "../components/CropTool.jsx";
 import { useAnimationLoop } from "../hooks/useAnimationLoop.js";
 import { buildSpineSkeleton } from "../lib/spineSkeleton.js";
 import { buildAtlas } from "../lib/atlasBuilder.js";
 import { getSymbolWithAnimations, saveSymbolAnimation, deleteSymbolAnimation } from "../lib/symbolsRepository.js";
+import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 import { downloadSpinePackage, downloadAllAnimationsPackage } from "../lib/exportZip.js";
 
 const ANIMATION_TYPES = [
@@ -23,11 +24,17 @@ const SIZE_PRESETS = [
 
 export default function SymbolPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedType = searchParams.get("type");
+
   const [symbol, setSymbol] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const [activeType, setActiveType] = useState("win");
+  const [activeType, setActiveType] = useState(
+    ANIMATION_TYPES.some((t) => t.key === requestedType) ? requestedType : "win"
+  );
   const [file, setFile] = useState(null);
   const [workingBlob, setWorkingBlob] = useState(null);
   const [workingUrl, setWorkingUrl] = useState(null);
@@ -39,6 +46,7 @@ export default function SymbolPage() {
   const [saving, setSaving] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [importingSource, setImportingSource] = useState(false);
+  const [creatingCharacter, setCreatingCharacter] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -70,6 +78,68 @@ export default function SymbolPage() {
       setStatus(`❌ Errore caricamento immagine importata: ${err.message}`);
     } finally {
       setImportingSource(false);
+    }
+  }
+
+  /** Immagine migliore disponibile per rappresentare il simbolo: un'animazione salvata, o l'immagine importata. */
+  function bestSymbolImageUrl() {
+    return symbol?.animations.find((a) => a.image_url)?.image_url || symbol?.source_image_url || null;
+  }
+
+  function loadImageSize(blob) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        URL.revokeObjectURL(url);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Immagine non valida"));
+      };
+      img.src = url;
+    });
+  }
+
+  /**
+   * Crea un nuovo Character usando l'immagine del simbolo come prima parte ("body"),
+   * pronto per aggiungere testa/braccia e animare con il rig multi-bone. Il simbolo
+   * originale non viene toccato: resta lì, questa è solo una copia di partenza.
+   */
+  async function handleCreateCharacter() {
+    const sourceUrl = bestSymbolImageUrl();
+    if (!sourceUrl) return;
+    setCreatingCharacter(true);
+    setStatus("");
+    try {
+      const res = await fetch(sourceUrl);
+      if (!res.ok) throw new Error(`Immagine non raggiungibile (HTTP ${res.status})`);
+      const blob = await res.blob();
+      const { width: w, height: h } = await loadImageSize(blob);
+
+      const character = await createCharacter(symbol.name);
+      await saveCharacterPart({
+        characterId: character.id,
+        partKey: "body",
+        parentKey: "root",
+        imageBlob: blob,
+        width: w,
+        height: h,
+        offsetX: 0,
+        offsetY: 0,
+        zIndex: 0,
+        animationType: "static",
+        speed: 1,
+        anchorX: "center",
+        anchorY: "center"
+      });
+
+      navigate(`/character/${character.id}`);
+    } catch (err) {
+      setStatus(`❌ Errore creazione character: ${err.message}`);
+    } finally {
+      setCreatingCharacter(false);
     }
   }
 
@@ -216,6 +286,12 @@ export default function SymbolPage() {
     <div className="page">
       <Link to="/symbols" className="back-link">← Tutti i simboli</Link>
       <h1>🍒 {symbol.name}</h1>
+
+      {bestSymbolImageUrl() && (
+        <button type="button" className="btn secondary tiny" onClick={handleCreateCharacter} disabled={creatingCharacter}>
+          {creatingCharacter ? "⏳ Creo Character..." : "🧙 Crea Character da questo simbolo"}
+        </button>
+      )}
 
       <div className="anim-tabs">
         {ANIMATION_TYPES.map(({ key, label, icon }) => {

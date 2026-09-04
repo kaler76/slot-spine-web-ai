@@ -195,6 +195,17 @@ a.card:hover { border-color: #4f7cff; }
 .anim-dot { font-size: 0.75rem; opacity: 0.25; }
 .anim-dot.filled { opacity: 1; }
 
+.symbol-card-type-select {
+  margin-top: 2px;
+  width: 100%;
+  padding: 5px 6px;
+  font-size: 0.72rem;
+  background: #1c1c1c;
+  color: #9fc4ff;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
+
 /* --- Form generico --- */
 .field-label { display: block; margin-top: 14px; font-size: 0.9rem; color: #bbb; }
 .field-label input, .field-label select {
