@@ -6,6 +6,7 @@ import CharactersList from "./pages/CharactersList.jsx";
 import CharacterPage from "./pages/CharacterPage.jsx";
 import BackgroundsList from "./pages/BackgroundsList.jsx";
 import BackgroundPage from "./pages/BackgroundPage.jsx";
+import ReelsPage from "./pages/ReelsPage.jsx";
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
       <Route path="/character/:id" element={<CharacterPage />} />
       <Route path="/backgrounds" element={<BackgroundsList />} />
       <Route path="/background/:id" element={<BackgroundPage />} />
+      <Route path="/reels" element={<ReelsPage />} />
     </Routes>
   );
 }

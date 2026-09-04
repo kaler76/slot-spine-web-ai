@@ -22,6 +22,27 @@ export async function listSymbolsWithAnimations() {
   });
 }
 
+/**
+ * Come listSymbolsWithAnimations, ma include anche skeleton_json/atlas_text di ogni
+ * animazione: serve alla vista Rulli, che deve poter riprodurre idle/land/win dei
+ * simboli atterrati (le altre liste caricano solo l'anteprima immagine, più leggere).
+ */
+export async function listSymbolsForReels() {
+  const { data: symbols, error: symErr } = await supabase
+    .from(SYMBOLS_TABLE)
+    .select("id, name, created_at")
+    .order("created_at", { ascending: false });
+  if (symErr) throw symErr;
+
+  const { data: animations, error: animErr } = await supabase.from(ANIMATIONS_TABLE).select("*");
+  if (animErr) throw animErr;
+
+  return symbols.map((s) => {
+    const anims = animations.filter((a) => a.symbol_id === s.id);
+    return { ...s, animations: anims };
+  });
+}
+
 /** Ritorna un singolo simbolo con tutte le sue animazioni (per la pagina dedicata). */
 export async function getSymbolWithAnimations(symbolId) {
   const { data: symbol, error: symErr } = await supabase

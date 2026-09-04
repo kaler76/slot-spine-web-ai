@@ -105,6 +105,14 @@ export default function Home() {
             </div>
           )}
         </Link>
+        <Link to="/reels" className="card">
+          <div className="card-icon">🎰</div>
+          <div className="card-title">Rulli animati</div>
+          <span className="status-badge ready">Pronto</span>
+          <div className="card-desc">
+            Vista a rulli indipendente: compone i simboli già animati (idle/land/win) in uno spin completo.
+          </div>
+        </Link>
       </div>
 
       {!loading && recentItems.length > 0 && (

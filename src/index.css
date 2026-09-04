@@ -299,6 +299,39 @@ a.card:hover { border-color: #4f7cff; }
   color: #9fc4ff;
 }
 
+/* --- Rulli animati --- */
+.reels-controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+.reels-controls .field-label { flex: 1; min-width: 140px; }
+.range-value { display: inline-block; margin-top: 4px; font-size: 0.78rem; color: #9fc4ff; }
+
+.reel-frame {
+  margin-top: 16px;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.reel-col {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: repeating-conic-gradient(#161616 0% 25%, #1c1c1c 0% 50%) 50% / 20px 20px;
+  border-radius: 4px;
+}
+.reel-track { display: flex; flex-direction: column; }
+.reel-track-resting { height: 100%; }
+.reel-cell {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.reel-symbol-img { max-width: 82%; max-height: 82%; will-change: transform, filter; }
+
 .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .preset-chip {
   padding: 6px 12px;
