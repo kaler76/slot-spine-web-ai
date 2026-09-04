@@ -19,6 +19,17 @@ export function extractAztecSlug(input) {
 }
 
 /**
+ * Elenca i progetti aztec-preview esistenti (solo nome e slug) tramite la funzione
+ * pubblica `slot_list_projects` (SECURITY DEFINER, concessa al ruolo anon): serve per
+ * offrire un menu a tendina invece di dover incollare a mano il link/slug.
+ */
+export async function listAztecProjects() {
+  const { data, error } = await supabase.rpc("slot_list_projects");
+  if (error) throw error;
+  return data || [];
+}
+
+/**
  * Legge un progetto aztec-preview dato lo slug, tramite la funzione pubblica `slot_get`
  * (SECURITY DEFINER, concessa al ruolo anon): stesso progetto Supabase di slot-spine-web-ai,
  * nessuna credenziale aggiuntiva, sola lettura.

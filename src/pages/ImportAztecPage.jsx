@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { extractAztecSlug, fetchAztecProject, extractAztecSymbols } from "../lib/aztecImport.js";
+import { extractAztecSlug, fetchAztecProject, extractAztecSymbols, listAztecProjects } from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
 import { saveLastAztecProject } from "../lib/appSettingsRepository.js";
 
@@ -12,6 +12,8 @@ import { saveLastAztecProject } from "../lib/appSettingsRepository.js";
  */
 export default function ImportAztecPage() {
   const [input, setInput] = useState("");
+  const [projects, setProjects] = useState(null);
+  const [projectsError, setProjectsError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [project, setProject] = useState(null);
@@ -21,9 +23,19 @@ export default function ImportAztecPage() {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
 
-  async function handleSearch(e) {
-    e.preventDefault();
-    const foundSlug = extractAztecSlug(input);
+  useEffect(() => {
+    (async () => {
+      try {
+        setProjects(await listAztecProjects());
+      } catch (err) {
+        setProjectsError(err.message);
+      }
+    })();
+  }, []);
+
+  async function handleSearch(e, slugOverride) {
+    e?.preventDefault();
+    const foundSlug = slugOverride || extractAztecSlug(input);
     if (!foundSlug) return;
     setLoading(true);
     setError(null);
@@ -105,6 +117,28 @@ export default function ImportAztecPage() {
         un passo a parte, che crea solo i simboli (nome + immagine collegata) — ritaglio, misure e animazioni restano
         un lavoro manuale successivo, come oggi.
       </div>
+
+      {projects && projects.length > 0 && (
+        <label className="field-label">
+          Oppure scegli un progetto già esistente
+          <select
+            value=""
+            disabled={loading}
+            onChange={(e) => {
+              const slug = e.target.value;
+              if (!slug) return;
+              setInput(slug);
+              handleSearch(null, slug);
+            }}
+          >
+            <option value="">— seleziona un progetto —</option>
+            {projects.map((p) => (
+              <option key={p.slug} value={p.slug}>{p.name}</option>
+            ))}
+          </select>
+        </label>
+      )}
+      {projectsError && <div className="hint">Impossibile caricare l'elenco progetti ({projectsError}): incolla il link/slug qui sotto.</div>}
 
       <form onSubmit={handleSearch} className="new-symbol-form">
         <input
