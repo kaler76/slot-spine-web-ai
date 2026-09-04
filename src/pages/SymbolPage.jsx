@@ -4,7 +4,12 @@ import CropTool from "../components/CropTool.jsx";
 import { useAnimationLoop } from "../hooks/useAnimationLoop.js";
 import { buildSpineSkeleton } from "../lib/spineSkeleton.js";
 import { buildAtlas } from "../lib/atlasBuilder.js";
-import { getSymbolWithAnimations, saveSymbolAnimation, deleteSymbolAnimation } from "../lib/symbolsRepository.js";
+import {
+  getSymbolWithAnimations,
+  saveSymbolAnimation,
+  deleteSymbolAnimation,
+  setSymbolConfirmed
+} from "../lib/symbolsRepository.js";
 import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 import { downloadSpinePackage, downloadAllAnimationsPackage } from "../lib/exportZip.js";
 
@@ -47,6 +52,7 @@ export default function SymbolPage() {
   const [playing, setPlaying] = useState(false);
   const [importingSource, setImportingSource] = useState(false);
   const [creatingCharacter, setCreatingCharacter] = useState(false);
+  const [togglingConfirmed, setTogglingConfirmed] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -140,6 +146,23 @@ export default function SymbolPage() {
       setStatus(`❌ Errore creazione character: ${err.message}`);
     } finally {
       setCreatingCharacter(false);
+    }
+  }
+
+  /**
+   * Segna il simbolo come confermato/fissato così com'è: un flag informativo per
+   * dire "ho finito di sistemare le animazioni di questo simbolo", niente di più
+   * — non cambia cosa appare nei Rulli animati (basta ancora avere un'animazione salvata).
+   */
+  async function handleToggleConfirmed() {
+    setTogglingConfirmed(true);
+    try {
+      await setSymbolConfirmed(symbol.id, !symbol.confirmed);
+      await refresh();
+    } catch (err) {
+      setStatus(`❌ Errore conferma: ${err.message}`);
+    } finally {
+      setTogglingConfirmed(false);
     }
   }
 
@@ -285,13 +308,25 @@ export default function SymbolPage() {
   return (
     <div className="page">
       <Link to="/symbols" className="back-link">← Tutti i simboli</Link>
-      <h1>🍒 {symbol.name}</h1>
+      <h1>
+        🍒 {symbol.name} {symbol.confirmed && <span className="confirmed-badge" title="Simbolo confermato">✅</span>}
+      </h1>
 
-      {bestSymbolImageUrl() && (
-        <button type="button" className="btn secondary tiny" onClick={handleCreateCharacter} disabled={creatingCharacter}>
-          {creatingCharacter ? "⏳ Creo Character..." : "🧙 Crea Character da questo simbolo"}
+      <div className="btn-row">
+        <button
+          type="button"
+          className={`btn secondary tiny ${symbol.confirmed ? "confirmed-btn-active" : ""}`}
+          onClick={handleToggleConfirmed}
+          disabled={togglingConfirmed}
+        >
+          {togglingConfirmed ? "⏳..." : symbol.confirmed ? "✅ Confermato" : "☐ Conferma simbolo"}
         </button>
-      )}
+        {bestSymbolImageUrl() && (
+          <button type="button" className="btn secondary tiny" onClick={handleCreateCharacter} disabled={creatingCharacter}>
+            {creatingCharacter ? "⏳ Creo Character..." : "🧙 Crea Character da questo simbolo"}
+          </button>
+        )}
+      </div>
 
       <div className="anim-tabs">
         {ANIMATION_TYPES.map(({ key, label, icon }) => {

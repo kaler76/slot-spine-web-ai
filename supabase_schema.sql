@@ -8,11 +8,15 @@ create table if not exists spine_symbols (
   created_at timestamptz default now(),
   -- Immagine sorgente collegata da un import (es. da un progetto aztec-preview già
   -- ritagliato): solo un riferimento da riusare in SymbolPage, non genera animazioni.
-  source_image_url text
+  source_image_url text,
+  -- Flag informativo: il simbolo è stato rivisto e "fissato" così com'è. Non cambia
+  -- cosa appare nei Rulli animati (basta un'animazione salvata), solo un promemoria visivo.
+  confirmed boolean not null default false
 );
 
--- 1b. Su un'installazione già esistente, aggiunge solo il nuovo campo (idempotente).
+-- 1b. Su un'installazione già esistente, aggiunge solo i nuovi campi (idempotente).
 alter table spine_symbols add column if not exists source_image_url text;
+alter table spine_symbols add column if not exists confirmed boolean not null default false;
 
 -- 2. Tabella animazioni per simbolo (max 4 varianti: idle / win / land / spinBlur)
 create table if not exists spine_symbol_animations (

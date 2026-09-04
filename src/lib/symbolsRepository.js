@@ -7,7 +7,7 @@ import { supabase, SYMBOLS_TABLE, ANIMATIONS_TABLE, STORAGE_BUCKET } from "./sup
 export async function listSymbolsWithAnimations() {
   const { data: symbols, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at, source_image_url")
+    .select("id, name, created_at, source_image_url, confirmed")
     .order("created_at", { ascending: false });
   if (symErr) throw symErr;
 
@@ -47,7 +47,7 @@ export async function listSymbolsForReels() {
 export async function getSymbolWithAnimations(symbolId) {
   const { data: symbol, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at, source_image_url")
+    .select("id, name, created_at, source_image_url, confirmed")
     .eq("id", symbolId)
     .single();
   if (symErr) throw symErr;
@@ -118,6 +118,13 @@ export async function saveSymbolAnimation({
     )
     .select()
     .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Segna un simbolo come confermato/da fissare così com'è (o toglie la conferma). Solo un flag informativo. */
+export async function setSymbolConfirmed(symbolId, confirmed) {
+  const { data, error } = await supabase.from(SYMBOLS_TABLE).update({ confirmed }).eq("id", symbolId).select().single();
   if (error) throw error;
   return data;
 }

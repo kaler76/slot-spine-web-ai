@@ -19,8 +19,9 @@ function restingImage(item) {
  * stesso motore di anteprima della pagina Simbolo (useAnimationLoop + skeleton
  * salvato); per un character compone tutte le sue parti con CharacterSprite.
  */
-function ReelCell({ item, activeType, playing, size }) {
+function ReelCell({ item, activeType, playing, size, tallSpan = 1 }) {
   const imgRef = useRef(null);
+  const cellHeight = size * tallSpan;
 
   const animationsObj = useMemo(() => {
     if (item.kind === "character") return null;
@@ -51,17 +52,34 @@ function ReelCell({ item, activeType, playing, size }) {
 
   if (item.kind === "character") {
     return (
-      <div className="reel-cell" style={{ height: size }}>
-        <CharacterSprite character={item} size={Math.round(size * 0.86)} playing={playing} />
+      <div className="reel-cell" style={{ height: cellHeight }}>
+        <CharacterSprite
+          character={item}
+          boxWidth={Math.round(size * 0.86)}
+          boxHeight={Math.round(cellHeight * 0.9)}
+          playing={playing}
+        />
       </div>
     );
   }
 
   return (
-    <div className="reel-cell" style={{ height: size }}>
+    <div className="reel-cell" style={{ height: cellHeight }}>
       <img ref={imgRef} src={record?.image_url} alt={item.name} className="reel-symbol-img" />
     </div>
   );
+}
+
+/**
+ * Vero quando tutte le celle a riposo/atterrate sono lo stesso elemento "tall" che
+ * copre l'intera altezza visibile: in quel caso va disegnato una volta sola, grande,
+ * invece che come N copie identiche schiacciate una sopra l'altra.
+ */
+function isUniformTallLanding(cells) {
+  if (!cells.length) return false;
+  const first = cells[0].item;
+  if ((first.tallSpan || 1) < cells.length) return false;
+  return cells.every((c) => c.item === first);
 }
 
 /**
@@ -74,14 +92,14 @@ export default function ReelColumn({ pool, visibleRows, spinToken, duration, for
   const trackRef = useRef(null);
   const [spinningNow, setSpinningNow] = useState(false);
   const [renderStrip, setRenderStrip] = useState([]);
-  const isFirstRender = useRef(true);
+  // Valore di spinToken all'ultimo spin effettivamente avviato, non solo "primo render sì/no":
+  // così la guardia resta corretta anche se l'effetto viene invocato due volte allo stesso
+  // render (es. React StrictMode in sviluppo), invece di un semplice flag consumato al volo.
+  const lastSpinTokenRef = useRef(spinToken);
 
   useEffect(() => {
-    // Al montaggio spinToken è già valorizzato: non deve far partire uno spin da solo.
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    if (lastSpinTokenRef.current === spinToken) return; // spinToken invariato: nessuno spin da avviare
+    lastSpinTokenRef.current = spinToken;
 
     const strip = buildStrip(pool, visibleRows, STRIP_LEN, forcedResult);
     setRenderStrip(strip);
@@ -120,9 +138,11 @@ export default function ReelColumn({ pool, visibleRows, spinToken, duration, for
         </div>
       ) : (
         <div key="resting" className="reel-track reel-track-resting">
-          {cells.map((cell, i) => (
-            <ReelCell key={i} item={cell.item} activeType={cell.activeType} playing={cell.playing} size={cellSize} />
-          ))}
+          {isUniformTallLanding(cells) ? (
+            <ReelCell item={cells[0].item} activeType={cells[0].activeType} playing={cells[0].playing} size={cellSize} tallSpan={cells.length} />
+          ) : (
+            cells.map((cell, i) => <ReelCell key={i} item={cell.item} activeType={cell.activeType} playing={cell.playing} size={cellSize} />)
+          )}
         </div>
       )}
     </div>

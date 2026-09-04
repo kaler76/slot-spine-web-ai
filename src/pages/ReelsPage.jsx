@@ -5,17 +5,18 @@ import { listCharactersForReels } from "../lib/charactersRepository.js";
 import { getLastAztecProject } from "../lib/appSettingsRepository.js";
 import { extractAztecSymbols } from "../lib/aztecImport.js";
 import { totalDuration } from "../lib/animationPreview.js";
-import { pickRandom } from "../lib/reelEngine.js";
+import { pickFinalRows } from "../lib/reelEngine.js";
 import { playSpinStart, playReelStop, playWin } from "../lib/reelSound.js";
 import ReelColumn from "../components/ReelColumn.jsx";
 
 const WIN_HOLD_MS = 900;
 
 function makeRestingCells(pool, count) {
-  return Array.from({ length: count }, () => {
-    const item = pickRandom(pool);
-    return { item, activeType: item.kind === "character" ? null : "idle", playing: true };
-  });
+  return pickFinalRows(pool, count, null).map((item) => ({
+    item,
+    activeType: item.kind === "character" ? null : "idle",
+    playing: true
+  }));
 }
 
 /**
@@ -93,15 +94,16 @@ export default function ReelsPage() {
         }
         const [symData, charData] = await Promise.all([listSymbolsForReels(), listCharactersForReels()]);
         const validNames = projectSymbolNames(lastProject);
+        const tallMap = lastProject.cfg?.tall || {};
         setSymbols(
           symData
             .filter((s) => s.animations.length > 0 && validNames.has(s.name))
-            .map((s) => ({ ...s, kind: "symbol" }))
+            .map((s) => ({ ...s, kind: "symbol", tallSpan: tallMap[s.name] || 1 }))
         );
         setCharacters(
           charData
             .filter((c) => c.parts.length > 0 && validNames.has(c.name))
-            .map((c) => ({ ...c, kind: "character" }))
+            .map((c) => ({ ...c, kind: "character", tallSpan: tallMap[c.name] || 1 }))
         );
         setStageProject(lastProject);
       } catch (err) {

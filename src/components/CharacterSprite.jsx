@@ -21,10 +21,12 @@ function resolveAbsolutePosition(key, partsMap) {
 
 /**
  * Compone e anima un Character intero (tutte le sue parti, con la stessa animazione
- * "ambient" calcolata live in CharacterPage) dentro un riquadro quadrato di lato `size`,
- * per poterlo mostrare come risultato di un rullo esattamente come un simbolo.
+ * "ambient" calcolata live in CharacterPage) dentro un riquadro largo `boxWidth` e alto
+ * `boxHeight` (di norma uguali: una cella quadrata; diversi per i simboli "tall" che
+ * occupano più righe di un rullo), per poterlo mostrare come risultato di un rullo
+ * esattamente come un simbolo.
  */
-export default function CharacterSprite({ character, size, playing }) {
+export default function CharacterSprite({ character, boxWidth, boxHeight, playing }) {
   const partsMap = useMemo(() => {
     const map = {};
     for (const p of character.parts) {
@@ -65,10 +67,10 @@ export default function CharacterSprite({ character, size, playing }) {
     }
     const boundsW = Math.max(maxX - minX, 10);
     const boundsH = Math.max(maxY - minY, 10);
-    const scale = Math.min(size / boundsW, size / boundsH);
+    const scale = Math.min(boxWidth / boundsW, boxHeight / boundsH);
     return { scale, centerX: -minX, centerY: maxY, boundsW, boundsH };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedKeysJoined, size]);
+  }, [orderedKeysJoined, boxWidth, boxHeight]);
 
   const animationsObj = useMemo(
     () =>
@@ -128,7 +130,7 @@ export default function CharacterSprite({ character, size, playing }) {
   if (orderedKeys.length === 0) return null;
 
   return (
-    <div style={{ width: size, height: size, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ width: boxWidth, height: boxHeight, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: stageLayout.boundsW, height: stageLayout.boundsH, transform: `scale(${stageLayout.scale})`, position: "relative" }}>
         {rootKeys.map((key) => renderPartTree(key, true))}
       </div>

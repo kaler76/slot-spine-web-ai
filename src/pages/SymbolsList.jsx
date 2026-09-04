@@ -86,7 +86,8 @@ export default function SymbolsList() {
 
       <div className="symbol-cards-grid">
         {symbols.map((s) => (
-          <Link to={`/symbol/${s.id}`} key={s.id} className="symbol-card">
+          <Link to={`/symbol/${s.id}`} key={s.id} className={`symbol-card ${s.confirmed ? "symbol-card-confirmed" : ""}`}>
+            {s.confirmed && <span className="confirmed-badge symbol-card-confirmed-badge" title="Confermato">✅</span>}
             <button
               type="button"
               className="symbol-card-delete"

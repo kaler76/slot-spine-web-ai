@@ -179,6 +179,11 @@ a.card:hover { border-color: #4f7cff; }
 }
 .symbol-card:hover .symbol-card-delete { display: flex; }
 .symbol-card-delete:hover { background: rgba(163,51,51,0.3); }
+
+.confirmed-badge { font-size: 0.85rem; }
+.symbol-card-confirmed { border-color: #3ecf8e; }
+.symbol-card-confirmed-badge { position: absolute; top: 6px; left: 6px; z-index: 2; }
+.confirmed-btn-active { border-color: #3ecf8e; color: #3ecf8e; }
 .symbol-card-thumb {
   aspect-ratio: 1/1;
   background: repeating-conic-gradient(#1a1a1a 0% 25%, #222 0% 50%) 50% / 14px 14px;
