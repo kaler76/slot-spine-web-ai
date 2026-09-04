@@ -38,6 +38,7 @@ export default function SymbolPage() {
   const [status, setStatus] = useState("");
   const [saving, setSaving] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [importingSource, setImportingSource] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -55,6 +56,22 @@ export default function SymbolPage() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  async function handleUseImportedImage() {
+    if (!symbol.source_image_url) return;
+    setImportingSource(true);
+    setStatus("");
+    try {
+      const res = await fetch(symbol.source_image_url);
+      if (!res.ok) throw new Error(`Immagine non raggiungibile (HTTP ${res.status})`);
+      const blob = await res.blob();
+      setFile(new File([blob], `${symbol.name}.png`, { type: blob.type || "image/png" }));
+    } catch (err) {
+      setStatus(`❌ Errore caricamento immagine importata: ${err.message}`);
+    } finally {
+      setImportingSource(false);
+    }
+  }
 
   function handleCropped(blob, w, h) {
     setWorkingBlob(blob);
@@ -249,6 +266,12 @@ export default function SymbolPage() {
           }}
         />
       </label>
+
+      {symbol.source_image_url && !file && (
+        <button type="button" className="btn secondary tiny" onClick={handleUseImportedImage} disabled={importingSource}>
+          {importingSource ? "⏳ Carico..." : "📥 Usa immagine importata da Aztec"}
+        </button>
+      )}
 
       {file && <CropTool file={file} onDone={handleCropped} />}
 

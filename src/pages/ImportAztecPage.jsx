@@ -1,0 +1,155 @@
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { extractAztecSlug, fetchAztecProject, extractAztecSymbols } from "../lib/aztecImport.js";
+import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
+
+/**
+ * Importa in slot-spine-web-ai i simboli già ritagliati in un progetto aztec-preview
+ * (stesso Supabase, letto in sola lettura tramite la funzione pubblica slot_get).
+ * Crea solo i simboli (nome + immagine collegata): ritaglio, misure e animazioni
+ * restano un passo manuale e successivo, esattamente come per un simbolo creato a mano.
+ */
+export default function ImportAztecPage() {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [project, setProject] = useState(null);
+  const [candidates, setCandidates] = useState([]);
+  const [selected, setSelected] = useState({});
+  const [existingNames, setExistingNames] = useState(new Set());
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+
+  async function handleSearch(e) {
+    e.preventDefault();
+    const slug = extractAztecSlug(input);
+    if (!slug) return;
+    setLoading(true);
+    setError(null);
+    setProject(null);
+    setResult(null);
+    try {
+      const [proj, existing] = await Promise.all([fetchAztecProject(slug), listSymbolsWithAnimations()]);
+      const syms = extractAztecSymbols(proj);
+      if (syms.length === 0) throw new Error("Il progetto non ha ancora simboli ritagliati (importa prima il PSD in aztec-preview).");
+
+      const existingSet = new Set(existing.map((s) => s.name));
+      const initialSelected = {};
+      for (const s of syms) initialSelected[s.key] = !existingSet.has(s.name);
+
+      setProject(proj);
+      setCandidates(syms);
+      setExistingNames(existingSet);
+      setSelected(initialSelected);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle(key) {
+    setSelected((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  async function handleImport() {
+    const toImport = candidates.filter((s) => selected[s.key]);
+    if (toImport.length === 0) return;
+    setImporting(true);
+    setResult(null);
+    setError(null);
+
+    let ok = 0;
+    const failed = [];
+    for (const s of toImport) {
+      try {
+        await createSymbol(s.name, s.url);
+        ok++;
+      } catch (err) {
+        failed.push(`${s.name}: ${err.message}`);
+      }
+    }
+
+    setImporting(false);
+    setResult({ ok, failed });
+    if (ok > 0) {
+      const existing = await listSymbolsWithAnimations();
+      setExistingNames(new Set(existing.map((sym) => sym.name)));
+    }
+  }
+
+  const selectedCount = candidates.filter((s) => selected[s.key]).length;
+
+  return (
+    <div className="page">
+      <Link to="/symbols" className="back-link">← Simboli</Link>
+      <h1>📥 Importa da Aztec</h1>
+      <div className="subtitle">
+        Registra i simboli già ritagliati in un progetto aztec-preview. Questo passo crea solo i simboli (nome +
+        immagine collegata) — ritaglio, misure e animazioni restano un lavoro manuale successivo, come oggi.
+      </div>
+
+      <form onSubmit={handleSearch} className="new-symbol-form">
+        <input
+          type="text"
+          placeholder="Link cliente aztec-preview (…/index.html?k=…) oppure solo lo slug"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+        />
+        <button type="submit" className="btn" disabled={loading || !input.trim()}>
+          {loading ? "⏳ Cerco..." : "🔍 Cerca progetto"}
+        </button>
+      </form>
+
+      {error && <div className="status error">❌ {error}</div>}
+
+      {project && (
+        <>
+          <div className="hint">
+            Progetto <strong>{project.name}</strong>
+            {project.client_name ? ` — ${project.client_name}` : ""} · {candidates.length} simboli trovati
+          </div>
+
+          <div className="symbol-cards-grid">
+            {candidates.map((s) => {
+              const already = existingNames.has(s.name);
+              return (
+                <label key={s.key} className={`symbol-card import-card ${selected[s.key] ? "import-card-selected" : ""}`}>
+                  <input type="checkbox" className="import-card-checkbox" checked={!!selected[s.key]} onChange={() => toggle(s.key)} />
+                  <div className="symbol-card-thumb">
+                    <img src={s.url} alt={s.name} />
+                  </div>
+                  <div className="symbol-card-name">{s.name}</div>
+                  {already && <div className="hint">già presente — verrà duplicato se selezionato</div>}
+                </label>
+              );
+            })}
+          </div>
+
+          <div className="btn-row">
+            <button type="button" className="btn" onClick={handleImport} disabled={importing || selectedCount === 0}>
+              {importing ? "⏳ Importo..." : `📥 Importa ${selectedCount} simboli`}
+            </button>
+          </div>
+
+          {result && (
+            <div className={`status ${result.failed.length ? "error" : ""}`}>
+              {result.ok > 0 && `✅ ${result.ok} simboli importati.`}
+              {result.failed.length > 0 && (
+                <>
+                  <br />❌ Errori: {result.failed.join("; ")}
+                </>
+              )}
+              {result.ok > 0 && (
+                <>
+                  {" "}
+                  <Link to="/symbols">Vai a Simboli →</Link>
+                </>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

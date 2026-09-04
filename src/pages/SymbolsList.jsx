@@ -73,6 +73,8 @@ export default function SymbolsList() {
         </button>
       </form>
 
+      <Link to="/import-aztec" className="hint import-aztec-link">📥 Importa simboli già ritagliati da un progetto aztec-preview →</Link>
+
       {error && <div className="status error">❌ {error}</div>}
       {loading && <div className="status">⏳ Carico simboli...</div>}
 

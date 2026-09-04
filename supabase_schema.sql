@@ -5,8 +5,14 @@
 create table if not exists spine_symbols (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  -- Immagine sorgente collegata da un import (es. da un progetto aztec-preview già
+  -- ritagliato): solo un riferimento da riusare in SymbolPage, non genera animazioni.
+  source_image_url text
 );
+
+-- 1b. Su un'installazione già esistente, aggiunge solo il nuovo campo (idempotente).
+alter table spine_symbols add column if not exists source_image_url text;
 
 -- 2. Tabella animazioni per simbolo (max 4 varianti: idle / win / land / spinBlur)
 create table if not exists spine_symbol_animations (

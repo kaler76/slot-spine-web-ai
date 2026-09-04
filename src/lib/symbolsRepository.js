@@ -47,7 +47,7 @@ export async function listSymbolsForReels() {
 export async function getSymbolWithAnimations(symbolId) {
   const { data: symbol, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at")
+    .select("id, name, created_at, source_image_url")
     .eq("id", symbolId)
     .single();
   if (symErr) throw symErr;
@@ -61,11 +61,16 @@ export async function getSymbolWithAnimations(symbolId) {
   return { ...symbol, animations };
 }
 
-/** Crea un nuovo simbolo (record vuoto, senza animazioni). */
-export async function createSymbol(name) {
+/**
+ * Crea un nuovo simbolo (record vuoto, senza animazioni). Se `sourceImageUrl` è passato
+ * (es. import da un progetto aztec-preview già ritagliato) viene solo collegato come
+ * immagine sorgente da riusare più avanti in SymbolPage: non genera nessuna animazione,
+ * quello resta un passo manuale e successivo come per un simbolo creato a mano.
+ */
+export async function createSymbol(name, sourceImageUrl) {
   const { data, error } = await supabase
     .from(SYMBOLS_TABLE)
-    .insert({ name })
+    .insert({ name, source_image_url: sourceImageUrl || null })
     .select()
     .single();
   if (error) throw error;

@@ -299,6 +299,13 @@ a.card:hover { border-color: #4f7cff; }
   color: #9fc4ff;
 }
 
+.import-aztec-link { display: inline-block; margin-bottom: 14px; color: #9fc4ff; text-decoration: none; }
+.import-aztec-link:hover { text-decoration: underline; }
+
+.import-card { cursor: pointer; }
+.import-card-checkbox { position: absolute; top: 8px; left: 8px; width: 16px; height: 16px; }
+.import-card-selected { border-color: #4f7cff; }
+
 /* --- Rulli animati --- */
 .reels-controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
 .reels-controls .field-label { flex: 1; min-width: 140px; }
