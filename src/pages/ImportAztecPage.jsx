@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { extractAztecSlug, fetchAztecProject, extractAztecSymbols } from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
+import { saveLastAztecProject } from "../lib/appSettingsRepository.js";
 
 /**
  * Importa in slot-spine-web-ai i simboli già ritagliati in un progetto aztec-preview
@@ -14,6 +15,7 @@ export default function ImportAztecPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [project, setProject] = useState(null);
+  const [slug, setSlug] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState({});
   const [existingNames, setExistingNames] = useState(new Set());
@@ -22,14 +24,14 @@ export default function ImportAztecPage() {
 
   async function handleSearch(e) {
     e.preventDefault();
-    const slug = extractAztecSlug(input);
-    if (!slug) return;
+    const foundSlug = extractAztecSlug(input);
+    if (!foundSlug) return;
     setLoading(true);
     setError(null);
     setProject(null);
     setResult(null);
     try {
-      const [proj, existing] = await Promise.all([fetchAztecProject(slug), listSymbolsWithAnimations()]);
+      const [proj, existing] = await Promise.all([fetchAztecProject(foundSlug), listSymbolsWithAnimations()]);
       const syms = extractAztecSymbols(proj);
       if (syms.length === 0) throw new Error("Il progetto non ha ancora simboli ritagliati (importa prima il PSD in aztec-preview).");
 
@@ -38,6 +40,7 @@ export default function ImportAztecPage() {
       for (const s of syms) initialSelected[s.key] = !existingSet.has(s.name);
 
       setProject(proj);
+      setSlug(foundSlug);
       setCandidates(syms);
       setExistingNames(existingSet);
       setSelected(initialSelected);
@@ -75,6 +78,20 @@ export default function ImportAztecPage() {
     if (ok > 0) {
       const existing = await listSymbolsWithAnimations();
       setExistingNames(new Set(existing.map((sym) => sym.name)));
+
+      // Ricorda questo progetto: "Rulli animati" lo userà come sfondo/palco reale,
+      // senza dover incollare di nuovo il link ogni volta.
+      try {
+        await saveLastAztecProject({
+          slug,
+          name: project.name,
+          client_name: project.client_name,
+          cfg: project.cfg,
+          assets: project.assets
+        });
+      } catch {
+        // Non blocca l'import se il salvataggio delle impostazioni fallisce: i simboli sono comunque importati.
+      }
     }
   }
 

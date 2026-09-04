@@ -332,6 +332,19 @@ a.card:hover { border-color: #4f7cff; }
   border-radius: 8px;
   overflow: hidden;
 }
+
+.reel-stage {
+  position: relative;
+  margin: 16px auto 0;
+  width: 100%;
+  max-width: 900px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000;
+}
+.reel-stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.reel-stage-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.reel-stage-reel-slot { position: absolute; overflow: hidden; }
 .reel-col {
   flex: 1;
   overflow: hidden;

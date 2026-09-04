@@ -167,3 +167,23 @@ create policy "Upload pubblico bucket spine-characters"
 create policy "Sovrascrittura pubblica bucket spine-characters"
   on storage.objects for update
   using (bucket_id = 'spine-characters');
+
+-- ============================================================
+-- IMPOSTAZIONI APP: ultimo progetto aztec-preview importato
+-- (usato da "Rulli animati" per lo sfondo/cornice/coordinate rulli reali)
+-- ============================================================
+
+create table if not exists spine_app_settings (
+  id text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table spine_app_settings enable row level security;
+
+create policy "Chiunque può leggere le impostazioni"
+  on spine_app_settings for select using (true);
+create policy "Chiunque può scrivere le impostazioni"
+  on spine_app_settings for insert with check (true);
+create policy "Chiunque può aggiornare le impostazioni"
+  on spine_app_settings for update using (true);
