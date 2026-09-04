@@ -15,7 +15,6 @@ export default function ImportAztecPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [project, setProject] = useState(null);
-  const [slug, setSlug] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState({});
   const [existingNames, setExistingNames] = useState(new Set());
@@ -40,10 +39,23 @@ export default function ImportAztecPage() {
       for (const s of syms) initialSelected[s.key] = !existingSet.has(s.name);
 
       setProject(proj);
-      setSlug(foundSlug);
       setCandidates(syms);
       setExistingNames(existingSet);
       setSelected(initialSelected);
+
+      // Attiva subito questo progetto per "Rulli animati" (sfondo/cornice/rulli reali),
+      // anche se poi non importi nessun simbolo nuovo in questa visita.
+      try {
+        await saveLastAztecProject({
+          slug: foundSlug,
+          name: proj.name,
+          client_name: proj.client_name,
+          cfg: proj.cfg,
+          assets: proj.assets
+        });
+      } catch {
+        // Non blocca la ricerca se il salvataggio delle impostazioni fallisce.
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -78,20 +90,6 @@ export default function ImportAztecPage() {
     if (ok > 0) {
       const existing = await listSymbolsWithAnimations();
       setExistingNames(new Set(existing.map((sym) => sym.name)));
-
-      // Ricorda questo progetto: "Rulli animati" lo userà come sfondo/palco reale,
-      // senza dover incollare di nuovo il link ogni volta.
-      try {
-        await saveLastAztecProject({
-          slug,
-          name: project.name,
-          client_name: project.client_name,
-          cfg: project.cfg,
-          assets: project.assets
-        });
-      } catch {
-        // Non blocca l'import se il salvataggio delle impostazioni fallisce: i simboli sono comunque importati.
-      }
     }
   }
 
@@ -102,8 +100,10 @@ export default function ImportAztecPage() {
       <Link to="/symbols" className="back-link">← Simboli</Link>
       <h1>📥 Importa da Aztec</h1>
       <div className="subtitle">
-        Registra i simboli già ritagliati in un progetto aztec-preview. Questo passo crea solo i simboli (nome +
-        immagine collegata) — ritaglio, misure e animazioni restano un lavoro manuale successivo, come oggi.
+        Registra i simboli già ritagliati in un progetto aztec-preview. La ricerca attiva subito quel progetto anche
+        per "Rulli animati" (sfondo, cornice e coordinate rulli reali); l'importazione dei simboli veri e propri resta
+        un passo a parte, che crea solo i simboli (nome + immagine collegata) — ritaglio, misure e animazioni restano
+        un lavoro manuale successivo, come oggi.
       </div>
 
       <form onSubmit={handleSearch} className="new-symbol-form">
