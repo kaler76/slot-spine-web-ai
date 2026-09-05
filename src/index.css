@@ -347,9 +347,9 @@ a.card:hover { border-color: #4f7cff; }
   border-radius: 8px;
   background: #000;
 }
-.reel-stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.reel-stage-frame { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.reel-stage-reel-slot { position: absolute; overflow: hidden; }
+.reel-stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 0; }
+.reel-stage-frame { position: absolute; pointer-events: none; z-index: 1; }
+.reel-stage-reel-slot { position: absolute; overflow: hidden; z-index: 2; }
 .reel-col {
   flex: 1;
   overflow: hidden;

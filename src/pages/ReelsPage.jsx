@@ -41,6 +41,15 @@ function stageGeometryFrom(project) {
   if (!cfg?.doc?.w || !cfg?.doc?.h || !Array.isArray(cfg.reelX) || !cfg.reelX.length || !cfg.reelY || !cfg.cell || !cfg.rows) {
     return null;
   }
+  // La cornice va posizionata/dimensionata sul suo rettangolo reale (cfg.frame), non
+  // stirata su tutto il documento: altrimenti copre i rulli invece di incorniciarli
+  // (vedi aztec-preview/rulli.html, dove .frame vive dentro un div "game" ritagliato
+  // esattamente su cfg.frame). Senza cfg.frame, meglio l'intero documento come prima.
+  const f = cfg.frame;
+  const frameRect =
+    f && Number.isFinite(f.x) && Number.isFinite(f.y) && f.w && f.h
+      ? { x: f.x, y: f.y, w: f.w, h: f.h }
+      : { x: 0, y: 0, w: cfg.doc.w, h: cfg.doc.h };
   return {
     docW: cfg.doc.w,
     docH: cfg.doc.h,
@@ -48,6 +57,7 @@ function stageGeometryFrom(project) {
     rows: cfg.rows,
     reelX: cfg.reelX,
     reelY: cfg.reelY,
+    frameRect,
     bgUrl: project.assets?.bg || null,
     frameUrl: project.assets?.frame || null
   };
@@ -271,6 +281,19 @@ export default function ReelsPage() {
 
           <div className="reel-stage" ref={stageRef} style={{ aspectRatio: `${stageGeo.docW} / ${stageGeo.docH}` }}>
             {stageGeo.bgUrl && <img src={stageGeo.bgUrl} alt="" className="reel-stage-bg" />}
+            {stageScale > 0 && stageGeo.frameUrl && (
+              <img
+                src={stageGeo.frameUrl}
+                alt=""
+                className="reel-stage-frame"
+                style={{
+                  left: Math.round(stageGeo.frameRect.x * stageScale),
+                  top: Math.round(stageGeo.frameRect.y * stageScale),
+                  width: Math.round(stageGeo.frameRect.w * stageScale),
+                  height: Math.round(stageGeo.frameRect.h * stageScale)
+                }}
+              />
+            )}
             {stageScale > 0 &&
               stageGeo.reelX.map((x, i) => (
                 <div
@@ -295,7 +318,6 @@ export default function ReelsPage() {
                   />
                 </div>
               ))}
-            {stageGeo.frameUrl && <img src={stageGeo.frameUrl} alt="" className="reel-stage-frame" />}
           </div>
 
           <div className="btn-row">
