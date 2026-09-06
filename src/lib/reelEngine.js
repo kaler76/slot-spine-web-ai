@@ -34,10 +34,14 @@ export function pickFinalRows(pool, visibleRows, forcedResult) {
 }
 
 /**
- * Costruisce lo striscione di un rullo: `stripLen - visibleRows` simboli casuali
- * di "riempimento" (quelli che si vedono scorrere durante lo spin, sempre simboli
+ * Costruisce lo striscione di un rullo: le `visibleRows` righe finali del risultato
+ * (vedi pickFinalRows) seguite da `stripLen - visibleRows` simboli casuali di
+ * "riempimento" (quelli che si vedono scorrere durante lo spin, sempre simboli
  * normali: uno "tall" schiacciato in una singola cella non avrebbe senso durante il
- * blur) seguiti dalle `visibleRows` righe finali del risultato (vedi pickFinalRows).
+ * blur). Le righe finali vanno per prime perché il rullo scorre verso il basso — come
+ * in un rullo vero, i simboli scendono ed entrano dall'alto — quindi l'animazione
+ * parte mostrando il fondo dello striscione (riempimento) e arriva a translateY 0,
+ * cioè esattamente l'inizio dello striscione (le righe finali).
  */
 export function buildStrip(pool, visibleRows, stripLen, forcedResult) {
   const fillerPool = nonTallPool(pool);
@@ -47,7 +51,7 @@ export function buildStrip(pool, visibleRows, stripLen, forcedResult) {
 
   const finalRows = pickFinalRows(pool, visibleRows, forcedResult);
 
-  return [...filler, ...finalRows];
+  return [...finalRows, ...filler];
 }
 
 /** Decelerazione morbida senza overshoot: parte veloce, rallenta fino a fermarsi esattamente sul risultato. */

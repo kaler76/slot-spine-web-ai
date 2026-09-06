@@ -105,19 +105,23 @@ export default function ReelColumn({ pool, visibleRows, spinToken, duration, for
     setRenderStrip(strip);
     setSpinningNow(true);
 
+    // Il rullo scorre verso il basso (come uno vero: i simboli entrano dall'alto e
+    // scendono), quindi si parte mostrando il fondo dello striscione (riempimento,
+    // translateY molto negativo) e si arriva a translateY 0 — cioè l'inizio dello
+    // striscione, dove buildStrip mette le righe finali.
     const totalDistance = (STRIP_LEN - visibleRows) * cellSize;
     const start = performance.now();
     let raf;
 
     function frame(now) {
       const t = Math.min(1, (now - start) / duration);
-      const offset = easeOutQuart(t) * totalDistance;
+      const offset = totalDistance * (1 - easeOutQuart(t));
       if (trackRef.current) trackRef.current.style.transform = `translateY(-${offset}px)`;
       if (t < 1) {
         raf = requestAnimationFrame(frame);
       } else {
         setSpinningNow(false);
-        onLanded(strip.slice(STRIP_LEN - visibleRows));
+        onLanded(strip.slice(0, visibleRows));
       }
     }
     raf = requestAnimationFrame(frame);
@@ -129,7 +133,16 @@ export default function ReelColumn({ pool, visibleRows, spinToken, duration, for
   return (
     <div className="reel-col" style={{ height: cellSize * visibleRows }}>
       {spinningNow ? (
-        <div key="spinning" ref={trackRef} className="reel-track">
+        <div
+          key="spinning"
+          ref={trackRef}
+          className="reel-track"
+          style={{ transform: `translateY(-${(STRIP_LEN - visibleRows) * cellSize}px)` }}
+        >
+          {/* Posizione iniziale coerente con t=0 nel loop (frame di riempimento in fondo
+              allo striscione): senza questo il primo frame disegnato dal browser, prima
+              che parta requestAnimationFrame, mostrerebbe per un istante translateY 0
+              (le righe finali, in cima allo striscione) invece del riempimento. */}
           {renderStrip.map((item, i) => (
             <div key={i} className="reel-cell" style={{ height: cellSize }}>
               <img src={restingImage(item)} alt={item.name} className="reel-symbol-img" />
