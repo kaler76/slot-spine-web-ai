@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { extractAztecSlug, fetchAztecProject, extractAztecSymbols, listAztecProjects } from "../lib/aztecImport.js";
+import {
+  extractAztecSlug,
+  fetchAztecProject,
+  extractAztecSymbols,
+  listAztecProjects,
+  aztecAdminUrl,
+  aztecPublicUrl
+} from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
 import { saveLastAztecProject } from "../lib/appSettingsRepository.js";
 
@@ -17,6 +24,7 @@ export default function ImportAztecPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [project, setProject] = useState(null);
+  const [projectSlug, setProjectSlug] = useState("");
   const [candidates, setCandidates] = useState([]);
   const [selected, setSelected] = useState({});
   const [existingNames, setExistingNames] = useState(new Set());
@@ -51,6 +59,7 @@ export default function ImportAztecPage() {
       for (const s of syms) initialSelected[s.key] = !existingSet.has(s.name);
 
       setProject(proj);
+      setProjectSlug(foundSlug);
       setCandidates(syms);
       setExistingNames(existingSet);
       setSelected(initialSelected);
@@ -59,6 +68,7 @@ export default function ImportAztecPage() {
       // anche se poi non importi nessun simbolo nuovo in questa visita.
       try {
         await saveLastAztecProject({
+          id: proj.id,
           slug: foundSlug,
           name: proj.name,
           client_name: proj.client_name,
@@ -159,6 +169,18 @@ export default function ImportAztecPage() {
           <div className="hint">
             Progetto <strong>{project.name}</strong>
             {project.client_name ? ` — ${project.client_name}` : ""} · {candidates.length} simboli trovati
+          </div>
+          <div className="row aztec-links">
+            {aztecAdminUrl(project.id) && (
+              <a href={aztecAdminUrl(project.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
+                🛠️ Apri il pannello Aztec
+              </a>
+            )}
+            {aztecPublicUrl(projectSlug) && (
+              <a href={aztecPublicUrl(projectSlug)} target="_blank" rel="noreferrer" className="import-aztec-link">
+                🔗 Apri l'anteprima cliente
+              </a>
+            )}
           </div>
 
           <div className="symbol-cards-grid">

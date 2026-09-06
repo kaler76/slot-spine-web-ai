@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { listSymbolsForReels } from "../lib/symbolsRepository.js";
 import { listCharactersForReels } from "../lib/charactersRepository.js";
 import { getLastAztecProject } from "../lib/appSettingsRepository.js";
-import { extractAztecSymbols } from "../lib/aztecImport.js";
+import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl } from "../lib/aztecImport.js";
 import { totalDuration } from "../lib/animationPreview.js";
 import { pickFinalRows } from "../lib/reelEngine.js";
 import { playSpinStart, playReelStop, playWin } from "../lib/reelSound.js";
@@ -250,6 +250,20 @@ export default function ReelsPage() {
         Sfondo, cornice e simboli/character presi dal progetto <strong>{stageProject.name}</strong> (ultimo importato
         da Aztec) — solo gli elementi di questo progetto, niente altro.
       </div>
+      {(aztecAdminUrl(stageProject.id) || aztecPublicUrl(stageProject.slug)) && (
+        <div className="row aztec-links">
+          {aztecAdminUrl(stageProject.id) && (
+            <a href={aztecAdminUrl(stageProject.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
+              🛠️ Apri il pannello Aztec
+            </a>
+          )}
+          {aztecPublicUrl(stageProject.slug) && (
+            <a href={aztecPublicUrl(stageProject.slug)} target="_blank" rel="noreferrer" className="import-aztec-link">
+              🔗 Apri l'anteprima cliente
+            </a>
+          )}
+        </div>
+      )}
 
       {pool.length === 0 ? (
         <div className="hint">

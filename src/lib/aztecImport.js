@@ -1,5 +1,18 @@
 import { supabase } from "./supabaseClient.js";
 
+/** Dominio pubblico del sito aztec-preview (stesso per l'anteprima cliente e il pannello studio). */
+const AZTEC_PREVIEW_BASE = "https://eventic-slot.vercel.app";
+
+/** Link al pannello studio (progetto.html) di aztec-preview: richiede il login dello studio. */
+export function aztecAdminUrl(projectId) {
+  return projectId ? `${AZTEC_PREVIEW_BASE}/progetto.html?p=${encodeURIComponent(projectId)}` : null;
+}
+
+/** Link pubblico (cliente) allo stesso progetto in aztec-preview. */
+export function aztecPublicUrl(slug) {
+  return slug ? `${AZTEC_PREVIEW_BASE}/index.html?k=${encodeURIComponent(slug)}` : null;
+}
+
 /**
  * Estrae lo slug di un progetto aztec-preview da un link cliente
  * (es. "https://.../index.html?k=xxxxxxxx") oppure lo restituisce invariato
