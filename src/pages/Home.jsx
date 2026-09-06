@@ -54,6 +54,15 @@ export default function Home() {
       <div className="subtitle">Pipeline di animazione automatica per grafiche slot machine</div>
 
       <div className="cards-grid">
+        <Link to="/project" className="card">
+          <div className="card-icon">🗂️</div>
+          <div className="card-title">Il mio progetto</div>
+          <span className="status-badge ready">Pronto</span>
+          <div className="card-desc">
+            Dopo aver importato un progetto Aztec e testato i rulli: carica/anima i suoi simboli, converti in
+            Character e anima lo sfondo reale — tutto da un unico posto.
+          </div>
+        </Link>
         <Link to="/symbols" className="card">
           <div className="card-icon">🍒</div>
           <div className="card-title">Simboli</div>

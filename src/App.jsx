@@ -8,6 +8,7 @@ import BackgroundsList from "./pages/BackgroundsList.jsx";
 import BackgroundPage from "./pages/BackgroundPage.jsx";
 import ReelsPage from "./pages/ReelsPage.jsx";
 import ImportAztecPage from "./pages/ImportAztecPage.jsx";
+import ProjectPage from "./pages/ProjectPage.jsx";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
       <Route path="/background/:id" element={<BackgroundPage />} />
       <Route path="/reels" element={<ReelsPage />} />
       <Route path="/import-aztec" element={<ImportAztecPage />} />
+      <Route path="/project" element={<ProjectPage />} />
     </Routes>
   );
 }
