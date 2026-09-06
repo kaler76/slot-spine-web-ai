@@ -357,6 +357,9 @@ a.card:hover { border-color: #4f7cff; }
   background: repeating-conic-gradient(#161616 0% 25%, #1c1c1c 0% 50%) 50% / 20px 20px;
   border-radius: 4px;
 }
+/* Dentro lo stage reale (sfondo/cornice del progetto) niente scacchiera placeholder:
+   deve vedersi la scena vera dietro ai simboli, non un pattern di sfondo generico. */
+.reel-stage-reel-slot .reel-col { background: transparent; border-radius: 0; }
 .reel-track { display: flex; flex-direction: column; }
 .reel-track-resting { height: 100%; }
 .reel-cell {
@@ -366,7 +369,7 @@ a.card:hover { border-color: #4f7cff; }
   justify-content: center;
   flex-shrink: 0;
 }
-.reel-symbol-img { max-width: 82%; max-height: 82%; will-change: transform, filter; }
+.reel-symbol-img { max-width: 98%; max-height: 98%; will-change: transform, filter; }
 
 .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .preset-chip {
