@@ -358,8 +358,10 @@ a.card:hover { border-color: #4f7cff; }
   border-radius: 4px;
 }
 /* Dentro lo stage reale (sfondo/cornice del progetto) niente scacchiera placeholder:
-   deve vedersi la scena vera dietro ai simboli, non un pattern di sfondo generico. */
-.reel-stage-reel-slot .reel-col { background: transparent; border-radius: 0; }
+   deve vedersi la scena vera dietro ai simboli. Una leggera velatura scura (non
+   trasparenza totale) fa comunque da fondo neutro se una cella dovesse mai restare
+   vuota, invece di rivelare senza filtri lo sfondo/cornice dietro la finestra. */
+.reel-stage-reel-slot .reel-col { background: rgba(4, 8, 16, 0.35); border-radius: 0; }
 .reel-track { display: flex; flex-direction: column; }
 .reel-track-resting { height: 100%; }
 .reel-cell {

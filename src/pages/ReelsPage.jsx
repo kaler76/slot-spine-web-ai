@@ -142,7 +142,13 @@ export default function ReelsPage() {
 
   useEffect(() => {
     if (!stageGeo || pool.length === 0) return;
-    setCellStates((prev) => Array.from({ length: stageGeo.reelX.length }, (_, i) => prev[i] || makeRestingCells(pool, stageGeo.rows)));
+    // Un array vuoto è "falsy" solo per `undefined`, non per `[]`: con `prev[i] || ...` una
+    // colonna che restasse mai senza celle (es. per una corsa fra effetti) resterebbe vuota
+    // per sempre invece di essere ripopolata, lasciando la finestra dei rulli trasparente
+    // (si vede lo sfondo del progetto sotto, invece del simbolo atterrato).
+    setCellStates((prev) =>
+      Array.from({ length: stageGeo.reelX.length }, (_, i) => (prev[i]?.length ? prev[i] : makeRestingCells(pool, stageGeo.rows)))
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pool.length, stageGeo?.reelX.length, stageGeo?.rows]);
 
