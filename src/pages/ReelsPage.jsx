@@ -105,14 +105,16 @@ export default function ReelsPage() {
         const [symData, charData] = await Promise.all([listSymbolsForReels(), listCharactersForReels()]);
         const validNames = projectSymbolNames(lastProject);
         const tallMap = lastProject.cfg?.tall || {};
-        setSymbols(
-          symData
-            .filter((s) => s.animations.length > 0 && validNames.has(s.name))
-            .map((s) => ({ ...s, kind: "symbol", tallSpan: tallMap[s.name] || 1 }))
-        );
+        const validSymbols = symData.filter((s) => s.animations.length > 0 && validNames.has(s.name));
+        const symbolNames = new Set(validSymbols.map((s) => s.name));
+        setSymbols(validSymbols.map((s) => ({ ...s, kind: "symbol", tallSpan: tallMap[s.name] || 1 })));
         setCharacters(
           charData
-            .filter((c) => c.parts.length > 0 && validNames.has(c.name))
+            // "Crea character" da un simbolo non tocca l'originale, quindi lo stesso nome può
+            // esistere sia come simbolo che come character: se il simbolo è ancora nel pool
+            // vince quello (è l'origine, aggiornata quando si ritocca l'immagine/animazione),
+            // altrimenti nei Rulli comparirebbero due "sym11" diversi con lo stesso nome.
+            .filter((c) => c.parts.length > 0 && validNames.has(c.name) && !symbolNames.has(c.name))
             .map((c) => ({ ...c, kind: "character", tallSpan: tallMap[c.name] || 1 }))
         );
         setStageProject(lastProject);
