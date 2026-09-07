@@ -23,6 +23,27 @@ export async function listCharactersWithParts() {
   }));
 }
 
+/**
+ * Come listCharactersWithParts, ma include tutte le colonne di ogni parte (offset,
+ * dimensioni, genitore, ancoraggio, velocità): serve alla vista Rulli, che deve poter
+ * comporre e animare il character intero, non solo mostrarne una miniatura.
+ */
+export async function listCharactersForReels() {
+  const { data: characters, error: charErr } = await supabase
+    .from(CHARACTERS_TABLE)
+    .select("id, name, created_at")
+    .order("created_at", { ascending: false });
+  if (charErr) throw charErr;
+
+  const { data: parts, error: partsErr } = await supabase.from(PARTS_TABLE).select("*");
+  if (partsErr) throw partsErr;
+
+  return characters.map((c) => ({
+    ...c,
+    parts: parts.filter((p) => p.character_id === c.id).sort((a, b) => a.z_index - b.z_index)
+  }));
+}
+
 export async function getCharacterWithDetails(characterId) {
   const { data: character, error: charErr } = await supabase
     .from(CHARACTERS_TABLE)

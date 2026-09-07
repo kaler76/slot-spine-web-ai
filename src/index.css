@@ -179,6 +179,11 @@ a.card:hover { border-color: #4f7cff; }
 }
 .symbol-card:hover .symbol-card-delete { display: flex; }
 .symbol-card-delete:hover { background: rgba(163,51,51,0.3); }
+
+.confirmed-badge { font-size: 0.85rem; }
+.symbol-card-confirmed { border-color: #3ecf8e; }
+.symbol-card-confirmed-badge { position: absolute; top: 6px; left: 6px; z-index: 2; }
+.confirmed-btn-active { border-color: #3ecf8e; color: #3ecf8e; }
 .symbol-card-thumb {
   aspect-ratio: 1/1;
   background: repeating-conic-gradient(#1a1a1a 0% 25%, #222 0% 50%) 50% / 14px 14px;
@@ -194,6 +199,17 @@ a.card:hover { border-color: #4f7cff; }
 .symbol-card-anims { display: flex; justify-content: center; gap: 4px; }
 .anim-dot { font-size: 0.75rem; opacity: 0.25; }
 .anim-dot.filled { opacity: 1; }
+
+.symbol-card-type-select {
+  margin-top: 2px;
+  width: 100%;
+  padding: 5px 6px;
+  font-size: 0.72rem;
+  background: #1c1c1c;
+  color: #9fc4ff;
+  border: 1px solid #333;
+  border-radius: 4px;
+}
 
 /* --- Form generico --- */
 .field-label { display: block; margin-top: 14px; font-size: 0.9rem; color: #bbb; }
@@ -298,6 +314,65 @@ a.card:hover { border-color: #4f7cff; }
   border-radius: 4px;
   color: #9fc4ff;
 }
+
+.import-aztec-link { display: inline-block; margin-bottom: 14px; color: #9fc4ff; text-decoration: none; }
+.import-aztec-link:hover { text-decoration: underline; }
+
+.import-card { cursor: pointer; }
+.import-card-checkbox { position: absolute; top: 8px; left: 8px; width: 16px; height: 16px; }
+.import-card-selected { border-color: #4f7cff; }
+
+/* --- Rulli animati --- */
+.reels-controls { display: flex; gap: 18px; flex-wrap: wrap; align-items: flex-end; }
+.reels-controls .field-label { flex: 1; min-width: 140px; }
+.range-value { display: inline-block; margin-top: 4px; font-size: 0.78rem; color: #9fc4ff; }
+
+.reel-frame {
+  margin-top: 16px;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.reel-stage {
+  position: relative;
+  margin: 16px auto 0;
+  width: 100%;
+  max-width: 900px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000;
+}
+.reel-stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 0; }
+.reel-stage-frame { position: absolute; pointer-events: none; z-index: 1; }
+.reel-stage-reel-slot { position: absolute; overflow: hidden; z-index: 2; }
+.reel-stage-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; z-index: 3; }
+.reel-col {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: repeating-conic-gradient(#161616 0% 25%, #1c1c1c 0% 50%) 50% / 20px 20px;
+  border-radius: 4px;
+}
+/* Dentro lo stage reale (sfondo/cornice del progetto) niente scacchiera placeholder:
+   deve vedersi la scena vera dietro ai simboli. Una leggera velatura scura (non
+   trasparenza totale) fa comunque da fondo neutro se una cella dovesse mai restare
+   vuota, invece di rivelare senza filtri lo sfondo/cornice dietro la finestra. */
+.reel-stage-reel-slot .reel-col { background: rgba(4, 8, 16, 0.35); border-radius: 0; }
+.reel-track { display: flex; flex-direction: column; }
+.reel-track-resting { height: 100%; }
+.reel-cell {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.reel-symbol-img { max-width: 98%; max-height: 98%; will-change: transform, filter; }
 
 .preset-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .preset-chip {

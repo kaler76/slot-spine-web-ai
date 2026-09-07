@@ -5,8 +5,18 @@
 create table if not exists spine_symbols (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  -- Immagine sorgente collegata da un import (es. da un progetto aztec-preview già
+  -- ritagliato): solo un riferimento da riusare in SymbolPage, non genera animazioni.
+  source_image_url text,
+  -- Flag informativo: il simbolo è stato rivisto e "fissato" così com'è. Non cambia
+  -- cosa appare nei Rulli animati (basta un'animazione salvata), solo un promemoria visivo.
+  confirmed boolean not null default false
 );
+
+-- 1b. Su un'installazione già esistente, aggiunge solo i nuovi campi (idempotente).
+alter table spine_symbols add column if not exists source_image_url text;
+alter table spine_symbols add column if not exists confirmed boolean not null default false;
 
 -- 2. Tabella animazioni per simbolo (max 4 varianti: idle / win / land / spinBlur)
 create table if not exists spine_symbol_animations (
@@ -161,3 +171,23 @@ create policy "Upload pubblico bucket spine-characters"
 create policy "Sovrascrittura pubblica bucket spine-characters"
   on storage.objects for update
   using (bucket_id = 'spine-characters');
+
+-- ============================================================
+-- IMPOSTAZIONI APP: ultimo progetto aztec-preview importato
+-- (usato da "Rulli animati" per lo sfondo/cornice/coordinate rulli reali)
+-- ============================================================
+
+create table if not exists spine_app_settings (
+  id text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+alter table spine_app_settings enable row level security;
+
+create policy "Chiunque può leggere le impostazioni"
+  on spine_app_settings for select using (true);
+create policy "Chiunque può scrivere le impostazioni"
+  on spine_app_settings for insert with check (true);
+create policy "Chiunque può aggiornare le impostazioni"
+  on spine_app_settings for update using (true);

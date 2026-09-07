@@ -31,7 +31,7 @@ export default function Home() {
   }, []);
 
   function thumbFor(item, kind) {
-    if (kind === "symbol") return item.animations.find((a) => a.image_url)?.image_url || null;
+    if (kind === "symbol") return item.animations.find((a) => a.image_url)?.image_url || item.source_image_url || null;
     if (kind === "character") return item.parts[0]?.image_url || null;
     if (kind === "background") return item.layers[0]?.image_url || null;
     return null;
@@ -54,6 +54,15 @@ export default function Home() {
       <div className="subtitle">Pipeline di animazione automatica per grafiche slot machine</div>
 
       <div className="cards-grid">
+        <Link to="/project" className="card">
+          <div className="card-icon">🗂️</div>
+          <div className="card-title">Il mio progetto</div>
+          <span className="status-badge ready">Pronto</span>
+          <div className="card-desc">
+            Dopo aver importato un progetto Aztec e testato i rulli: carica/anima i suoi simboli, converti in
+            Character e anima lo sfondo reale — tutto da un unico posto.
+          </div>
+        </Link>
         <Link to="/symbols" className="card">
           <div className="card-icon">🍒</div>
           <div className="card-title">Simboli</div>
@@ -104,6 +113,14 @@ export default function Home() {
               })}
             </div>
           )}
+        </Link>
+        <Link to="/reels" className="card">
+          <div className="card-icon">🎰</div>
+          <div className="card-title">Rulli animati</div>
+          <span className="status-badge ready">Pronto</span>
+          <div className="card-desc">
+            Vista a rulli indipendente: compone i simboli già animati (idle/land/win) in uno spin completo.
+          </div>
         </Link>
       </div>
 

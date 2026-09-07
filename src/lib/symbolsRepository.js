@@ -7,7 +7,7 @@ import { supabase, SYMBOLS_TABLE, ANIMATIONS_TABLE, STORAGE_BUCKET } from "./sup
 export async function listSymbolsWithAnimations() {
   const { data: symbols, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at")
+    .select("id, name, created_at, source_image_url, confirmed")
     .order("created_at", { ascending: false });
   if (symErr) throw symErr;
 
@@ -22,11 +22,32 @@ export async function listSymbolsWithAnimations() {
   });
 }
 
+/**
+ * Come listSymbolsWithAnimations, ma include anche skeleton_json/atlas_text di ogni
+ * animazione: serve alla vista Rulli, che deve poter riprodurre idle/land/win dei
+ * simboli atterrati (le altre liste caricano solo l'anteprima immagine, più leggere).
+ */
+export async function listSymbolsForReels() {
+  const { data: symbols, error: symErr } = await supabase
+    .from(SYMBOLS_TABLE)
+    .select("id, name, created_at")
+    .order("created_at", { ascending: false });
+  if (symErr) throw symErr;
+
+  const { data: animations, error: animErr } = await supabase.from(ANIMATIONS_TABLE).select("*");
+  if (animErr) throw animErr;
+
+  return symbols.map((s) => {
+    const anims = animations.filter((a) => a.symbol_id === s.id);
+    return { ...s, animations: anims };
+  });
+}
+
 /** Ritorna un singolo simbolo con tutte le sue animazioni (per la pagina dedicata). */
 export async function getSymbolWithAnimations(symbolId) {
   const { data: symbol, error: symErr } = await supabase
     .from(SYMBOLS_TABLE)
-    .select("id, name, created_at")
+    .select("id, name, created_at, source_image_url, confirmed")
     .eq("id", symbolId)
     .single();
   if (symErr) throw symErr;
@@ -40,11 +61,16 @@ export async function getSymbolWithAnimations(symbolId) {
   return { ...symbol, animations };
 }
 
-/** Crea un nuovo simbolo (record vuoto, senza animazioni). */
-export async function createSymbol(name) {
+/**
+ * Crea un nuovo simbolo (record vuoto, senza animazioni). Se `sourceImageUrl` è passato
+ * (es. import da un progetto aztec-preview già ritagliato) viene solo collegato come
+ * immagine sorgente da riusare più avanti in SymbolPage: non genera nessuna animazione,
+ * quello resta un passo manuale e successivo come per un simbolo creato a mano.
+ */
+export async function createSymbol(name, sourceImageUrl) {
   const { data, error } = await supabase
     .from(SYMBOLS_TABLE)
-    .insert({ name })
+    .insert({ name, source_image_url: sourceImageUrl || null })
     .select()
     .single();
   if (error) throw error;
@@ -92,6 +118,13 @@ export async function saveSymbolAnimation({
     )
     .select()
     .single();
+  if (error) throw error;
+  return data;
+}
+
+/** Segna un simbolo come confermato/da fissare così com'è (o toglie la conferma). Solo un flag informativo. */
+export async function setSymbolConfirmed(symbolId, confirmed) {
+  const { data, error } = await supabase.from(SYMBOLS_TABLE).update({ confirmed }).eq("id", symbolId).select().single();
   if (error) throw error;
   return data;
 }

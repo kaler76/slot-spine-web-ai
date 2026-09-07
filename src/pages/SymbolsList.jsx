@@ -3,6 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import { listSymbolsWithAnimations, createSymbol, deleteSymbol } from "../lib/symbolsRepository.js";
 
 const ANIMATION_ICONS = { idle: "💤", win: "✨", land: "📍", spinBlur: "🌀" };
+const ANIMATION_TYPES = [
+  { key: "idle", label: "Idle" },
+  { key: "win", label: "Win" },
+  { key: "land", label: "Land" },
+  { key: "spinBlur", label: "SpinBlur" }
+];
 
 export default function SymbolsList() {
   const [symbols, setSymbols] = useState([]);
@@ -73,12 +79,15 @@ export default function SymbolsList() {
         </button>
       </form>
 
+      <Link to="/import-aztec" className="hint import-aztec-link">📥 Importa simboli già ritagliati da un progetto aztec-preview →</Link>
+
       {error && <div className="status error">❌ {error}</div>}
       {loading && <div className="status">⏳ Carico simboli...</div>}
 
       <div className="symbol-cards-grid">
         {symbols.map((s) => (
-          <Link to={`/symbol/${s.id}`} key={s.id} className="symbol-card">
+          <Link to={`/symbol/${s.id}`} key={s.id} className={`symbol-card ${s.confirmed ? "symbol-card-confirmed" : ""}`}>
+            {s.confirmed && <span className="confirmed-badge symbol-card-confirmed-badge" title="Confermato">✅</span>}
             <button
               type="button"
               className="symbol-card-delete"
@@ -88,11 +97,10 @@ export default function SymbolsList() {
               ✕
             </button>
             <div className="symbol-card-thumb">
-              {s.animations[0] ? (
-                <img src={s.animations.find((a) => a.image_url)?.image_url} alt={s.name} />
-              ) : (
-                <span className="symbol-card-empty">vuoto</span>
-              )}
+              {(() => {
+                const thumb = s.animations.find((a) => a.image_url)?.image_url || s.source_image_url;
+                return thumb ? <img src={thumb} alt={s.name} /> : <span className="symbol-card-empty">vuoto</span>;
+              })()}
             </div>
             <div className="symbol-card-name">{s.name}</div>
             <div className="symbol-card-anims">
@@ -105,6 +113,25 @@ export default function SymbolsList() {
                 );
               })}
             </div>
+            <select
+              className="symbol-card-type-select"
+              value=""
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const type = e.target.value;
+                if (type) navigate(`/symbol/${s.id}?type=${type}`);
+              }}
+            >
+              <option value="">Apri animazione...</option>
+              {ANIMATION_TYPES.map(({ key, label }) => {
+                const has = s.animations.some((a) => a.animation_type === key);
+                return (
+                  <option key={key} value={key}>
+                    {ANIMATION_ICONS[key]} {label}{has ? " ✓" : ""}
+                  </option>
+                );
+              })}
+            </select>
           </Link>
         ))}
         {!loading && symbols.length === 0 && (
