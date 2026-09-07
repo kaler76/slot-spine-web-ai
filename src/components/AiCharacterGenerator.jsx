@@ -62,7 +62,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         },
         body: JSON.stringify({
           characterDescription,
-          artStyle,
+          artStyle: withReference ? undefined : artStyle,
           group: "all",
           referenceImagesBase64
         })
@@ -132,8 +132,9 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           )}
           {useReference && (
             <div className="hint" style={{ marginTop: 4 }}>
-              Gemini userà questa immagine come il personaggio esatto da riprodurre (stessi colori, costume, viso),
-              ricostruendola nei 22 pezzi separati e pronti per il rig invece di inventarne uno nuovo.
+              Gemini userà questa immagine come il personaggio esatto da riprodurre (stessi colori, costume, viso e
+              stile artistico), ricostruendola nei 22 pezzi separati e pronti per il rig invece di inventarne uno
+              nuovo o di ridisegnarlo in uno stile diverso.
             </div>
           )}
         </>
@@ -147,10 +148,12 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           placeholder="e.g. elegant Chinese empress in red and gold traditional dress"
         />
       </label>
-      <label className="field-label">
-        Stile artistico
-        <input type="text" value={artStyle} onChange={(e) => setArtStyle(e.target.value)} />
-      </label>
+      {!(useReference && hasExistingParts) && (
+        <label className="field-label">
+          Stile artistico
+          <input type="text" value={artStyle} onChange={(e) => setArtStyle(e.target.value)} />
+        </label>
+      )}
 
       <div className="hint" style={{ marginTop: 8 }}>
         Genera tutti e 22 gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
