@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import CropTool from "../components/CropTool.jsx";
 import SpriteSheetImporter from "../components/SpriteSheetImporter.jsx";
 import AiCharacterGenerator from "../components/AiCharacterGenerator.jsx";
-import { useBackgroundAnimationLoop } from "../hooks/useBackgroundAnimationLoop.js";
+import { useCharacterAnimationLoop } from "../hooks/useCharacterAnimationLoop.js";
 import { buildCharacterSkeleton, anchorToFraction } from "../lib/characterSkeleton.js";
 import { buildMultiPartAtlas } from "../lib/atlasBuilder.js";
 import { AVAILABLE_PART_ANIMATION_TYPES } from "../lib/characterAnimationTemplates.js";
@@ -20,7 +20,8 @@ const ANIM_LABELS = {
   static: "⏸️ Fermo",
   sway: "🎐 Oscillazione",
   bounce: "⬆️ Rimbalzo",
-  blink: "✨ Lampeggio"
+  blink: "✨ Lampeggio",
+  physics: "🔗 Fisica (pendolo)"
 };
 
 function sanitizeKey(name) {
@@ -428,17 +429,19 @@ export default function CharacterPage() {
     if (!partRefsMap.current[key]) partRefsMap.current[key] = { current: null };
   }
 
-  const restRotations = useMemo(
-    () => Object.fromEntries(orderedPartKeys.map((k) => [k, previewPartsMap[k].rotation || 0])),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [orderedPartKeys.map((k) => `${k}:${previewPartsMap[k].rotation || 0}`).join(",")]
-  );
+  const animationParts = orderedPartKeys.map((k) => ({
+    key: k,
+    parentKey: effectiveParentOf(k),
+    rotation: previewPartsMap[k].rotation || 0,
+    animationType: previewPartsMap[k].animationType,
+    speed: previewPartsMap[k].speed
+  }));
 
-  const { duration: previewDuration } = useBackgroundAnimationLoop({
+  const { duration: previewDuration } = useCharacterAnimationLoop({
+    parts: animationParts,
     layerRefs: partRefsMap.current,
     animationsObj: skeletonData?.animations,
-    playing: playing && !!skeletonData,
-    restRotations
+    playing: playing && !!skeletonData
   });
 
   async function handleGenerateExport() {
@@ -774,6 +777,16 @@ export default function CharacterPage() {
               </select>
             </label>
           </div>
+          {animationType === "physics" && (
+            <div className="hint" style={{ color: "#9fc4ff" }}>
+              🔗 Un pezzo con "Fisica" reagisce con inerzia e ritardo al movimento del suo genitore (invece di seguirlo
+              rigidamente o oscillare a formula fissa) — se il genitore è fermo (statico), anche questo pezzo resterà
+              fermo alla sua posa di riposo: aggancialo a un genitore che si muove (es. il busto con "Oscillazione") per
+              vederne l'effetto. "Velocità" qui controlla quanto è rigida/reattiva la molla (1 = normale, più alto =
+              più rigido e scattante, più basso = più morbido e "flottante"). Nota: per ora è solo un'anteprima live,
+              non ancora inclusa nel pacchetto Spine esportato.
+            </div>
+          )}
           <div className="row">
             <label className="field-label">
               Ancoraggio orizzontale (cardine per la rotazione)
