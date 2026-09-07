@@ -80,11 +80,26 @@ function blinkTrack(partKey, speed) {
   };
 }
 
+/**
+ * FISICA (pendolo a molla): a differenza degli altri tipi non produce una
+ * traccia a keyframe — il movimento è simulato frame per frame da
+ * useCharacterAnimationLoop (reagisce al movimento del bone genitore con
+ * inerzia/molla, non segue una formula fissa). La traccia resta vuota qui
+ * di proposito: serve solo perché "physics" compaia come tipo valido e per
+ * l'export dello skeleton, che per ora esporta questo bone come statico
+ * (la fisica è per ora solo un'anteprima live, non ancora nel pacchetto
+ * Spine esportato).
+ */
+function physicsTrack() {
+  return { bones: {} };
+}
+
 const TEMPLATES = {
   static: () => staticTrack(),
   sway: (partKey, speed) => swayTrack(partKey, speed),
   bounce: (partKey, speed) => bounceTrack(partKey, speed),
-  blink: (partKey, speed) => blinkTrack(partKey, speed)
+  blink: (partKey, speed) => blinkTrack(partKey, speed),
+  physics: () => physicsTrack()
 };
 
 export const AVAILABLE_PART_ANIMATION_TYPES = Object.keys(TEMPLATES);

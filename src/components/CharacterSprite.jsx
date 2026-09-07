@@ -1,5 +1,5 @@
 import { useMemo, useRef } from "react";
-import { useBackgroundAnimationLoop } from "../hooks/useBackgroundAnimationLoop.js";
+import { useCharacterAnimationLoop } from "../hooks/useCharacterAnimationLoop.js";
 import { anchorToFraction } from "../lib/characterSkeleton.js";
 import { buildAmbientCharacterAnimation } from "../lib/characterAnimationTemplates.js";
 
@@ -115,19 +115,21 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
     if (!partRefsMap.current[key]) partRefsMap.current[key] = { current: null };
   }
 
-  const restRotationsKey = orderedKeys.map((k) => `${k}:${partsMap[k].rotation || 0}`).join(",");
-  const restRotations = useMemo(
-    () => Object.fromEntries(orderedKeys.map((k) => [k, partsMap[k].rotation || 0])),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [restRotationsKey]
-  );
-
-  useBackgroundAnimationLoop({ layerRefs: partRefsMap.current, animationsObj, playing, restRotations });
-
   function effectiveParentOf(key) {
     const pk = partsMap[key]?.parentKey;
     return pk && pk !== "root" && partsMap[pk] ? pk : "root";
   }
+
+  const animationParts = orderedKeys.map((k) => ({
+    key: k,
+    parentKey: effectiveParentOf(k),
+    rotation: partsMap[k].rotation || 0,
+    animationType: partsMap[k].animationType,
+    speed: partsMap[k].speed
+  }));
+
+  useCharacterAnimationLoop({ parts: animationParts, layerRefs: partRefsMap.current, animationsObj, playing });
+
   const rootKeys = orderedKeys.filter((k) => effectiveParentOf(k) === "root");
 
   function renderPartTree(key, isRoot) {
