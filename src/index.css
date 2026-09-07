@@ -502,7 +502,7 @@ a.card:hover { border-color: #4f7cff; }
 .layer-edit-form .btn.tiny { flex: 1; }
 
 .tech-details-row-char {
-  grid-template-columns: 1fr 0.9fr 1fr 1fr 0.4fr 0.5fr 0.8fr 1fr 0.5fr;
+  grid-template-columns: 1fr 0.9fr 1fr 1fr 0.4fr 0.5fr 0.8fr 1fr 0.4fr 0.5fr;
 }
 .tech-details-row-char select {
   width: 100%;

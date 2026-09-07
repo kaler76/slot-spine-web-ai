@@ -89,7 +89,8 @@ export async function saveCharacterPart({
   speed,
   anchorX,
   anchorY,
-  rotation
+  rotation,
+  segments
 }) {
   const path = `${characterId}/${partKey}.png`;
 
@@ -118,7 +119,8 @@ export async function saveCharacterPart({
         speed: speed ?? 1,
         anchor_x: anchorX || "center",
         anchor_y: anchorY || "center",
-        rotation: rotation ?? 0
+        rotation: rotation ?? 0,
+        segments: segments ?? 1
       },
       { onConflict: "character_id,part_key" }
     )
@@ -131,7 +133,7 @@ export async function saveCharacterPart({
 /** Aggiorna solo i metadati di una parte già salvata, senza ricaricare l'immagine. */
 export async function updateCharacterPartMetadata(
   partId,
-  { width, height, offsetX, offsetY, zIndex, parentKey, animationType, speed, anchorX, anchorY, rotation }
+  { width, height, offsetX, offsetY, zIndex, parentKey, animationType, speed, anchorX, anchorY, rotation, segments }
 ) {
   const { data, error } = await supabase
     .from(PARTS_TABLE)
@@ -146,7 +148,8 @@ export async function updateCharacterPartMetadata(
       speed,
       anchor_x: anchorX,
       anchor_y: anchorY,
-      rotation: rotation ?? 0
+      rotation: rotation ?? 0,
+      segments: segments ?? 1
     })
     .eq("id", partId)
     .select()

@@ -43,6 +43,41 @@ function rotatedCorners({ x, y, angleDeg, width, height, fracX, fracY }) {
   return corners;
 }
 
+const SEGMENT_KEY_SEP = "__seg";
+
+/** Stessa logica di CharacterPage (vedi commento lì): espande una parte "Fisica" con più segmenti in una catena di sotto-bone sintetici, una fascia orizzontale dell'immagine ciascuno. */
+function expandSegmentedParts(partsMap) {
+  const expanded = {};
+  const resolveParent = (pk) => (pk && pk !== "root" && partsMap[pk] ? pk : "root");
+
+  for (const [key, p] of Object.entries(partsMap)) {
+    const segments = Math.max(1, Math.round(p.segments) || 1);
+    if (segments <= 1 || p.animationType !== "physics") {
+      expanded[key] = { ...p, parentKey: resolveParent(p.parentKey), sliced: false };
+      continue;
+    }
+    const bandHeight = p.height / segments;
+    const segKeys = Array.from({ length: segments }, (_, i) => (i === 0 ? key : `${key}${SEGMENT_KEY_SEP}${i + 1}`));
+    for (let i = 0; i < segments; i++) {
+      expanded[segKeys[i]] = {
+        ...p,
+        parentKey: i === 0 ? resolveParent(p.parentKey) : segKeys[i - 1],
+        rotation: i === 0 ? p.rotation || 0 : 0,
+        offsetX: i === 0 ? p.offsetX : 0,
+        offsetY: i === 0 ? p.offsetY : -bandHeight,
+        anchorY: "top",
+        width: p.width,
+        height: bandHeight,
+        fullHeight: p.height,
+        cropTop: i * bandHeight,
+        sliced: true,
+        segments: 1
+      };
+    }
+  }
+  return expanded;
+}
+
 /**
  * Compone e anima un Character intero (tutte le sue parti, con la stessa animazione
  * "ambient" calcolata live in CharacterPage) dentro un riquadro largo `boxWidth` e alto
@@ -66,6 +101,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
         anchorX: p.anchor_x || "center",
         anchorY: p.anchor_y || "center",
         rotation: p.rotation || 0,
+        segments: p.segments || 1,
         url: p.image_url
       };
     }
@@ -76,15 +112,28 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
   const orderedKeys = Object.keys(partsMap).sort((a, b) => partsMap[a].zIndex - partsMap[b].zIndex);
   const orderedKeysJoined = orderedKeys.join(",");
 
+  // Parti con animazione "Fisica" e più di 1 segmento diventano una catena di
+  // sotto-bone sintetici (vedi expandSegmentedParts) — bounding box, loop di
+  // animazione e albero di rendering lavorano su questa mappa "espansa".
+  const expandedPartsMap = useMemo(
+    () => expandSegmentedParts(partsMap),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [partsMap, orderedKeysJoined]
+  );
+  const expandedOrderedKeys = Object.keys(expandedPartsMap).sort(
+    (a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex
+  );
+  const expandedOrderedKeysJoined = expandedOrderedKeys.join(",");
+
   const stageLayout = useMemo(() => {
-    if (orderedKeys.length === 0) return { scale: 1, centerX: 0, centerY: 0, boundsW: 10, boundsH: 10 };
+    if (expandedOrderedKeys.length === 0) return { scale: 1, centerX: 0, centerY: 0, boundsW: 10, boundsH: 10 };
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (const key of orderedKeys) {
-      const p = partsMap[key];
-      const abs = resolveAbsoluteTransform(key, partsMap);
+    for (const key of expandedOrderedKeys) {
+      const p = expandedPartsMap[key];
+      const abs = resolveAbsoluteTransform(key, expandedPartsMap);
       const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
       const corners = rotatedCorners({ ...abs, width: p.width, height: p.height, fracX, fracY });
       for (const c of corners) {
@@ -99,7 +148,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
     const scale = Math.min(boxWidth / boundsW, boxHeight / boundsH);
     return { scale, centerX: -minX, centerY: maxY, boundsW, boundsH };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedKeysJoined, boxWidth, boxHeight]);
+  }, [expandedOrderedKeysJoined, boxWidth, boxHeight]);
 
   const animationsObj = useMemo(
     () =>
@@ -111,35 +160,34 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
   );
 
   const partRefsMap = useRef({});
-  for (const key of orderedKeys) {
+  for (const key of expandedOrderedKeys) {
     if (!partRefsMap.current[key]) partRefsMap.current[key] = { current: null };
   }
 
   function effectiveParentOf(key) {
-    const pk = partsMap[key]?.parentKey;
-    return pk && pk !== "root" && partsMap[pk] ? pk : "root";
+    return expandedPartsMap[key]?.parentKey || "root";
   }
 
-  const animationParts = orderedKeys.map((k) => ({
+  const animationParts = expandedOrderedKeys.map((k) => ({
     key: k,
     parentKey: effectiveParentOf(k),
-    rotation: partsMap[k].rotation || 0,
-    animationType: partsMap[k].animationType,
-    speed: partsMap[k].speed
+    rotation: expandedPartsMap[k].rotation || 0,
+    animationType: expandedPartsMap[k].animationType,
+    speed: expandedPartsMap[k].speed
   }));
 
   useCharacterAnimationLoop({ parts: animationParts, layerRefs: partRefsMap.current, animationsObj, playing });
 
-  const rootKeys = orderedKeys.filter((k) => effectiveParentOf(k) === "root");
+  const rootKeys = expandedOrderedKeys.filter((k) => effectiveParentOf(k) === "root");
 
   function renderPartTree(key, isRoot) {
-    const p = partsMap[key];
+    const p = expandedPartsMap[key];
     const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
     const boneLeft = isRoot ? stageLayout.centerX + (p.offsetX || 0) : p.offsetX || 0;
     const boneTop = isRoot ? stageLayout.centerY - (p.offsetY || 0) : -(p.offsetY || 0);
-    const childKeys = orderedKeys
+    const childKeys = expandedOrderedKeys
       .filter((k) => k !== key && effectiveParentOf(k) === key)
-      .sort((a, b) => partsMap[a].zIndex - partsMap[b].zIndex);
+      .sort((a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex);
 
     return (
       <div
@@ -155,19 +203,30 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
           transform: p.rotation ? `rotate(${-p.rotation}deg)` : undefined
         }}
       >
-        <img
-          src={p.url}
-          alt={key}
-          style={{
-            position: "absolute",
-            left: -p.width * fracX,
-            top: -p.height * fracY,
-            width: p.width,
-            height: p.height,
-            transformOrigin: `${fracX * 100}% ${fracY * 100}%`
-          }}
-          draggable={false}
-        />
+        {p.sliced ? (
+          <div style={{ position: "absolute", left: -p.width * fracX, top: -p.height * fracY, width: p.width, height: p.height, overflow: "hidden" }}>
+            <img
+              src={p.url}
+              alt={key}
+              style={{ position: "absolute", left: 0, top: -p.cropTop, width: p.width, height: p.fullHeight }}
+              draggable={false}
+            />
+          </div>
+        ) : (
+          <img
+            src={p.url}
+            alt={key}
+            style={{
+              position: "absolute",
+              left: -p.width * fracX,
+              top: -p.height * fracY,
+              width: p.width,
+              height: p.height,
+              transformOrigin: `${fracX * 100}% ${fracY * 100}%`
+            }}
+            draggable={false}
+          />
+        )}
         {childKeys.map((childKey) => renderPartTree(childKey, false))}
       </div>
     );
