@@ -18,7 +18,7 @@ export function anchorToFraction(anchorX, anchorY) {
  * le animazioni (es. un orecchino che dondola dall'alto come un pendolo).
  *
  * @param {Object} params
- * @param {Array<{partKey, parentKey, width, height, offsetX, offsetY, zIndex, animationType, speed, anchorX, anchorY}>} params.parts
+ * @param {Array<{partKey, parentKey, width, height, offsetX, offsetY, rotation, zIndex, animationType, speed, anchorX, anchorY}>} params.parts
  * @returns {Object} skeleton JSON pronto per l'export
  */
 export function buildCharacterSkeleton({ parts }) {
@@ -50,7 +50,8 @@ export function buildCharacterSkeleton({ parts }) {
       name: part.partKey,
       parent,
       x: part.offsetX || 0,
-      y: part.offsetY || 0
+      y: part.offsetY || 0,
+      rotation: part.rotation || 0
     });
     slots.push({ name: part.partKey, bone: part.partKey, attachment: part.partKey });
 

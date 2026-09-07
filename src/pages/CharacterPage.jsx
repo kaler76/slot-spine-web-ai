@@ -32,22 +32,52 @@ function sanitizeKey(name) {
 }
 
 /**
- * Risolve la posizione assoluta di una parte risalendo la catena dei genitori
- * (ognuno scelto liberamente dall'utente, non più fissa), sommando gli offset.
+ * Risolve la trasformazione assoluta (posizione + rotazione cumulata) di una
+ * parte risalendo la catena dei genitori — stesso spazio y-up di offsetX/Y
+ * (positivo = su), con rotazione in convenzione Spine (antioraria positiva,
+ * coerente coi gradi memorizzati). L'offset di ogni anello della catena va
+ * ruotato dell'angolo accumulato FINO A QUEL PUNTO (il genitore), perché è
+ * definito dentro il riferimento già ruotato del genitore — esattamente come
+ * avviene nel DOM annidato. Serve per calcolare un bounding box dell'anteprima
+ * che includa anche le parti ruotate, non solo la loro posizione non ruotata.
  */
-function resolveAbsolutePosition(key, partsMap) {
-  let x = 0;
-  let y = 0;
+function resolveAbsoluteTransform(key, partsMap) {
+  const chain = [];
   let current = key;
   const visited = new Set();
   while (current && partsMap[current] && !visited.has(current)) {
     visited.add(current);
-    x += partsMap[current].offsetX;
-    y += partsMap[current].offsetY;
+    chain.unshift(current);
     const parentKey = partsMap[current].parentKey;
     current = parentKey && parentKey !== "root" ? parentKey : null;
   }
-  return { x, y };
+  let x = 0, y = 0, angleDeg = 0;
+  for (const k of chain) {
+    const p = partsMap[k];
+    const rad = (angleDeg * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const ox = p.offsetX || 0;
+    const oy = p.offsetY || 0;
+    x += ox * cos - oy * sin;
+    y += ox * sin + oy * cos;
+    angleDeg += p.rotation || 0;
+  }
+  return { x, y, angleDeg };
+}
+
+/** Le 4 estremità (x,y) del rettangolo width×height dato l'ancoraggio, ruotate di angleDeg (antiorario, y-up) e traslate in (x,y). */
+function rotatedCorners({ x, y, angleDeg, width, height, fracX, fracY }) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const localXs = [-width * fracX, width * (1 - fracX)];
+  const localYs = [-height * (1 - fracY), height * fracY];
+  const corners = [];
+  for (const lx of localXs) {
+    for (const ly of localYs) {
+      corners.push({ x: x + lx * cos - ly * sin, y: y + lx * sin + ly * cos });
+    }
+  }
+  return corners;
 }
 
 export default function CharacterPage() {
@@ -67,6 +97,7 @@ export default function CharacterPage() {
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [zIndex, setZIndex] = useState(0);
+  const [rotation, setRotation] = useState(0);
   const [animationType, setAnimationType] = useState("static");
   const [anchorX, setAnchorX] = useState("center");
   const [anchorY, setAnchorY] = useState("center");
@@ -117,6 +148,7 @@ export default function CharacterPage() {
     setOffsetX(0);
     setOffsetY(0);
     setZIndex((character?.parts.length || 0) * 10);
+    setRotation(0);
     setAnimationType("static");
     setPartSpeed(1);
     setAnchorX("center");
@@ -201,6 +233,7 @@ export default function CharacterPage() {
         offsetX: Number(offsetX),
         offsetY: Number(offsetY),
         zIndex: Number(zIndex) || 0,
+        rotation: Number(rotation) || 0,
         animationType,
         speed: Number(partSpeed) || 1,
         anchorX,
@@ -235,6 +268,7 @@ export default function CharacterPage() {
       offsetX: p.offset_x,
       offsetY: p.offset_y,
       zIndex: p.z_index ?? 0,
+      rotation: p.rotation ?? 0,
       parentKey: p.parent_key || "root",
       animationType: p.animation_type || "static",
       speed: p.speed ?? 1,
@@ -257,6 +291,7 @@ export default function CharacterPage() {
         offsetX: Number(editValues.offsetX),
         offsetY: Number(editValues.offsetY),
         zIndex: Number(editValues.zIndex),
+        rotation: Number(editValues.rotation) || 0,
         parentKey: editValues.parentKey,
         animationType: editValues.animationType,
         speed: Number(editValues.speed) || 1,
@@ -286,6 +321,7 @@ export default function CharacterPage() {
             offsetX: Number(editValues.offsetX) || 0,
             offsetY: Number(editValues.offsetY) || 0,
             zIndex: Number(editValues.zIndex) || 0,
+            rotation: Number(editValues.rotation) || 0,
             parentKey: editValues.parentKey || "root",
             animationType: editValues.animationType || "static",
             speed: Number(editValues.speed) || 1,
@@ -299,6 +335,7 @@ export default function CharacterPage() {
             offsetX: p.offset_x,
             offsetY: p.offset_y,
             zIndex: p.z_index ?? 0,
+            rotation: p.rotation ?? 0,
             parentKey: p.parent_key || "root",
             animationType: p.animation_type || "static",
             speed: p.speed ?? 1,
@@ -315,6 +352,7 @@ export default function CharacterPage() {
         offsetX: Number(offsetX),
         offsetY: Number(offsetY),
         zIndex: Number(zIndex) || 0,
+        rotation: Number(rotation) || 0,
         parentKey,
         animationType,
         speed: Number(partSpeed) || 1,
@@ -333,6 +371,7 @@ export default function CharacterPage() {
     offsetX,
     offsetY,
     zIndex,
+    rotation,
     parentKey,
     animationType,
     partSpeed,
@@ -358,12 +397,15 @@ export default function CharacterPage() {
     let minX = 0, maxX = 0, minY = 0, maxY = 0;
     for (const key of orderedPartKeys) {
       const p = previewPartsMap[key];
-      const abs = resolveAbsolutePosition(key, previewPartsMap);
+      const abs = resolveAbsoluteTransform(key, previewPartsMap);
       const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
-      minX = Math.min(minX, abs.x - p.width * fracX);
-      maxX = Math.max(maxX, abs.x + p.width * (1 - fracX));
-      minY = Math.min(minY, abs.y - p.height * (1 - fracY));
-      maxY = Math.max(maxY, abs.y + p.height * fracY);
+      const corners = rotatedCorners({ ...abs, width: p.width, height: p.height, fracX, fracY });
+      for (const c of corners) {
+        minX = Math.min(minX, c.x);
+        maxX = Math.max(maxX, c.x);
+        minY = Math.min(minY, c.y);
+        maxY = Math.max(maxY, c.y);
+      }
     }
     const boundsW = Math.max(maxX - minX, 100);
     const boundsH = Math.max(maxY - minY, 100);
@@ -386,10 +428,17 @@ export default function CharacterPage() {
     if (!partRefsMap.current[key]) partRefsMap.current[key] = { current: null };
   }
 
+  const restRotations = useMemo(
+    () => Object.fromEntries(orderedPartKeys.map((k) => [k, previewPartsMap[k].rotation || 0])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [orderedPartKeys.map((k) => `${k}:${previewPartsMap[k].rotation || 0}`).join(",")]
+  );
+
   const { duration: previewDuration } = useBackgroundAnimationLoop({
     layerRefs: partRefsMap.current,
     animationsObj: skeletonData?.animations,
-    playing: playing && !!skeletonData
+    playing: playing && !!skeletonData,
+    restRotations
   });
 
   async function handleGenerateExport() {
@@ -482,7 +531,15 @@ export default function CharacterPage() {
       <div
         key={key}
         ref={partRefsMap.current[key]}
-        style={{ position: "absolute", left: boneLeft, top: boneTop, width: 0, height: 0, zIndex: p.zIndex }}
+        style={{
+          position: "absolute",
+          left: boneLeft,
+          top: boneTop,
+          width: 0,
+          height: 0,
+          zIndex: p.zIndex,
+          transform: p.rotation ? `rotate(${-p.rotation}deg)` : undefined
+        }}
       >
         <img
           src={p.url}
@@ -525,6 +582,7 @@ export default function CharacterPage() {
               <span>Dimensioni</span>
               <span>Offset X/Y</span>
               <span>Z</span>
+              <span>Rotazione</span>
               <span>Ancoraggio</span>
               <span>Animazione</span>
               <span></span>
@@ -552,6 +610,12 @@ export default function CharacterPage() {
                       <input type="number" value={editValues.offsetY} onChange={(e) => setEditValues((v) => ({ ...v, offsetY: e.target.value }))} />
                     </span>
                     <input type="number" value={editValues.zIndex} onChange={(e) => setEditValues((v) => ({ ...v, zIndex: e.target.value }))} />
+                    <input
+                      type="number"
+                      value={editValues.rotation}
+                      title="Rotazione di riposo del bone (gradi, antiorario positivo — come in Spine)"
+                      onChange={(e) => setEditValues((v) => ({ ...v, rotation: e.target.value }))}
+                    />
                     <span className="tech-edit-pair">
                       <select value={editValues.anchorX} onChange={(e) => setEditValues((v) => ({ ...v, anchorX: e.target.value }))}>
                         <option value="left">⬅️</option>
@@ -591,6 +655,7 @@ export default function CharacterPage() {
                   <span>{p.width}×{p.height}px</span>
                   <span>{p.offset_x}, {p.offset_y}</span>
                   <span>{p.z_index}</span>
+                  <span>{p.rotation || 0}°</span>
                   <span>
                     {{ left: "⬅️", center: "◯", right: "➡️" }[p.anchor_x || "center"]}
                     {{ top: "⬆️", center: "◯", bottom: "⬇️" }[p.anchor_y || "center"]}
@@ -694,6 +759,12 @@ export default function CharacterPage() {
               Z-index (ordine: più alto = più in primo piano)
               <input type="number" value={zIndex} onChange={(e) => setZIndex(e.target.value)} />
             </label>
+            <label className="field-label" title="Posa di riposo del bone: gradi antiorari, come le rotazioni Spine — 0 = nessuna rotazione">
+              Rotazione di riposo (gradi)
+              <input type="number" value={rotation} onChange={(e) => setRotation(e.target.value)} />
+            </label>
+          </div>
+          <div className="row">
             <label className="field-label">
               Tipo animazione
               <select value={animationType} onChange={(e) => setAnimationType(e.target.value)}>
