@@ -13,6 +13,11 @@ export function aztecPublicUrl(slug) {
   return slug ? `${AZTEC_PREVIEW_BASE}/index.html?k=${encodeURIComponent(slug)}` : null;
 }
 
+/** Link diretto alla scheda Grafiche (fondale/cornice/davanti) del pannello studio. */
+export function aztecGraphicsUrl(projectId) {
+  return projectId ? `${AZTEC_PREVIEW_BASE}/grafiche.html?p=${encodeURIComponent(projectId)}` : null;
+}
+
 /**
  * Estrae lo slug di un progetto aztec-preview da un link cliente
  * (es. "https://.../index.html?k=xxxxxxxx") oppure lo restituisce invariato

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getLastAztecProject } from "../lib/appSettingsRepository.js";
-import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl } from "../lib/aztecImport.js";
+import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl, aztecGraphicsUrl } from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
 import { listCharactersWithParts, createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 import { listBackgroundsWithLayers, createBackground, updateBackgroundCanvas, saveBackgroundLayer } from "../lib/backgroundsRepository.js";
@@ -127,10 +127,13 @@ export default function ProjectPage() {
       const docH = project.cfg?.doc?.h || 1080;
       await updateBackgroundCanvas(bg.id, { canvasWidth: docW, canvasHeight: docH });
 
+      // "davanti" (overlay) è il layer di loghi/decori disegnato sopra i simboli nel
+      // pannello Aztec (scheda Grafiche): va sopra anche qui, con z-index più alto di frame.
       const layers = [];
       if (project.assets?.bg) layers.push(["bg", project.assets.bg, 0]);
       if (project.assets?.frame) layers.push(["frame", project.assets.frame, 10]);
-      for (const [layerKey, url] of layers) {
+      if (project.assets?.overlay) layers.push(["overlay", project.assets.overlay, 20]);
+      for (const [layerKey, url, zIndex] of layers) {
         const res = await fetch(url);
         if (!res.ok) continue;
         const blob = await res.blob();
@@ -140,7 +143,7 @@ export default function ProjectPage() {
           imageBlob: blob,
           width: docW,
           height: docH,
-          zIndex: layerKey === "bg" ? 0 : 10,
+          zIndex,
           animationType: "static",
           speed: 1
         });
@@ -188,6 +191,11 @@ export default function ProjectPage() {
         {aztecAdminUrl(project.id) && (
           <a href={aztecAdminUrl(project.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
             🛠️ Apri il pannello Aztec
+          </a>
+        )}
+        {aztecGraphicsUrl(project.id) && (
+          <a href={aztecGraphicsUrl(project.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
+            🖼️ Apri Grafiche (fondale/cornice/davanti)
           </a>
         )}
         {aztecPublicUrl(project.slug) && (

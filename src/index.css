@@ -350,6 +350,7 @@ a.card:hover { border-color: #4f7cff; }
 .reel-stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; z-index: 0; }
 .reel-stage-frame { position: absolute; pointer-events: none; z-index: 1; }
 .reel-stage-reel-slot { position: absolute; overflow: hidden; z-index: 2; }
+.reel-stage-overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; z-index: 3; }
 .reel-col {
   flex: 1;
   overflow: hidden;

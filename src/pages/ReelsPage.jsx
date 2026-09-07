@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { listSymbolsForReels } from "../lib/symbolsRepository.js";
 import { listCharactersForReels } from "../lib/charactersRepository.js";
 import { getLastAztecProject } from "../lib/appSettingsRepository.js";
-import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl } from "../lib/aztecImport.js";
+import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl, aztecGraphicsUrl } from "../lib/aztecImport.js";
 import { totalDuration } from "../lib/animationPreview.js";
 import { pickFinalRows } from "../lib/reelEngine.js";
 import { playSpinStart, playReelStop, playWin } from "../lib/reelSound.js";
@@ -59,7 +59,10 @@ function stageGeometryFrom(project) {
     reelY: cfg.reelY,
     frameRect,
     bgUrl: project.assets?.bg || null,
-    frameUrl: project.assets?.frame || null
+    frameUrl: project.assets?.frame || null,
+    // "davanti" nel pannello Aztec: loghi/decori disegnati sopra i simboli, quindi va
+    // sopra anche qui (stesso rettangolo del documento, come lo sfondo).
+    overlayUrl: project.assets?.overlay || null
   };
 }
 
@@ -257,6 +260,11 @@ export default function ReelsPage() {
               🛠️ Apri il pannello Aztec
             </a>
           )}
+          {aztecGraphicsUrl(stageProject.id) && (
+            <a href={aztecGraphicsUrl(stageProject.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
+              🖼️ Apri Grafiche
+            </a>
+          )}
           {aztecPublicUrl(stageProject.slug) && (
             <a href={aztecPublicUrl(stageProject.slug)} target="_blank" rel="noreferrer" className="import-aztec-link">
               🔗 Apri l'anteprima cliente
@@ -340,6 +348,7 @@ export default function ReelsPage() {
                   />
                 </div>
               ))}
+            {stageGeo.overlayUrl && <img src={stageGeo.overlayUrl} alt="" className="reel-stage-overlay" />}
           </div>
 
           <div className="btn-row">

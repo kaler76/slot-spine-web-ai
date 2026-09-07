@@ -6,7 +6,8 @@ import {
   extractAztecSymbols,
   listAztecProjects,
   aztecAdminUrl,
-  aztecPublicUrl
+  aztecPublicUrl,
+  aztecGraphicsUrl
 } from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
 import { saveLastAztecProject } from "../lib/appSettingsRepository.js";
@@ -174,6 +175,11 @@ export default function ImportAztecPage() {
             {aztecAdminUrl(project.id) && (
               <a href={aztecAdminUrl(project.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
                 🛠️ Apri il pannello Aztec
+              </a>
+            )}
+            {aztecGraphicsUrl(project.id) && (
+              <a href={aztecGraphicsUrl(project.id)} target="_blank" rel="noreferrer" className="import-aztec-link">
+                🖼️ Apri Grafiche
               </a>
             )}
             {aztecPublicUrl(projectSlug) && (
