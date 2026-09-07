@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { getLastAztecProject } from "../lib/appSettingsRepository.js";
-import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl, aztecGraphicsUrl } from "../lib/aztecImport.js";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { getLastAztecProject, saveLastAztecProject } from "../lib/appSettingsRepository.js";
+import { extractAztecSymbols, aztecAdminUrl, aztecPublicUrl, aztecGraphicsUrl, fetchAztecProject } from "../lib/aztecImport.js";
 import { listSymbolsWithAnimations, createSymbol } from "../lib/symbolsRepository.js";
 import { listCharactersWithParts, createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 import { listBackgroundsWithLayers, createBackground, updateBackgroundCanvas, saveBackgroundLayer } from "../lib/backgroundsRepository.js";
@@ -35,6 +35,7 @@ function loadImageSize(blob) {
  */
 export default function ProjectPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [project, setProject] = useState(null);
@@ -47,7 +48,24 @@ export default function ProjectPage() {
     setLoading(true);
     setError(null);
     try {
-      const proj = await getLastAztecProject();
+      // Link diretto da un progetto Aztec (?k=slug, es. dal menu del pannello studio):
+      // attiva subito quel progetto, come fa la ricerca in "Importa da Aztec".
+      const slugParam = searchParams.get("k");
+      let proj;
+      if (slugParam) {
+        const raw = await fetchAztecProject(slugParam);
+        proj = { ...raw, slug: slugParam };
+        await saveLastAztecProject({
+          id: proj.id,
+          slug: slugParam,
+          name: proj.name,
+          client_name: proj.client_name,
+          cfg: proj.cfg,
+          assets: proj.assets
+        });
+      } else {
+        proj = await getLastAztecProject();
+      }
       setProject(proj);
       if (proj) {
         const [syms, chars, backgrounds] = await Promise.all([
@@ -64,7 +82,8 @@ export default function ProjectPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get("k")]);
 
   useEffect(() => {
     refresh();
