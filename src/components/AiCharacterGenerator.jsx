@@ -9,9 +9,25 @@ function base64ToBlob(base64, mimeType = "image/png") {
   return new Blob([arr], { type: mimeType });
 }
 
+/** Scarica un'immagine già caricata (es. quella importata da Aztec) e la converte in base64 pura (senza prefisso data:), come si aspetta l'API Gemini. */
+async function urlToBase64(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`immagine di riferimento non raggiungibile (HTTP ${res.status})`);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(new Error("lettura immagine di riferimento fallita"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
   const [artStyle, setArtStyle] = useState("flat vector game illustration, clean lineart, cel-shaded");
+  const hasExistingParts = existingParts && existingParts.length > 0;
+  const [useReference, setUseReference] = useState(hasExistingParts);
+  const [referenceKey, setReferenceKey] = useState(existingParts?.[0]?.part_key || "");
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null); // { passed, attempts, imageBase64, blob }
   const [status, setStatus] = useState("");
@@ -19,13 +35,24 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
   const [importingKey, setImportingKey] = useState(0);
 
   async function handleGenerate() {
-    if (!characterDescription.trim()) {
-      setStatus("⚠️ Descrivi il personaggio prima di generare.");
+    const withReference = useReference && hasExistingParts;
+    if (!withReference && !characterDescription.trim()) {
+      setStatus("⚠️ Descrivi il personaggio, oppure spunta \"parti da un'immagine già caricata\".");
       return;
     }
     setGenerating(true);
-    setStatus("⏳ Generazione della sprite sheet completa in corso (può richiedere fino a un minuto o due, contiene molti elementi)...");
+    setStatus(
+      withReference
+        ? "⏳ Ricostruzione della sprite sheet dall'immagine di riferimento in corso (può richiedere fino a un minuto o due, contiene molti elementi)..."
+        : "⏳ Generazione della sprite sheet completa in corso (può richiedere fino a un minuto o due, contiene molti elementi)..."
+    );
     try {
+      let referenceImagesBase64;
+      if (withReference) {
+        const part = existingParts.find((p) => p.part_key === referenceKey) || existingParts[0];
+        referenceImagesBase64 = [await urlToBase64(part.image_url)];
+      }
+
       const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
         method: "POST",
         headers: {
@@ -36,7 +63,8 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         body: JSON.stringify({
           characterDescription,
           artStyle,
-          group: "all"
+          group: "all",
+          referenceImagesBase64
         })
       });
 
@@ -86,8 +114,32 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
 
   return (
     <div className="ai-generator">
+      {hasExistingParts && (
+        <>
+          <label className="field-label field-label-inline">
+            <input type="checkbox" checked={useReference} onChange={(e) => setUseReference(e.target.checked)} />
+            Parti da un'immagine già caricata (invece di generare un personaggio nuovo da zero)
+          </label>
+          {useReference && (
+            <label className="field-label">
+              Immagine di riferimento
+              <select value={referenceKey} onChange={(e) => setReferenceKey(e.target.value)}>
+                {existingParts.map((p) => (
+                  <option key={p.part_key} value={p.part_key}>{p.part_key}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {useReference && (
+            <div className="hint" style={{ marginTop: 4 }}>
+              Gemini userà questa immagine come il personaggio esatto da riprodurre (stessi colori, costume, viso),
+              ricostruendola nei 22 pezzi separati e pronti per il rig invece di inventarne uno nuovo.
+            </div>
+          )}
+        </>
+      )}
       <label className="field-label">
-        Descrizione personaggio (in inglese, per risultati migliori)
+        Descrizione personaggio (in inglese, per risultati migliori){useReference && hasExistingParts ? " — opzionale con un'immagine di riferimento" : ""}
         <input
           type="text"
           value={characterDescription}
@@ -101,12 +153,20 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       </label>
 
       <div className="hint" style={{ marginTop: 8 }}>
-        Genera tutti e 19 gli elementi (viso, capelli, accessori, corpo, oggetti) in un'unica immagine, con ampi
-        margini di sicurezza tra ciascuno per evitare che si tocchino.
+        Genera tutti e 22 gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
+        ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le
+        spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con
+        mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo.
       </div>
 
       <button type="button" className="btn" onClick={handleGenerate} disabled={generating}>
-        {generating ? "⏳ Generazione..." : result ? "🔄 Rigenera sprite sheet completa" : "🎨 Genera sprite sheet completa"}
+        {generating
+          ? "⏳ Generazione..."
+          : result
+            ? "🔄 Rigenera sprite sheet"
+            : useReference && hasExistingParts
+              ? "🎨 Ricostruisci sprite sheet dall'immagine"
+              : "🎨 Genera sprite sheet completa"}
       </button>
 
       {status && <div className="status">{status}</div>}
