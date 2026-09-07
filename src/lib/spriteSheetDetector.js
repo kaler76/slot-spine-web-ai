@@ -17,6 +17,7 @@
 const MIN_COMPONENT_PIXELS = 200;
 const MIN_COMPONENT_AREA = 400;
 const DILATION_ITERATIONS = 2;
+const EROSION_ITERATIONS = 1;
 const ALPHA_THRESHOLD = 15;
 const LABEL_SATURATION_THRESHOLD = 0.12;
 
@@ -45,6 +46,38 @@ function dilateMask(mask, width, height, iterations) {
           }
         }
         next[idx] = found;
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Erosione: un pixel resta "dentro" solo se lui E tutti gli 8 vicini lo sono già.
+ * Serve a togliere il sottile bordino chiaro di anti-aliasing che resta attaccato
+ * al ritaglio quando lo sfondo non è vera trasparenza alpha ma un bianco pieno
+ * (la sfumatura verso il bianco a bordo forma altrimenti un contorno bianco/grigio
+ * visibile su ogni pezzo importato).
+ */
+function erodeMask(mask, width, height, iterations) {
+  let current = mask;
+  for (let it = 0; it < iterations; it++) {
+    const next = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * width + x;
+        if (!current[idx]) continue;
+        let allForeground = 1;
+        for (let dy = -1; dy <= 1 && allForeground; dy++) {
+          const ny = y + dy;
+          if (ny < 0 || ny >= height) { allForeground = 0; break; }
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx;
+            if (nx < 0 || nx >= width || !current[ny * width + nx]) { allForeground = 0; break; }
+          }
+        }
+        next[idx] = allForeground;
       }
     }
     current = next;
@@ -127,6 +160,9 @@ export function detectSpriteRegions({ width, height, rgba }) {
 
   const dilated = dilateMask(rawMask, width, height, DILATION_ITERATIONS);
   const { labels, count } = labelComponents(dilated, width, height);
+  // Solo per il ritaglio finale (non per bounding box/centro, che restano sui pixel
+  // reali): elimina il bordino di anti-aliasing chiaro rimasto attaccato al pezzo.
+  const erodedMask = erodeMask(rawMask, width, height, EROSION_ITERATIONS);
 
   // Bounding box + conteggio pixel REALI per ogni componente (sui pixel non dilatati)
   const stats = Array.from({ length: count + 1 }, () => ({
@@ -200,5 +236,5 @@ export function detectSpriteRegions({ width, height, rgba }) {
   }
 
   regions.sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  return { regions, labels, rawMask };
+  return { regions, labels, rawMask, erodedMask };
 }
