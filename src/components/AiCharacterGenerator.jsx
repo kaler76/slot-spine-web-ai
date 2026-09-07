@@ -101,8 +101,10 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       </label>
 
       <div className="hint" style={{ marginTop: 8 }}>
-        Genera tutti e 19 gli elementi (viso, capelli, accessori, corpo, oggetti) in un'unica immagine, con ampi
-        margini di sicurezza tra ciascuno per evitare che si tocchino.
+        Genera tutti e 22 gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
+        ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le
+        spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con
+        mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo.
       </div>
 
       <button type="button" className="btn" onClick={handleGenerate} disabled={generating}>
