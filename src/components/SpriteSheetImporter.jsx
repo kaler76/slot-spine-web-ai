@@ -36,7 +36,7 @@ function loadImage(source) {
  * (evita che elementi vicini o etichette "sanguinino" nel ritaglio), restituendo
  * un canvas con solo i pixel di quel componente, sfondo trasparente altrove.
  */
-function cropComponentToCanvas({ srcCanvas, region, labels, rawMask, width, pad = 4 }) {
+function cropComponentToCanvas({ srcCanvas, region, labels, erodedMask, width, pad = 4 }) {
   const cx0 = Math.max(0, region.x - pad);
   const cy0 = Math.max(0, region.y - pad);
   const cx1 = Math.min(srcCanvas.width, region.x + region.w + pad);
@@ -53,7 +53,7 @@ function cropComponentToCanvas({ srcCanvas, region, labels, rawMask, width, pad 
       const globalX = cx0 + xx;
       const globalY = cy0 + yy;
       const globalIdx = globalY * width + globalX;
-      const belongs = rawMask[globalIdx] && labels[globalIdx] === region.label;
+      const belongs = erodedMask[globalIdx] && labels[globalIdx] === region.label;
       const srcIdx = (yy * cw + xx) * 4;
       if (belongs) {
         out.data[srcIdx] = srcData.data[srcIdx];
@@ -85,7 +85,7 @@ export async function processSpriteSheetBlob(blob) {
   ctx.drawImage(img, 0, 0);
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-  const { regions, labels, rawMask } = detectSpriteRegions({
+  const { regions, labels, erodedMask } = detectSpriteRegions({
     width: canvas.width,
     height: canvas.height,
     rgba: imageData.data
@@ -94,7 +94,7 @@ export async function processSpriteSheetBlob(blob) {
   const artRegions = regions.filter((r) => !r.isProbablyLabel);
 
   const parts = artRegions.map((region, idx) => {
-    const cropped = cropComponentToCanvas({ srcCanvas: canvas, region, labels, rawMask, width: canvas.width });
+    const cropped = cropComponentToCanvas({ srcCanvas: canvas, region, labels, erodedMask, width: canvas.width });
     return {
       id: `detected_${Date.now()}_${idx}`,
       canvas: cropped,
