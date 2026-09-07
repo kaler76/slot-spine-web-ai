@@ -81,6 +81,54 @@ function rotatedCorners({ x, y, angleDeg, width, height, fracX, fracY }) {
   return corners;
 }
 
+const SEGMENT_KEY_SEP = "__seg";
+
+/**
+ * Fase 3 (semplificata): una parte con animazione "Fisica" e più di 1
+ * segmento viene sostituita da una CATENA di N sotto-bone sintetici (mai
+ * salvati su DB, solo per il rendering e l'animazione): ognuno mostra 1/N
+ * dell'immagine originale (una fascia orizzontale) ed è agganciato
+ * fisicamente al segmento precedente della stessa catena, così il movimento
+ * si propaga a cascata e il pezzo si PIEGA lungo la sua lunghezza invece di
+ * ruotare come un blocco rigido unico — l'equivalente "leggero" di una mesh
+ * con pesi, senza bisogno di un editor di vertici dedicato. Il primo segmento
+ * mantiene la chiave/il genitore/la rotazione di riposo originali; dal
+ * secondo in poi l'ancoraggio verticale è sempre "alto" (il segmento pende
+ * dalla base di quello sopra) e la rotazione di riposo è 0 (a riposo la
+ * catena resta dritta, ricostruendo l'immagine originale non deformata).
+ */
+function expandSegmentedParts(partsMap) {
+  const expanded = {};
+  const resolveParent = (pk) => (pk && pk !== "root" && partsMap[pk] ? pk : "root");
+
+  for (const [key, p] of Object.entries(partsMap)) {
+    const segments = Math.max(1, Math.round(p.segments) || 1);
+    if (segments <= 1 || p.animationType !== "physics") {
+      expanded[key] = { ...p, parentKey: resolveParent(p.parentKey), sliced: false };
+      continue;
+    }
+    const bandHeight = p.height / segments;
+    const segKeys = Array.from({ length: segments }, (_, i) => (i === 0 ? key : `${key}${SEGMENT_KEY_SEP}${i + 1}`));
+    for (let i = 0; i < segments; i++) {
+      expanded[segKeys[i]] = {
+        ...p,
+        parentKey: i === 0 ? resolveParent(p.parentKey) : segKeys[i - 1],
+        rotation: i === 0 ? p.rotation || 0 : 0,
+        offsetX: i === 0 ? p.offsetX : 0,
+        offsetY: i === 0 ? p.offsetY : -bandHeight,
+        anchorY: "top",
+        width: p.width,
+        height: bandHeight,
+        fullHeight: p.height,
+        cropTop: i * bandHeight,
+        sliced: true,
+        segments: 1
+      };
+    }
+  }
+  return expanded;
+}
+
 export default function CharacterPage() {
   const { id } = useParams();
   const [character, setCharacter] = useState(null);
@@ -99,6 +147,7 @@ export default function CharacterPage() {
   const [offsetY, setOffsetY] = useState(0);
   const [zIndex, setZIndex] = useState(0);
   const [rotation, setRotation] = useState(0);
+  const [segments, setSegments] = useState(1);
   const [animationType, setAnimationType] = useState("static");
   const [anchorX, setAnchorX] = useState("center");
   const [anchorY, setAnchorY] = useState("center");
@@ -150,6 +199,7 @@ export default function CharacterPage() {
     setOffsetY(0);
     setZIndex((character?.parts.length || 0) * 10);
     setRotation(0);
+    setSegments(1);
     setAnimationType("static");
     setPartSpeed(1);
     setAnchorX("center");
@@ -235,6 +285,7 @@ export default function CharacterPage() {
         offsetY: Number(offsetY),
         zIndex: Number(zIndex) || 0,
         rotation: Number(rotation) || 0,
+        segments: Number(segments) || 1,
         animationType,
         speed: Number(partSpeed) || 1,
         anchorX,
@@ -270,6 +321,7 @@ export default function CharacterPage() {
       offsetY: p.offset_y,
       zIndex: p.z_index ?? 0,
       rotation: p.rotation ?? 0,
+      segments: p.segments ?? 1,
       parentKey: p.parent_key || "root",
       animationType: p.animation_type || "static",
       speed: p.speed ?? 1,
@@ -293,6 +345,7 @@ export default function CharacterPage() {
         offsetY: Number(editValues.offsetY),
         zIndex: Number(editValues.zIndex),
         rotation: Number(editValues.rotation) || 0,
+        segments: Number(editValues.segments) || 1,
         parentKey: editValues.parentKey,
         animationType: editValues.animationType,
         speed: Number(editValues.speed) || 1,
@@ -323,6 +376,7 @@ export default function CharacterPage() {
             offsetY: Number(editValues.offsetY) || 0,
             zIndex: Number(editValues.zIndex) || 0,
             rotation: Number(editValues.rotation) || 0,
+            segments: Number(editValues.segments) || 1,
             parentKey: editValues.parentKey || "root",
             animationType: editValues.animationType || "static",
             speed: Number(editValues.speed) || 1,
@@ -337,6 +391,7 @@ export default function CharacterPage() {
             offsetY: p.offset_y,
             zIndex: p.z_index ?? 0,
             rotation: p.rotation ?? 0,
+            segments: p.segments ?? 1,
             parentKey: p.parent_key || "root",
             animationType: p.animation_type || "static",
             speed: p.speed ?? 1,
@@ -354,6 +409,7 @@ export default function CharacterPage() {
         offsetY: Number(offsetY),
         zIndex: Number(zIndex) || 0,
         rotation: Number(rotation) || 0,
+        segments: Number(segments) || 1,
         parentKey,
         animationType,
         speed: Number(partSpeed) || 1,
@@ -373,6 +429,7 @@ export default function CharacterPage() {
     offsetY,
     zIndex,
     rotation,
+    segments,
     parentKey,
     animationType,
     partSpeed,
@@ -389,6 +446,20 @@ export default function CharacterPage() {
   );
   const hasAnyPart = orderedPartKeys.length > 0;
 
+  // Parti con animazione "Fisica" e più di 1 segmento vengono sostituite da una
+  // catena di sotto-bone sintetici (vedi expandSegmentedParts) — bounding box,
+  // loop di animazione e albero di rendering lavorano tutti su questa mappa
+  // "espansa", non su previewPartsMap direttamente (l'export dello skeleton
+  // resta invece sulle parti reali, la fisica non è ancora esportabile).
+  const expandedPartsMap = useMemo(
+    () => expandSegmentedParts(previewPartsMap),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [previewPartsMap, orderedPartKeys.join(",")]
+  );
+  const expandedOrderedKeys = Object.keys(expandedPartsMap).sort(
+    (a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex
+  );
+
   // Bounding box reale calcolato dalle posizioni assolute effettive di tutte le
   // parti (non dalla dimensione della singola parte più grande), così anche
   // offset molto ampi o immagini a piena risoluzione (es. 1024×1024) rientrano
@@ -396,9 +467,9 @@ export default function CharacterPage() {
   const stageLayout = useMemo(() => {
     if (!hasAnyPart) return { stageScale: 1, stageCenterX: 0, stageCenterY: 0, boundsW: 100, boundsH: 100 };
     let minX = 0, maxX = 0, minY = 0, maxY = 0;
-    for (const key of orderedPartKeys) {
-      const p = previewPartsMap[key];
-      const abs = resolveAbsoluteTransform(key, previewPartsMap);
+    for (const key of expandedOrderedKeys) {
+      const p = expandedPartsMap[key];
+      const abs = resolveAbsoluteTransform(key, expandedPartsMap);
       const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
       const corners = rotatedCorners({ ...abs, width: p.width, height: p.height, fracX, fracY });
       for (const c of corners) {
@@ -415,7 +486,7 @@ export default function CharacterPage() {
     const stageScale = Math.min(STAGE_BOX_W / boundsW, STAGE_BOX_H / boundsH, 1);
     return { stageScale, stageCenterX: -minX, stageCenterY: maxY, boundsW, boundsH };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnyPart, previewPartsMap, orderedPartKeys.join(",")]);
+  }, [hasAnyPart, expandedPartsMap, expandedOrderedKeys.join(",")]);
 
   const skeletonData = useMemo(() => {
     if (!hasAnyPart) return null;
@@ -425,16 +496,16 @@ export default function CharacterPage() {
   }, [hasAnyPart, previewPartsMap, orderedPartKeys.join(",")]);
 
   const partRefsMap = useRef({});
-  for (const key of orderedPartKeys) {
+  for (const key of expandedOrderedKeys) {
     if (!partRefsMap.current[key]) partRefsMap.current[key] = { current: null };
   }
 
-  const animationParts = orderedPartKeys.map((k) => ({
+  const animationParts = expandedOrderedKeys.map((k) => ({
     key: k,
-    parentKey: effectiveParentOf(k),
-    rotation: previewPartsMap[k].rotation || 0,
-    animationType: previewPartsMap[k].animationType,
-    speed: previewPartsMap[k].speed
+    parentKey: expandedPartsMap[k].parentKey,
+    rotation: expandedPartsMap[k].rotation || 0,
+    animationType: expandedPartsMap[k].animationType,
+    speed: expandedPartsMap[k].speed
   }));
 
   const { duration: previewDuration } = useCharacterAnimationLoop({
@@ -493,26 +564,27 @@ export default function CharacterPage() {
   const parentOptions = ["root", ...character.parts.map((p) => p.part_key)];
   const { stageScale, stageCenterX, stageCenterY, boundsW, boundsH } = stageLayout;
 
-  // Risolve il genitore "effettivo" di una parte: se il genitore dichiarato non
-  // esiste più tra le parti presenti, si comporta come se fosse alla radice.
+  // Genitore "effettivo" di una parte nella mappa espansa (già completamente
+  // risolto da expandSegmentedParts: sempre "root" o una chiave esistente).
   function effectiveParentOf(key) {
-    const pk = previewPartsMap[key]?.parentKey;
-    return pk && pk !== "root" && previewPartsMap[pk] ? pk : "root";
+    return expandedPartsMap[key]?.parentKey || "root";
   }
 
-  const rootPartKeys = orderedPartKeys.filter((k) => effectiveParentOf(k) === "root");
+  const rootPartKeys = expandedOrderedKeys.filter((k) => effectiveParentOf(k) === "root");
   const editingPartKeyForDrag = character.parts.find((p) => p.id === editingPartId)?.part_key || null;
 
   /**
-   * Renderizza una parte E, annidate al suo interno, tutte le sue parti figlie:
-   * così il transform (rotazione/scala) animato sul contenitore della parte si
-   * trasmette automaticamente ai figli tramite la normale composizione CSS,
-   * esattamente come la gerarchia dei bone in Spine (es. gli occhi seguono
-   * il movimento della testa, oltre alla propria animazione di lampeggio).
+   * Renderizza una parte E, annidate al suo interno, tutte le sue parti figlie
+   * (o segmenti sintetici, per le parti con "Fisica" a più segmenti — vedi
+   * expandSegmentedParts): così il transform (rotazione/scala) animato sul
+   * contenitore della parte si trasmette automaticamente ai figli tramite la
+   * normale composizione CSS, esattamente come la gerarchia dei bone in Spine.
    */
   function renderPartTree(key, isRoot) {
-    const p = previewPartsMap[key];
+    const p = expandedPartsMap[key];
     if (!p) return null;
+    // Per un segmento di catena l'ancoraggio verticale è sempre "alto" (pende
+    // dal segmento sopra), imposto già da expandSegmentedParts sul valore di p.
     const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
 
     // Per le parti alla radice la posizione è calcolata rispetto al centro dello
@@ -526,9 +598,9 @@ export default function CharacterPage() {
     const isDraggable = isNewPartDraggable || isEditingPartDraggable;
     const dragMode = isEditingPartDraggable ? "editing" : "new";
 
-    const childKeys = orderedPartKeys
+    const childKeys = expandedOrderedKeys
       .filter((k) => k !== key && effectiveParentOf(k) === key)
-      .sort((a, b) => previewPartsMap[a].zIndex - previewPartsMap[b].zIndex);
+      .sort((a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex);
 
     return (
       <div
@@ -544,21 +616,36 @@ export default function CharacterPage() {
           transform: p.rotation ? `rotate(${-p.rotation}deg)` : undefined
         }}
       >
-        <img
-          src={p.url}
-          alt={key}
-          className={`character-part-img ${isDraggable ? "character-part-draggable" : ""}`}
-          style={{
-            position: "absolute",
-            left: -p.width * fracX,
-            top: -p.height * fracY,
-            width: p.width,
-            height: p.height,
-            transformOrigin: `${fracX * 100}% ${fracY * 100}%`
-          }}
-          onMouseDown={isDraggable ? (e) => handlePartDragStart(e, dragMode) : undefined}
-          draggable={false}
-        />
+        {p.sliced ? (
+          <div
+            style={{ position: "absolute", left: -p.width * fracX, top: -p.height * fracY, width: p.width, height: p.height, overflow: "hidden" }}
+          >
+            <img
+              src={p.url}
+              alt={key}
+              className={`character-part-img ${isDraggable ? "character-part-draggable" : ""}`}
+              style={{ position: "absolute", left: 0, top: -p.cropTop, width: p.width, height: p.fullHeight }}
+              onMouseDown={isDraggable ? (e) => handlePartDragStart(e, dragMode) : undefined}
+              draggable={false}
+            />
+          </div>
+        ) : (
+          <img
+            src={p.url}
+            alt={key}
+            className={`character-part-img ${isDraggable ? "character-part-draggable" : ""}`}
+            style={{
+              position: "absolute",
+              left: -p.width * fracX,
+              top: -p.height * fracY,
+              width: p.width,
+              height: p.height,
+              transformOrigin: `${fracX * 100}% ${fracY * 100}%`
+            }}
+            onMouseDown={isDraggable ? (e) => handlePartDragStart(e, dragMode) : undefined}
+            draggable={false}
+          />
+        )}
         {childKeys.map((childKey) => renderPartTree(childKey, false))}
       </div>
     );
@@ -588,6 +675,7 @@ export default function CharacterPage() {
               <span>Rotazione</span>
               <span>Ancoraggio</span>
               <span>Animazione</span>
+              <span>Segm.</span>
               <span></span>
             </div>
             {[...character.parts].sort((a, b) => a.z_index - b.z_index).map((p) => {
@@ -639,6 +727,14 @@ export default function CharacterPage() {
                         <option key={t} value={t}>{ANIM_LABELS[t]}</option>
                       ))}
                     </select>
+                    <input
+                      type="number"
+                      min="1"
+                      max="8"
+                      value={editValues.segments}
+                      title="Segmenti (solo con animazione Fisica): divide il pezzo in N fasce che si piegano a cascata"
+                      onChange={(e) => setEditValues((v) => ({ ...v, segments: e.target.value }))}
+                    />
                     <span className="tech-edit-actions">
                       <button type="button" className="btn tiny" disabled={savingEdit} onClick={() => saveEditingPart(p.id, p.part_key)}>✓</button>
                       <button type="button" className="btn secondary tiny" onClick={cancelEditingPart}>✕</button>
@@ -664,6 +760,7 @@ export default function CharacterPage() {
                     {{ top: "⬆️", center: "◯", bottom: "⬇️" }[p.anchor_y || "center"]}
                   </span>
                   <span>{ANIM_LABELS[p.animation_type]}</span>
+                  <span>{p.segments && p.segments > 1 ? `${p.segments}×` : "—"}</span>
                   <span className="tech-edit-hint">✏️</span>
                 </div>
               );
@@ -778,14 +875,27 @@ export default function CharacterPage() {
             </label>
           </div>
           {animationType === "physics" && (
-            <div className="hint" style={{ color: "#9fc4ff" }}>
-              🔗 Un pezzo con "Fisica" reagisce con inerzia e ritardo al movimento del suo genitore (invece di seguirlo
-              rigidamente o oscillare a formula fissa) — se il genitore è fermo (statico), anche questo pezzo resterà
-              fermo alla sua posa di riposo: aggancialo a un genitore che si muove (es. il busto con "Oscillazione") per
-              vederne l'effetto. "Velocità" qui controlla quanto è rigida/reattiva la molla (1 = normale, più alto =
-              più rigido e scattante, più basso = più morbido e "flottante"). Nota: per ora è solo un'anteprima live,
-              non ancora inclusa nel pacchetto Spine esportato.
-            </div>
+            <>
+              <div className="hint" style={{ color: "#9fc4ff" }}>
+                🔗 Un pezzo con "Fisica" reagisce con inerzia e ritardo al movimento del suo genitore (invece di seguirlo
+                rigidamente o oscillare a formula fissa) — se il genitore è fermo (statico), anche questo pezzo resterà
+                fermo alla sua posa di riposo: aggancialo a un genitore che si muove (es. il busto con "Oscillazione") per
+                vederne l'effetto. "Velocità" qui controlla quanto è rigida/reattiva la molla (1 = normale, più alto =
+                più rigido e scattante, più basso = più morbido e "flottante"). Nota: per ora è solo un'anteprima live,
+                non ancora inclusa nel pacchetto Spine esportato.
+              </div>
+              <label className="field-label" title="Divide l'immagine in N fasce che si piegano a cascata invece di ruotare come un blocco unico — utile per capelli lunghi o tessuti che pendono">
+                Segmenti (1 = pezzo rigido, più segmenti = si piega come una catena)
+                <input type="number" min="1" max="8" value={segments} onChange={(e) => setSegments(e.target.value)} />
+              </label>
+              {Number(segments) > 1 && (
+                <div className="hint">
+                  ✂️ L'immagine verrà divisa in {Number(segments)} fasce orizzontali uguali, ognuna agganciata
+                  fisicamente alla precedente: il pezzo si piegherà lungo la sua lunghezza invece di ruotare tutto
+                  insieme. L'ancoraggio verticale per questo pezzo diventa sempre "Alto" (pende dall'alto).
+                </div>
+              )}
+            </>
           )}
           <div className="row">
             <label className="field-label">
