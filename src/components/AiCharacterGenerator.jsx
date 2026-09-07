@@ -24,7 +24,6 @@ async function urlToBase64(url) {
 
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
-  const [artStyle, setArtStyle] = useState("flat vector game illustration, clean lineart, cel-shaded");
   const hasExistingParts = existingParts && existingParts.length > 0;
   const [useReference, setUseReference] = useState(hasExistingParts);
   const [referenceKey, setReferenceKey] = useState(existingParts?.[0]?.part_key || "");
@@ -33,11 +32,51 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
   const [status, setStatus] = useState("");
   const [importingBlob, setImportingBlob] = useState(null);
   const [importingKey, setImportingKey] = useState(0);
+  const [promptText, setPromptText] = useState("");
+  const [loadingPrompt, setLoadingPrompt] = useState(false);
 
-  async function handleGenerate() {
+  async function resolveReferenceImagesBase64() {
+    const withReference = useReference && hasExistingParts;
+    if (!withReference) return undefined;
+    const part = existingParts.find((p) => p.part_key === referenceKey) || existingParts[0];
+    return [await urlToBase64(part.image_url)];
+  }
+
+  /** Chiede alla funzione edge il prompt esatto che userebbe (con l'analisi del riferimento, se presente), senza generare alcuna immagine: l'utente può poi modificarlo liberamente prima di generare. */
+  async function handleShowPrompt() {
     const withReference = useReference && hasExistingParts;
     if (!withReference && !characterDescription.trim()) {
       setStatus("⚠️ Descrivi il personaggio, oppure spunta \"parti da un'immagine già caricata\".");
+      return;
+    }
+    setLoadingPrompt(true);
+    setStatus(withReference ? "⏳ Analisi del riferimento e costruzione del prompt in corso..." : "⏳ Costruzione del prompt in corso...");
+    try {
+      const referenceImagesBase64 = await resolveReferenceImagesBase64();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          apikey: SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({ characterDescription, group: "all", referenceImagesBase64, previewOnly: true })
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) throw new Error(data?.error || `Errore HTTP ${res.status}`);
+      setPromptText(data.prompt);
+      setStatus("✅ Prompt pronto qui sotto: modificalo pure prima di generare, se vuoi.");
+    } catch (err) {
+      setStatus(`❌ Errore nel costruire il prompt: ${err.message}`);
+    } finally {
+      setLoadingPrompt(false);
+    }
+  }
+
+  async function handleGenerate() {
+    const withReference = useReference && hasExistingParts;
+    if (!withReference && !characterDescription.trim() && !promptText.trim()) {
+      setStatus("⚠️ Descrivi il personaggio, spunta \"parti da un'immagine già caricata\", oppure scrivi un prompt personalizzato.");
       return;
     }
     setGenerating(true);
@@ -47,11 +86,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         : "⏳ Generazione della sprite sheet completa in corso (può richiedere fino a un minuto o due, contiene molti elementi)..."
     );
     try {
-      let referenceImagesBase64;
-      if (withReference) {
-        const part = existingParts.find((p) => p.part_key === referenceKey) || existingParts[0];
-        referenceImagesBase64 = [await urlToBase64(part.image_url)];
-      }
+      const referenceImagesBase64 = await resolveReferenceImagesBase64();
 
       const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
         method: "POST",
@@ -62,9 +97,9 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         },
         body: JSON.stringify({
           characterDescription,
-          artStyle,
           group: "all",
-          referenceImagesBase64
+          referenceImagesBase64,
+          promptOverride: promptText.trim() || undefined
         })
       });
 
@@ -132,8 +167,9 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           )}
           {useReference && (
             <div className="hint" style={{ marginTop: 4 }}>
-              Gemini userà questa immagine come il personaggio esatto da riprodurre (stessi colori, costume, viso),
-              ricostruendola nei 22 pezzi separati e pronti per il rig invece di inventarne uno nuovo.
+              Gemini userà questa immagine come il personaggio esatto da riprodurre (stessi colori, costume, viso e
+              stile artistico), ricostruendola nei pezzi separati e pronti per il rig invece di inventarne uno
+              nuovo o di ridisegnarlo in uno stile diverso.
             </div>
           )}
         </>
@@ -147,17 +183,28 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           placeholder="e.g. elegant Chinese empress in red and gold traditional dress"
         />
       </label>
-      <label className="field-label">
-        Stile artistico
-        <input type="text" value={artStyle} onChange={(e) => setArtStyle(e.target.value)} />
-      </label>
-
       <div className="hint" style={{ marginTop: 8 }}>
-        Genera tutti e 22 gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
+        Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
         ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le
         spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con
         mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo.
       </div>
+
+      <button type="button" className="btn secondary" onClick={handleShowPrompt} disabled={loadingPrompt || generating}>
+        {loadingPrompt ? "⏳ Costruzione prompt..." : "👁️ Mostra il prompt (e modificalo se vuoi)"}
+      </button>
+
+      {promptText && (
+        <label className="field-label">
+          Prompt per Gemini (modificabile — verrà usato così com'è al posto di quello generato automaticamente)
+          <textarea
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+            rows={12}
+            style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+          />
+        </label>
+      )}
 
       <button type="button" className="btn" onClick={handleGenerate} disabled={generating}>
         {generating
