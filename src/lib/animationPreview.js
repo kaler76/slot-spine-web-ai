@@ -54,8 +54,12 @@ export function totalDuration(boneTrack) {
 /**
  * Calcola lo stile CSS (transform + filter) da applicare all'immagine del simbolo
  * per il frame corrente, dato l'oggetto "animations.<tipo>" prodotto dal generatore.
+ * `restRotationDeg` è la rotazione di riposo del bone (posa base, stessa convenzione
+ * Spine — antioraria positiva — dei keyframe `rotate`): si somma all'angolo animato
+ * prima di convertirlo in CSS, così l'animazione oscilla attorno alla posa base
+ * invece di sovrascriverla.
  */
-export function computeFrameStyle(animationEntry, boneName, slotName, elapsedSeconds) {
+export function computeFrameStyle(animationEntry, boneName, slotName, elapsedSeconds, restRotationDeg = 0) {
   const boneTrack = animationEntry?.bones?.[boneName] || {};
   const slotTrack = animationEntry?.slots?.[slotName] || {};
 
@@ -63,7 +67,8 @@ export function computeFrameStyle(animationEntry, boneName, slotName, elapsedSec
   const translate = sampleTrack(boneTrack.translate, elapsedSeconds, ["x", "y"], { x: 0, y: 0 });
   const rotate = sampleTrack(boneTrack.rotate, elapsedSeconds, ["angle"], { angle: 0 });
 
-  const transform = `translate(${translate.x}px, ${-translate.y}px) rotate(${-rotate.angle}deg) scale(${scale.x}, ${scale.y})`;
+  const totalAngle = rotate.angle + restRotationDeg;
+  const transform = `translate(${translate.x}px, ${-translate.y}px) rotate(${-totalAngle}deg) scale(${scale.x}, ${scale.y})`;
 
   const colorHex = sampleColor(slotTrack.rgba, elapsedSeconds);
   let filter = "";
