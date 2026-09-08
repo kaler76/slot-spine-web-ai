@@ -23,6 +23,18 @@ async function urlToBase64(url) {
 }
 
 const MAX_ATTEMPTS = 4;
+const RETRY_DELAY_MS = 4000;
+
+/** Errori transitori lato Gemini (sovraccarico momentaneo, rate limit) per cui ha senso riprovare automaticamente — a differenza di un tetto di spesa superato o di un errore di validazione, che non si risolvono riprovando. */
+function isRetryableApiError(message) {
+  const m = String(message || "").toLowerCase();
+  if (m.includes("spending cap") || m.includes("resource_exhausted")) return false;
+  return m.includes("503") || m.includes("unavailable") || m.includes("high demand") || m.includes("429") || m.includes("overload");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
@@ -130,13 +142,31 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
             withReference ? "ricostruzione dall'immagine di riferimento" : "generazione della sprite sheet"
           } in corso...`
         );
-        const data = await generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
+        let data;
+        try {
+          data = await generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
+        } catch (err) {
+          // Un sovraccarico momentaneo di Gemini (503/429 transitorio) merita un altro
+          // tentativo automatico invece di arrendersi subito — a differenza di un errore
+          // definitivo (es. tetto di spesa superato), che non si risolve riprovando.
+          if (isRetryableApiError(err.message) && attempt < MAX_ATTEMPTS) {
+            attempts.push({ attempt, pass: false, issues: [`${err.message} — nuovo tentativo automatico tra qualche secondo...`] });
+            setStatus(`⏳ Gemini temporaneamente sovraccarico, nuovo tentativo tra ${RETRY_DELAY_MS / 1000}s...`);
+            await sleep(RETRY_DELAY_MS);
+            continue;
+          }
+          throw err;
+        }
         lastData = data;
         referenceAnalysis = data.referenceAnalysis;
         referenceAnalysisError = data.referenceAnalysisError;
         correction = data.correction;
         attempts.push({ attempt, pass: data.passed, issues: data.issues || [] });
         if (data.passed) break;
+      }
+
+      if (!lastData) {
+        throw new Error("Gemini è rimasto sovraccarico per tutti i tentativi disponibili — riprova tra qualche minuto.");
       }
 
       const blob = base64ToBlob(lastData.imageBase64);
