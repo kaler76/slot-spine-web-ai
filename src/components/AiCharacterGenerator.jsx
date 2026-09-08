@@ -22,6 +22,8 @@ async function urlToBase64(url) {
   });
 }
 
+const MAX_ATTEMPTS = 4;
+
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
   const hasExistingParts = existingParts && existingParts.length > 0;
@@ -73,6 +75,39 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
     }
   }
 
+  /** Una singola chiamata (breve) alla funzione edge: genera un tentativo, passando indietro lo stato del tentativo precedente per evitare di ripetere l'analisi del riferimento e restare così sotto il timeout della piattaforma (vedi commento in cima all'edge function). */
+  async function generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError }) {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        apikey: SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify({
+        characterDescription,
+        group: "all",
+        referenceImagesBase64,
+        promptOverride: promptText.trim() || undefined,
+        correction,
+        referenceAnalysis,
+        referenceAnalysisError
+      })
+    });
+
+    const rawText = await res.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      throw new Error(`Risposta non valida (status ${res.status}): ${rawText.slice(0, 500)}`);
+    }
+    if (!res.ok || data?.error) {
+      throw new Error(data?.error || `Errore HTTP ${res.status}`);
+    }
+    return data;
+  }
+
   async function handleGenerate() {
     const withReference = useReference && hasExistingParts;
     if (!withReference && !characterDescription.trim() && !promptText.trim()) {
@@ -80,47 +115,36 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       return;
     }
     setGenerating(true);
-    setStatus(
-      withReference
-        ? "⏳ Ricostruzione della sprite sheet dall'immagine di riferimento in corso (può richiedere fino a un minuto o due, contiene molti elementi)..."
-        : "⏳ Generazione della sprite sheet completa in corso (può richiedere fino a un minuto o due, contiene molti elementi)..."
-    );
     try {
       const referenceImagesBase64 = await resolveReferenceImagesBase64();
 
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
-          apikey: SUPABASE_ANON_KEY
-        },
-        body: JSON.stringify({
-          characterDescription,
-          group: "all",
-          referenceImagesBase64,
-          promptOverride: promptText.trim() || undefined
-        })
-      });
+      const attempts = [];
+      let correction;
+      let referenceAnalysis;
+      let referenceAnalysisError;
+      let lastData = null;
 
-      const rawText = await res.text();
-      let data;
-      try {
-        data = JSON.parse(rawText);
-      } catch {
-        throw new Error(`Risposta non valida (status ${res.status}): ${rawText.slice(0, 500)}`);
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        setStatus(
+          `⏳ Tentativo ${attempt}/${MAX_ATTEMPTS}: ${
+            withReference ? "ricostruzione dall'immagine di riferimento" : "generazione della sprite sheet"
+          } in corso...`
+        );
+        const data = await generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
+        lastData = data;
+        referenceAnalysis = data.referenceAnalysis;
+        referenceAnalysisError = data.referenceAnalysisError;
+        correction = data.correction;
+        attempts.push({ attempt, pass: data.passed, issues: data.issues || [] });
+        if (data.passed) break;
       }
 
-      if (!res.ok || data?.error) {
-        throw new Error(data?.error || `Errore HTTP ${res.status}`);
-      }
-
-      const blob = base64ToBlob(data.imageBase64);
-      setResult({ passed: data.passed, attempts: data.attempts, imageBase64: data.imageBase64, blob });
+      const blob = base64ToBlob(lastData.imageBase64);
+      setResult({ passed: lastData.passed, attempts, imageBase64: lastData.imageBase64, blob });
       setStatus(
-        data.passed
-          ? `✅ Sprite sheet generata e passato il controllo qualità in ${data.totalAttempts} tentativo/i.`
-          : `⚠️ Non ha superato del tutto il controllo qualità dopo ${data.totalAttempts} tentativi. L'immagine è comunque disponibile qui sotto: puoi scaricarla per controllarla, provare comunque a importarla, o rigenerare.`
+        lastData.passed
+          ? `✅ Sprite sheet generata e passato il controllo qualità in ${attempts.length} tentativo/i.`
+          : `⚠️ Non ha superato del tutto il controllo qualità dopo ${attempts.length} tentativi. L'immagine è comunque disponibile qui sotto: puoi scaricarla per controllarla, provare comunque a importarla, o rigenerare.`
       );
     } catch (err) {
       setStatus(`❌ Errore generazione: ${err.message}`);
