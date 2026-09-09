@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import CropTool from "../components/CropTool.jsx";
 import SpriteSheetImporter from "../components/SpriteSheetImporter.jsx";
 import AiCharacterGenerator from "../components/AiCharacterGenerator.jsx";
+import CharacterRotationEditor from "../components/CharacterRotationEditor.jsx";
 import { useCharacterAnimationLoop } from "../hooks/useCharacterAnimationLoop.js";
 import { buildCharacterSkeleton, anchorToFraction } from "../lib/characterSkeleton.js";
 import { buildMultiPartAtlas } from "../lib/atlasBuilder.js";
@@ -659,7 +660,8 @@ export default function CharacterPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page character-page-layout">
+      <div className="character-main">
       <Link to="/characters" className="back-link">← Tutti i character</Link>
       <h1>🧙 {character.name}</h1>
 
@@ -803,11 +805,63 @@ export default function CharacterPage() {
         ))}
       </div>
 
+      {hasAnyPart && (
+        <>
+          <h2 className="section-title">Anteprima composita (loop ambientale)</h2>
+          <div className="hint">
+            Le parti annidate (es. occhi/bocca/capelli con genitore "testa") seguono visivamente il movimento del
+            genitore, oltre alla propria animazione — come nel vero Spine.
+          </div>
+          <div
+            className="character-stage-outer"
+            style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
+          >
+            <div
+              className="character-stage-inner"
+              style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
+            >
+              {rootPartKeys.map((key) => renderPartTree(key, true))}
+            </div>
+          </div>
+          {workingBlob && (
+            <div className="hint">
+              Trascina la nuova parte direttamente nel riquadro per posizionarla — i campi Offset X/Y si aggiornano da soli.
+            </div>
+          )}
+
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={() => setPlaying((p) => !p)}>
+              {playing ? `⏸ Pausa (${previewDuration.toFixed(2)}s)` : "▶ Anteprima loop ambientale"}
+            </button>
+            <button type="button" className="btn" onClick={handleGenerateExport} disabled={savingExport}>
+              ⚙️ Genera export
+            </button>
+          </div>
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={handleDownload}>
+              ⬇ Scarica pacchetto
+            </button>
+          </div>
+        </>
+      )}
+
+      {status && <div className="status">{status}</div>}
+      </div>
+
+      <div className="character-sidebar">
       <h2 className="section-title">🎨 Genera con AI (Gemini)</h2>
       <AiCharacterGenerator characterId={character.id} existingParts={character.parts} onImported={refresh} />
 
       <h2 className="section-title">📥 Importa da sprite sheet (manuale)</h2>
       <SpriteSheetImporter characterId={character.id} existingParts={character.parts} onImported={refresh} />
+
+      <h2 className="section-title">🌀 Rotazione (frame intermedi)</h2>
+      <CharacterRotationEditor
+        characterId={character.id}
+        rotationFrames={character.rotationFrames || []}
+        rotationSpeed={character.rotation_speed}
+        onChanged={refresh}
+      />
 
       <h2 className="section-title">➕ Aggiungi parte (una alla volta)</h2>
 
@@ -945,48 +999,7 @@ export default function CharacterPage() {
           </button>
         </>
       )}
-
-      {hasAnyPart && (
-        <>
-          <h2 className="section-title">Anteprima composita (loop ambientale)</h2>
-          <div className="hint">
-            Le parti annidate (es. occhi/bocca/capelli con genitore "testa") seguono visivamente il movimento del
-            genitore, oltre alla propria animazione — come nel vero Spine.
-          </div>
-          <div
-            className="character-stage-outer"
-            style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
-          >
-            <div
-              className="character-stage-inner"
-              style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
-            >
-              {rootPartKeys.map((key) => renderPartTree(key, true))}
-            </div>
-          </div>
-          {workingBlob && (
-            <div className="hint">
-              Trascina la nuova parte direttamente nel riquadro per posizionarla — i campi Offset X/Y si aggiornano da soli.
-            </div>
-          )}
-
-          <div className="btn-row">
-            <button type="button" className="btn secondary" onClick={() => setPlaying((p) => !p)}>
-              {playing ? `⏸ Pausa (${previewDuration.toFixed(2)}s)` : "▶ Anteprima loop ambientale"}
-            </button>
-            <button type="button" className="btn" onClick={handleGenerateExport} disabled={savingExport}>
-              ⚙️ Genera export
-            </button>
-          </div>
-          <div className="btn-row">
-            <button type="button" className="btn secondary" onClick={handleDownload}>
-              ⬇ Scarica pacchetto
-            </button>
-          </div>
-        </>
-      )}
-
-      {status && <div className="status">{status}</div>}
+      </div>
     </div>
   );
 }

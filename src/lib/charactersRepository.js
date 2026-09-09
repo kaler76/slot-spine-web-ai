@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient.js";
 const CHARACTERS_TABLE = "spine_characters";
 const PARTS_TABLE = "spine_character_parts";
 const EXPORTS_TABLE = "spine_character_exports";
+const ROTATION_FRAMES_TABLE = "spine_character_rotation_frames";
 const STORAGE_BUCKET = "spine-characters";
 
 export async function listCharactersWithParts() {
@@ -47,7 +48,7 @@ export async function listCharactersForReels() {
 export async function getCharacterWithDetails(characterId) {
   const { data: character, error: charErr } = await supabase
     .from(CHARACTERS_TABLE)
-    .select("id, name, created_at")
+    .select("id, name, created_at, rotation_speed")
     .eq("id", characterId)
     .single();
   if (charErr) throw charErr;
@@ -65,7 +66,14 @@ export async function getCharacterWithDetails(characterId) {
     .eq("character_id", characterId)
     .maybeSingle();
 
-  return { ...character, parts, export: exportRow || null };
+  const { data: rotationFrames, error: rotationErr } = await supabase
+    .from(ROTATION_FRAMES_TABLE)
+    .select("*")
+    .eq("character_id", characterId)
+    .order("angle", { ascending: true });
+  if (rotationErr) throw rotationErr;
+
+  return { ...character, parts, export: exportRow || null, rotationFrames: rotationFrames || [] };
 }
 
 export async function createCharacter(name) {
@@ -178,5 +186,53 @@ export async function saveCharacterExport({ characterId, skeletonJson, atlasText
 
 export async function deleteCharacter(characterId) {
   const { error } = await supabase.from(CHARACTERS_TABLE).delete().eq("id", characterId);
+  if (error) throw error;
+}
+
+/**
+ * Salva (o sovrascrive) un frame di rotazione per un angolo 0-180°: 0 = fronte,
+ * 180 = retro. Il ciclo completo a 360° viene ricostruito a runtime riusando
+ * questi stessi frame specchiati orizzontalmente per l'altro lato (tecnica
+ * "frame intermedi + mirror" — non serve disegnare/generare l'intero giro).
+ */
+export async function saveRotationFrame({ characterId, angle, imageBlob, width, height }) {
+  const path = `${characterId}/rotation_${angle}.png`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from(STORAGE_BUCKET)
+    .upload(path, imageBlob, { contentType: "image/png", upsert: true });
+  if (uploadErr) throw uploadErr;
+
+  const { data: publicUrlData } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path);
+
+  const { data, error } = await supabase
+    .from(ROTATION_FRAMES_TABLE)
+    .upsert(
+      {
+        character_id: characterId,
+        angle,
+        width,
+        height,
+        image_path: path,
+        image_url: publicUrlData.publicUrl
+      },
+      { onConflict: "character_id,angle" }
+    )
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteRotationFrame(frameId) {
+  const { error } = await supabase.from(ROTATION_FRAMES_TABLE).delete().eq("id", frameId);
+  if (error) throw error;
+}
+
+export async function updateCharacterRotationSpeed(characterId, speed) {
+  const { error } = await supabase
+    .from(CHARACTERS_TABLE)
+    .update({ rotation_speed: speed })
+    .eq("id", characterId);
   if (error) throw error;
 }
