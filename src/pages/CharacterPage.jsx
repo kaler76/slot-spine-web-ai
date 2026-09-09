@@ -660,8 +660,7 @@ export default function CharacterPage() {
   }
 
   return (
-    <div className="page character-page-layout">
-      <div className="character-main">
+    <div className="page">
       <Link to="/characters" className="back-link">← Tutti i character</Link>
       <h1>🧙 {character.name}</h1>
 
@@ -805,50 +804,6 @@ export default function CharacterPage() {
         ))}
       </div>
 
-      {hasAnyPart && (
-        <>
-          <h2 className="section-title">Anteprima composita (loop ambientale)</h2>
-          <div className="hint">
-            Le parti annidate (es. occhi/bocca/capelli con genitore "testa") seguono visivamente il movimento del
-            genitore, oltre alla propria animazione — come nel vero Spine.
-          </div>
-          <div
-            className="character-stage-outer"
-            style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
-          >
-            <div
-              className="character-stage-inner"
-              style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
-            >
-              {rootPartKeys.map((key) => renderPartTree(key, true))}
-            </div>
-          </div>
-          {workingBlob && (
-            <div className="hint">
-              Trascina la nuova parte direttamente nel riquadro per posizionarla — i campi Offset X/Y si aggiornano da soli.
-            </div>
-          )}
-
-          <div className="btn-row">
-            <button type="button" className="btn secondary" onClick={() => setPlaying((p) => !p)}>
-              {playing ? `⏸ Pausa (${previewDuration.toFixed(2)}s)` : "▶ Anteprima loop ambientale"}
-            </button>
-            <button type="button" className="btn" onClick={handleGenerateExport} disabled={savingExport}>
-              ⚙️ Genera export
-            </button>
-          </div>
-          <div className="btn-row">
-            <button type="button" className="btn secondary" onClick={handleDownload}>
-              ⬇ Scarica pacchetto
-            </button>
-          </div>
-        </>
-      )}
-
-      {status && <div className="status">{status}</div>}
-      </div>
-
-      <div className="character-sidebar">
       <h2 className="section-title">🎨 Genera con AI (Gemini)</h2>
       <AiCharacterGenerator characterId={character.id} existingParts={character.parts} onImported={refresh} />
 
@@ -999,7 +954,48 @@ export default function CharacterPage() {
           </button>
         </>
       )}
-      </div>
+
+      {hasAnyPart && (
+        <>
+          <h2 className="section-title">Anteprima composita (loop ambientale)</h2>
+          <div className="hint">
+            Le parti annidate (es. occhi/bocca/capelli con genitore "testa") seguono visivamente il movimento del
+            genitore, oltre alla propria animazione — come nel vero Spine.
+          </div>
+          <div
+            className="character-stage-outer"
+            style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
+          >
+            <div
+              className="character-stage-inner"
+              style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
+            >
+              {rootPartKeys.map((key) => renderPartTree(key, true))}
+            </div>
+          </div>
+          {workingBlob && (
+            <div className="hint">
+              Trascina la nuova parte direttamente nel riquadro per posizionarla — i campi Offset X/Y si aggiornano da soli.
+            </div>
+          )}
+
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={() => setPlaying((p) => !p)}>
+              {playing ? `⏸ Pausa (${previewDuration.toFixed(2)}s)` : "▶ Anteprima loop ambientale"}
+            </button>
+            <button type="button" className="btn" onClick={handleGenerateExport} disabled={savingExport}>
+              ⚙️ Genera export
+            </button>
+          </div>
+          <div className="btn-row">
+            <button type="button" className="btn secondary" onClick={handleDownload}>
+              ⬇ Scarica pacchetto
+            </button>
+          </div>
+        </>
+      )}
+
+      {status && <div className="status">{status}</div>}
     </div>
   );
 }
