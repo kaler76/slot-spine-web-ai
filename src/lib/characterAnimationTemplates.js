@@ -81,6 +81,30 @@ function blinkTrack(partKey, speed) {
 }
 
 /**
+ * VENTO: oscillazione indipendente e leggera (più lenta e sottile della normale
+ * Oscillazione), pensata per fare da "capobone" di una catena a più segmenti
+ * (capelli lunghi, sciarpe, code) — è la tecnica della "rotazione semplice dei
+ * bone" per dare vita a capelli/tessuti senza mesh con pesi: si anima da sola
+ * (non serve un genitore già in movimento, a differenza di Fisica) e i
+ * segmenti successivi della stessa catena la seguono a cascata via Fisica.
+ */
+function windTrack(partKey, speed, amplitude = 3.5) {
+  const d = scaledDuration(3.6, speed);
+  const half = +(d / 2).toFixed(4);
+  return {
+    bones: {
+      [partKey]: {
+        rotate: [
+          { time: 0, angle: 0 },
+          { time: half, angle: amplitude },
+          { time: d, angle: 0 }
+        ]
+      }
+    }
+  };
+}
+
+/**
  * FISICA (pendolo a molla): a differenza degli altri tipi non produce una
  * traccia a keyframe — il movimento è simulato frame per frame da
  * useCharacterAnimationLoop (reagisce al movimento del bone genitore con
@@ -99,6 +123,7 @@ const TEMPLATES = {
   sway: (partKey, speed) => swayTrack(partKey, speed),
   bounce: (partKey, speed) => bounceTrack(partKey, speed),
   blink: (partKey, speed) => blinkTrack(partKey, speed),
+  wind: (partKey, speed) => windTrack(partKey, speed),
   physics: () => physicsTrack()
 };
 

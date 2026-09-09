@@ -36,11 +36,20 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Generare un solo gruppo per volta è più preciso che chiedere tutto insieme in una singola immagine (vale anche per i modelli di immagine più recenti, non solo per la generazione di angolazioni multiple) — l'utente può comunque scegliere "tutto insieme" per restare più veloce quando la qualità di ogni singolo pezzo è già soddisfacente. */
+const GROUP_OPTIONS = [
+  { value: "all", label: "🧩 Tutto insieme (21 elementi in un'unica immagine)" },
+  { value: "face", label: "😊 Solo viso (11 elementi: occhi, pupille, sopracciglia, bocche, testa)" },
+  { value: "hair", label: "💇 Solo capelli (7 elementi)" },
+  { value: "body", label: "🧍 Solo corpo (8 elementi: torso, braccia, mani)" }
+];
+
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
   const hasExistingParts = existingParts && existingParts.length > 0;
   const [useReference, setUseReference] = useState(hasExistingParts);
   const [referenceKey, setReferenceKey] = useState(existingParts?.[0]?.part_key || "");
+  const [group, setGroup] = useState("all");
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null); // { passed, attempts, imageBase64, blob }
   const [status, setStatus] = useState("");
@@ -48,6 +57,12 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
   const [importingKey, setImportingKey] = useState(0);
   const [promptText, setPromptText] = useState("");
   const [loadingPrompt, setLoadingPrompt] = useState(false);
+
+  /** Il prompt mostrato/modificato è specifico per gruppo: se l'utente cambia gruppo dopo averlo generato, va ricostruito, altrimenti si rischia di generare "tutto insieme" con un prompt scritto per "solo viso" (o viceversa). */
+  function handleGroupChange(next) {
+    setGroup(next);
+    setPromptText("");
+  }
 
   async function resolveReferenceImagesBase64() {
     const withReference = useReference && hasExistingParts;
@@ -74,7 +89,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
           apikey: SUPABASE_ANON_KEY
         },
-        body: JSON.stringify({ characterDescription, group: "all", referenceImagesBase64, previewOnly: true })
+        body: JSON.stringify({ characterDescription, group, referenceImagesBase64, previewOnly: true })
       });
       const data = await res.json();
       if (!res.ok || data?.error) throw new Error(data?.error || `Errore HTTP ${res.status}`);
@@ -98,7 +113,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       },
       body: JSON.stringify({
         characterDescription,
-        group: "all",
+        group,
         referenceImagesBase64,
         promptOverride: promptText.trim() || undefined,
         correction,
@@ -237,11 +252,18 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
           placeholder="e.g. elegant Chinese empress in red and gold traditional dress"
         />
       </label>
+      <label className="field-label">
+        Cosa generare
+        <select value={group} onChange={(e) => handleGroupChange(e.target.value)}>
+          {GROUP_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </label>
       <div className="hint" style={{ marginTop: 8 }}>
-        Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con
-        ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le
-        spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con
-        mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo.
+        {group === "all"
+          ? "Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo."
+          : "Generare un gruppo alla volta è più preciso di chiedere tutto in un'unica immagine (meno elementi da posizionare = meno errori) — ripeti la generazione per ogni gruppo che ti serve e importali tutti sullo stesso personaggio."}
       </div>
 
       <button type="button" className="btn secondary" onClick={handleShowPrompt} disabled={loadingPrompt || generating}>
