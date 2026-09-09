@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import CropTool from "../components/CropTool.jsx";
 import SpriteSheetImporter from "../components/SpriteSheetImporter.jsx";
 import AiCharacterGenerator from "../components/AiCharacterGenerator.jsx";
+import CharacterTurnaroundTester from "../components/CharacterTurnaroundTester.jsx";
 import CharacterRotationEditor from "../components/CharacterRotationEditor.jsx";
 import { useCharacterAnimationLoop } from "../hooks/useCharacterAnimationLoop.js";
 import { buildCharacterSkeleton, anchorToFraction } from "../lib/characterSkeleton.js";
@@ -168,6 +169,7 @@ export default function CharacterPage() {
 
   const [playing, setPlaying] = useState(false);
   const [savingExport, setSavingExport] = useState(false);
+  const [showTurnaroundTester, setShowTurnaroundTester] = useState(false);
 
   // --- Editing inline parti esistenti ---
   const [editingPartId, setEditingPartId] = useState(null);
@@ -809,6 +811,21 @@ export default function CharacterPage() {
 
       <h2 className="section-title">📥 Importa da sprite sheet (manuale)</h2>
       <SpriteSheetImporter characterId={character.id} existingParts={character.parts} onImported={refresh} />
+
+      <h2 className="section-title">
+        🧪 Test: nuovo sistema turnaround (sperimentale){" "}
+        <button
+          type="button"
+          className="btn secondary"
+          style={{ fontSize: "0.75rem", padding: "2px 8px", marginLeft: 8 }}
+          onClick={() => setShowTurnaroundTester((v) => !v)}
+        >
+          {showTurnaroundTester ? "Nascondi" : "Mostra"}
+        </button>
+      </h2>
+      {showTurnaroundTester && (
+        <CharacterTurnaroundTester characterId={character.id} existingParts={character.parts} onImported={refresh} />
+      )}
 
       <h2 className="section-title">🌀 Rotazione (frame intermedi)</h2>
       <CharacterRotationEditor
