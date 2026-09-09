@@ -426,39 +426,6 @@ a.card:hover { border-color: #4f7cff; }
   outline-color: #7ea0ff;
 }
 
-/* Layout a due colonne per CharacterPage: anteprima/dati a sinistra, comandi
-   (generazione AI, importazione, rotazione, aggiungi parte) fissi in una
-   sidebar a destra invece che impilati sotto — restano visibili mentre si
-   guarda l'anteprima, senza dover scorrere l'intera pagina. */
-.character-page-layout {
-  max-width: 1180px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 32px;
-  align-items: start;
-}
-.character-main { min-width: 0; }
-.character-sidebar {
-  position: sticky;
-  top: 20px;
-  min-width: 0;
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
-  padding-left: 20px;
-  border-left: 1px solid #2c2c2c;
-}
-@media (max-width: 960px) {
-  .character-page-layout { display: block; }
-  .character-sidebar {
-    position: static;
-    max-height: none;
-    overflow-y: visible;
-    padding-left: 0;
-    border-left: none;
-    margin-top: 20px;
-  }
-}
-
 .rotation-slots-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
