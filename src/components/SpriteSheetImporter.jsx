@@ -10,6 +10,10 @@ const ANIM_LABELS = {
   blink: "✨ Lampeggio"
 };
 
+/** Nomi che identificano un arto (braccio/gamba, IT o EN): questi pezzi vanno avvicinati al genitore per sovrapporsi al giunto invece di restare allo stacco che il foglio generato lascia apposta per il rilevamento. */
+const LIMB_NAME_PATTERN = /braccio|avambraccio|gamba|coscia|\barm\b|\bleg\b/i;
+const LIMB_OVERLAP_FACTOR = 0.7;
+
 function sanitizeKey(name) {
   return String(name || "")
     .trim()
@@ -203,8 +207,21 @@ export default function SpriteSheetImporter({ characterId, existingParts, onImpo
         let offsetY = 0;
         const parentPart = byName[p.parentKey];
         if (parentPart) {
-          offsetX = Math.round(p.sheetCenterX - parentPart.sheetCenterX);
-          offsetY = Math.round(-(p.sheetCenterY - parentPart.sheetCenterY));
+          let dx = p.sheetCenterX - parentPart.sheetCenterX;
+          let dy = -(p.sheetCenterY - parentPart.sheetCenterY);
+          // Nel foglio generato ogni pezzo ha ampio spazio vuoto attorno per
+          // essere rilevato correttamente come componente separato — ma nel
+          // rig assemblato un arto deve invece SOVRAPPORSI al genitore al
+          // giunto (es. spalla del braccio sul torso), non restare staccato
+          // alla stessa distanza. Per gli arti si avvicina quindi la parte
+          // riducendo la distanza dal genitore, per ottenere di default la
+          // sovrapposizione che nasconde il giunto invece dello stacco netto.
+          if (LIMB_NAME_PATTERN.test(p.name)) {
+            dx *= LIMB_OVERLAP_FACTOR;
+            dy *= LIMB_OVERLAP_FACTOR;
+          }
+          offsetX = Math.round(dx);
+          offsetY = Math.round(dy);
           autoPositioned++;
         }
 
