@@ -20,6 +20,16 @@ const DILATION_ITERATIONS = 2;
 const EROSION_ITERATIONS = 1;
 const ALPHA_THRESHOLD = 15;
 const LABEL_SATURATION_THRESHOLD = 0.12;
+const WHITE_THRESHOLD = 235;
+// Sfondo #FF00FF pieno (usato dal percorso turnaround/decomposition, vedi
+// promptDecompose.js/spineRules.js) invece del bianco pieno del percorso
+// gruppi esistente: soglie tolleranti per non perdere lo sfondo per via di
+// piccole variazioni di compressione attorno al magenta puro.
+const MAGENTA_BACKGROUND_SHARE_THRESHOLD = 0.15;
+
+function isNearMagenta(r, g, b) {
+  return r > 190 && b > 190 && g < 90;
+}
 
 function dilateMask(mask, width, height, iterations) {
   let current = mask;
@@ -133,22 +143,32 @@ export function detectSpriteRegions({ width, height, rgba }) {
   const n = width * height;
 
   // Alcuni generatori AI non rispettano sempre la richiesta di sfondo
-  // trasparente, restituendo invece un canvas bianco pieno (alpha=255
+  // trasparente, restituendo invece un canvas a tinta unita (alpha=255
   // ovunque). In quel caso basarsi sull'alpha per separare gli elementi non
-  // funziona: passiamo a un fallback basato sul colore (sfondo ~bianco).
+  // funziona: passiamo a un fallback basato sul colore — bianco pieno per il
+  // percorso a gruppi esistente, magenta #FF00FF per il percorso
+  // turnaround/decomposition (vedi promptDecompose.js), rilevati entrambi
+  // automaticamente così l'importer funziona con l'uno o l'altro senza che
+  // il chiamante debba specificare quale sistema ha generato l'immagine.
   let transparentPixelCount = 0;
+  let magentaPixelCount = 0;
   for (let i = 0; i < n; i++) {
     if (rgba[i * 4 + 3] < 250) transparentPixelCount++;
+    if (isNearMagenta(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2])) magentaPixelCount++;
   }
   const hasRealTransparency = transparentPixelCount / n > 0.01;
+  const hasMagentaBackground = !hasRealTransparency && magentaPixelCount / n > MAGENTA_BACKGROUND_SHARE_THRESHOLD;
 
   const rawMask = new Uint8Array(n);
   if (hasRealTransparency) {
     for (let i = 0; i < n; i++) {
       rawMask[i] = rgba[i * 4 + 3] > ALPHA_THRESHOLD ? 1 : 0;
     }
+  } else if (hasMagentaBackground) {
+    for (let i = 0; i < n; i++) {
+      rawMask[i] = isNearMagenta(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]) ? 0 : 1;
+    }
   } else {
-    const WHITE_THRESHOLD = 235;
     for (let i = 0; i < n; i++) {
       const r = rgba[i * 4];
       const g = rgba[i * 4 + 1];
@@ -236,5 +256,6 @@ export function detectSpriteRegions({ width, height, rgba }) {
   }
 
   regions.sort((a, b) => (a.y - b.y) || (a.x - b.x));
-  return { regions, labels, rawMask, erodedMask };
+  const backgroundMode = hasRealTransparency ? "alpha" : hasMagentaBackground ? "magenta" : "white";
+  return { regions, labels, rawMask, erodedMask, backgroundMode };
 }
