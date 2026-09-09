@@ -9,6 +9,34 @@ function base64ToBlob(base64, mimeType = "image/png") {
   return new Blob([arr], { type: mimeType });
 }
 
+function loadImageFromBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("immagine non decodificabile"));
+    img.src = URL.createObjectURL(blob);
+  });
+}
+
+/** Unisce più sprite sheet (ciascuno già su sfondo bianco pieno, generato separatamente) impilandoli verticalmente in un solo foglio, così l'importatore lato client — che rileva le parti dai pixel dell'immagine, non da metadati del server — le tratta come un'unica sprite sheet da cui estrarre tutte le parti. Usata per "Tutto insieme": chiedere a Gemini tutti gli elementi in una sola immagine complessa saturava spesso il budget di output e produceva PNG troncati/corrotti; generare viso/capelli/corpo separatamente (come già più affidabile per l'uso manuale) e ricomporli qui evita il problema senza perdere la comodità di un solo foglio da importare. */
+async function stitchBlobsVertically(blobs) {
+  const images = await Promise.all(blobs.map(loadImageFromBlob));
+  const width = Math.max(...images.map((img) => img.width));
+  const height = images.reduce((sum, img) => sum + img.height, 0);
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  let y = 0;
+  for (const img of images) {
+    ctx.drawImage(img, 0, y);
+    y += img.height;
+  }
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
 /** Scarica un'immagine già caricata (es. quella importata da Aztec) e la converte in base64 pura (senza prefisso data:), come si aspetta l'API Gemini. */
 async function urlToBase64(url) {
   const res = await fetch(url);
@@ -40,13 +68,15 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Generare un solo gruppo per volta è più preciso che chiedere tutto insieme in una singola immagine (vale anche per i modelli di immagine più recenti, non solo per la generazione di angolazioni multiple) — l'utente può comunque scegliere "tutto insieme" per restare più veloce quando la qualità di ogni singolo pezzo è già soddisfacente. */
+/** Chiedere a Gemini 23 elementi in una sola immagine satura spesso il budget di output e produce PNG troncati/corrotti (vedi runAttemptsForGroup) — molto più affidabile generare un gruppo alla volta. "Tutto insieme" resta un'unica opzione comoda per l'utente, ma internamente genera viso/capelli/corpo separatamente e li ricompone in un solo foglio (vedi handleGenerate). */
 const GROUP_OPTIONS = [
-  { value: "all", label: "🧩 Tutto insieme (23 elementi in un'unica immagine)" },
+  { value: "all", label: "🧩 Tutto insieme (viso + capelli + corpo, generati separatamente e uniti)" },
   { value: "face", label: "😊 Solo viso (11 elementi: occhi, pupille, sopracciglia, bocche, testa)" },
   { value: "hair", label: "💇 Solo capelli (7 elementi)" },
   { value: "body", label: "🧍 Solo corpo (5 elementi: torso, braccio sx/dx intero, oggetti)" }
 ];
+
+const ALL_SUBGROUPS = ["face", "hair", "body"];
 
 /** Etichette brevi solo per il menu di scelta — devono rispecchiare l'ordine esatto degli elementi lato server (GROUP_TEMPLATES nell'edge function), il testo completo di ogni elemento resta lì. */
 const ELEMENT_LABELS = {
@@ -157,8 +187,8 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
     }
   }
 
-  /** Una singola chiamata (breve) alla funzione edge: genera un tentativo, passando indietro lo stato del tentativo precedente per evitare di ripetere l'analisi del riferimento e restare così sotto il timeout della piattaforma (vedi commento in cima all'edge function). */
-  async function generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError }) {
+  /** Una singola chiamata (breve) alla funzione edge: genera un tentativo per il gruppo indicato, passando indietro lo stato del tentativo precedente per evitare di ripetere l'analisi del riferimento e restare così sotto il timeout della piattaforma (vedi commento in cima all'edge function). */
+  async function generateOnce({ group: groupForCall, promptOverride, referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError }) {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
       method: "POST",
       headers: {
@@ -168,9 +198,9 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       },
       body: JSON.stringify({
         characterDescription,
-        group,
+        group: groupForCall,
         referenceImagesBase64,
-        promptOverride: promptText.trim() || undefined,
+        promptOverride,
         correction,
         referenceAnalysis,
         referenceAnalysisError
@@ -190,6 +220,46 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
     return data;
   }
 
+  /** Ciclo di tentativi (fino a MAX_ATTEMPTS) per UN gruppo. Estratto da handleGenerate così può essere richiamato tre volte in sequenza (viso/capelli/corpo) per "Tutto insieme" invece di chiedere tutti e 23 gli elementi in una sola immagine. */
+  async function runAttemptsForGroup(groupForCall, { referenceImagesBase64, promptOverride, initialReferenceAnalysis, initialReferenceAnalysisError, statusPrefix = "" }) {
+    const attempts = [];
+    let correction;
+    let referenceAnalysis = initialReferenceAnalysis;
+    let referenceAnalysisError = initialReferenceAnalysisError;
+    let lastData = null;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      setStatus(`⏳ ${statusPrefix}Tentativo ${attempt}/${MAX_ATTEMPTS} in corso...`);
+      let data;
+      try {
+        data = await generateOnce({ group: groupForCall, promptOverride, referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
+      } catch (err) {
+        // Un sovraccarico momentaneo di Gemini (503/429) o un blocco del filtro di
+        // sicurezza (spesso un falso positivo non deterministico) meritano un altro
+        // tentativo automatico invece di arrendersi subito — a differenza di un errore
+        // definitivo (es. tetto di spesa superato), che non si risolve riprovando.
+        if (isRetryableApiError(err.message) && attempt < MAX_ATTEMPTS) {
+          attempts.push({ attempt, pass: false, issues: [`${err.message} — nuovo tentativo automatico tra qualche secondo...`] });
+          setStatus(`⏳ ${statusPrefix}${err.message.toLowerCase().includes("prohibited_content") || err.message.toLowerCase().includes("safety") ? "Il filtro di sicurezza di Gemini ha bloccato questo tentativo" : "Gemini temporaneamente sovraccarico"}, nuovo tentativo tra ${RETRY_DELAY_MS / 1000}s...`);
+          await sleep(RETRY_DELAY_MS);
+          continue;
+        }
+        throw err;
+      }
+      lastData = data;
+      referenceAnalysis = data.referenceAnalysis;
+      referenceAnalysisError = data.referenceAnalysisError;
+      correction = data.correction;
+      attempts.push({ attempt, pass: data.passed, unverified: data.unverified, issues: data.issues || [] });
+      if (data.passed) break;
+    }
+
+    if (!lastData) {
+      throw new Error("Gemini è rimasto sovraccarico per tutti i tentativi disponibili — riprova tra qualche minuto.");
+    }
+    return { lastData, attempts, referenceAnalysis, referenceAnalysisError };
+  }
+
   async function handleGenerate() {
     const withReference = useReference && hasExistingParts;
     if (!withReference && !characterDescription.trim() && !promptText.trim()) {
@@ -200,45 +270,51 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
     try {
       const referenceImagesBase64 = await resolveReferenceImagesBase64();
 
-      const attempts = [];
-      let correction;
-      let referenceAnalysis;
-      let referenceAnalysisError;
-      let lastData = null;
+      if (group === "all") {
+        // Un'unica immagine con tutti e 23 gli elementi satura spesso il budget di
+        // output di Gemini e produce PNG troncati/corrotti (persino il controllo
+        // rilassato hasValidPngHeader lato server fallisce, segno di corruzione
+        // vera, non solo di byte di troppo in coda) — l'immagine con meno elementi
+        // è quella che riesce sempre. Si genera quindi viso/capelli/corpo
+        // separatamente (ognuno un prompt semplice ed efficace, non i 23 insieme)
+        // e si ricompongono in un solo foglio lato client, senza perdere la
+        // comodità di un solo pulsante per l'utente.
+        let referenceAnalysis;
+        let referenceAnalysisError;
+        const subResults = [];
+        const allAttempts = [];
+        const subLabels = { face: "viso", hair: "capelli", body: "corpo" };
 
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        setStatus(
-          `⏳ Tentativo ${attempt}/${MAX_ATTEMPTS}: ${
-            withReference ? "ricostruzione dall'immagine di riferimento" : "generazione della sprite sheet"
-          } in corso...`
-        );
-        let data;
-        try {
-          data = await generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
-        } catch (err) {
-          // Un sovraccarico momentaneo di Gemini (503/429) o un blocco del filtro di
-          // sicurezza (spesso un falso positivo non deterministico) meritano un altro
-          // tentativo automatico invece di arrendersi subito — a differenza di un errore
-          // definitivo (es. tetto di spesa superato), che non si risolve riprovando.
-          if (isRetryableApiError(err.message) && attempt < MAX_ATTEMPTS) {
-            attempts.push({ attempt, pass: false, issues: [`${err.message} — nuovo tentativo automatico tra qualche secondo...`] });
-            setStatus(`⏳ ${err.message.toLowerCase().includes("prohibited_content") || err.message.toLowerCase().includes("safety") ? "Il filtro di sicurezza di Gemini ha bloccato questo tentativo" : "Gemini temporaneamente sovraccarico"}, nuovo tentativo tra ${RETRY_DELAY_MS / 1000}s...`);
-            await sleep(RETRY_DELAY_MS);
-            continue;
-          }
-          throw err;
+        for (const subGroup of ALL_SUBGROUPS) {
+          const { lastData, attempts, referenceAnalysis: ra, referenceAnalysisError: rae } = await runAttemptsForGroup(subGroup, {
+            referenceImagesBase64,
+            initialReferenceAnalysis: referenceAnalysis,
+            initialReferenceAnalysisError: referenceAnalysisError,
+            statusPrefix: `${subLabels[subGroup]}: `
+          });
+          referenceAnalysis = ra;
+          referenceAnalysisError = rae;
+          subResults.push({ subGroup, lastData });
+          allAttempts.push(...attempts.map((a) => ({ ...a, subGroup })));
         }
-        lastData = data;
-        referenceAnalysis = data.referenceAnalysis;
-        referenceAnalysisError = data.referenceAnalysisError;
-        correction = data.correction;
-        attempts.push({ attempt, pass: data.passed, unverified: data.unverified, issues: data.issues || [] });
-        if (data.passed) break;
+
+        const combinedBlob = await stitchBlobsVertically(subResults.map((r) => base64ToBlob(r.lastData.imageBase64)));
+        const allPassed = subResults.every((r) => r.lastData.passed);
+        const anyUnverified = subResults.some((r) => r.lastData.unverified);
+        setResult({ passed: allPassed, attempts: allAttempts, imageBase64: null, blob: combinedBlob });
+        setStatus(
+          allPassed
+            ? `✅ Viso, capelli e corpo generati separatamente (più affidabile di tutto insieme) e uniti in un solo foglio.${anyUnverified ? " Controllo geometrico non eseguibile su almeno un pezzo — dai un'occhiata prima di importare." : ""}`
+            : "⚠️ Non tutti i gruppi hanno superato il controllo qualità. Il foglio combinato è comunque disponibile qui sotto: puoi scaricarlo, provare a importarlo, o rigenerare."
+        );
+        return;
       }
 
-      if (!lastData) {
-        throw new Error("Gemini è rimasto sovraccarico per tutti i tentativi disponibili — riprova tra qualche minuto.");
-      }
+      const { lastData, attempts } = await runAttemptsForGroup(group, {
+        referenceImagesBase64,
+        promptOverride: promptText.trim() || undefined,
+        statusPrefix: withReference ? "Ricostruzione dall'immagine di riferimento — " : ""
+      });
 
       const blob = base64ToBlob(lastData.imageBase64);
       setResult({ passed: lastData.passed, attempts, imageBase64: lastData.imageBase64, blob });
@@ -419,24 +495,32 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       </label>
       <div className="hint" style={{ marginTop: 8 }}>
         {group === "all"
-          ? "Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato con la spalla pulita (senza pauldron/decorazioni) e ogni braccio è UN pezzo intero dalla spalla alle dita, con un accessorio (pauldron, manica, fascia) che coprirà il giunto spalla-torso quando li sovrapponi in Character: così non restano buchi né doppie decorazioni quando li muovi."
+          ? "Chiedere tutti e 23 gli elementi in un'unica immagine saturava spesso Gemini e produceva immagini troncate/corrotte: ora vengono generati viso, capelli e corpo separatamente (ognuno con un prompt semplice, senza troppi elementi insieme) e uniti automaticamente in un solo foglio da importare — un solo pulsante, tre generazioni più affidabili."
           : "Generare un gruppo alla volta è più preciso di chiedere tutto in un'unica immagine (meno elementi da posizionare = meno errori) — ripeti la generazione per ogni gruppo che ti serve e importali tutti sullo stesso personaggio."}
       </div>
 
-      <button type="button" className="btn secondary" onClick={handleShowPrompt} disabled={loadingPrompt || generating}>
-        {loadingPrompt ? "⏳ Costruzione prompt..." : "👁️ Mostra il prompt (e modificalo se vuoi)"}
-      </button>
+      {group === "all" ? (
+        <div className="hint" style={{ marginTop: 4 }}>
+          Il prompt non è modificabile qui perché "tutto insieme" usa automaticamente i tre prompt standard di viso/capelli/corpo — passa a un gruppo singolo qui sopra per vedere o modificare un prompt.
+        </div>
+      ) : (
+        <>
+          <button type="button" className="btn secondary" onClick={handleShowPrompt} disabled={loadingPrompt || generating}>
+            {loadingPrompt ? "⏳ Costruzione prompt..." : "👁️ Mostra il prompt (e modificalo se vuoi)"}
+          </button>
 
-      {promptText && (
-        <label className="field-label">
-          Prompt per Gemini (modificabile — verrà usato così com'è al posto di quello generato automaticamente)
-          <textarea
-            value={promptText}
-            onChange={(e) => setPromptText(e.target.value)}
-            rows={12}
-            style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
-          />
-        </label>
+          {promptText && (
+            <label className="field-label">
+              Prompt per Gemini (modificabile — verrà usato così com'è al posto di quello generato automaticamente)
+              <textarea
+                value={promptText}
+                onChange={(e) => setPromptText(e.target.value)}
+                rows={12}
+                style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+              />
+            </label>
+          )}
+        </>
       )}
 
       <button type="button" className="btn" onClick={handleGenerate} disabled={generating}>
@@ -461,9 +545,9 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
 
           {result.attempts && (
             <div className="ai-attempts-log">
-              {result.attempts.map((a) => (
-                <div key={a.attempt} className={a.pass ? "ai-attempt-pass" : "ai-attempt-fail"}>
-                  Tentativo {a.attempt}:{" "}
+              {result.attempts.map((a, i) => (
+                <div key={`${a.subGroup || "g"}-${a.attempt}-${i}`} className={a.pass ? "ai-attempt-pass" : "ai-attempt-fail"}>
+                  {a.subGroup ? `${a.subGroup} — ` : ""}Tentativo {a.attempt}:{" "}
                   {a.unverified
                     ? "🟡 non verificato (controllo geometrico saltato, immagine probabilmente valida)"
                     : a.pass
