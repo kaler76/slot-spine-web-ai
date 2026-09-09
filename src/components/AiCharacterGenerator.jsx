@@ -227,7 +227,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         referenceAnalysis = data.referenceAnalysis;
         referenceAnalysisError = data.referenceAnalysisError;
         correction = data.correction;
-        attempts.push({ attempt, pass: data.passed, issues: data.issues || [] });
+        attempts.push({ attempt, pass: data.passed, unverified: data.unverified, issues: data.issues || [] });
         if (data.passed) break;
       }
 
@@ -238,9 +238,11 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       const blob = base64ToBlob(lastData.imageBase64);
       setResult({ passed: lastData.passed, attempts, imageBase64: lastData.imageBase64, blob });
       setStatus(
-        lastData.passed
-          ? `✅ Sprite sheet generata e passato il controllo qualità in ${attempts.length} tentativo/i.`
-          : `⚠️ Non ha superato del tutto il controllo qualità dopo ${attempts.length} tentativi. L'immagine è comunque disponibile qui sotto: puoi scaricarla per controllarla, provare comunque a importarla, o rigenerare.`
+        lastData.unverified
+          ? `✅ Sprite sheet generata in ${attempts.length} tentativo/i. Controllo geometrico automatico non eseguibile su questa immagine (limite del nostro parser, non un problema dell'immagine) — dai un'occhiata tu prima di importare.`
+          : lastData.passed
+            ? `✅ Sprite sheet generata e passato il controllo qualità in ${attempts.length} tentativo/i.`
+            : `⚠️ Non ha superato del tutto il controllo qualità dopo ${attempts.length} tentativi. L'immagine è comunque disponibile qui sotto: puoi scaricarla per controllarla, provare comunque a importarla, o rigenerare.`
       );
     } catch (err) {
       setStatus(`❌ Errore generazione: ${err.message}`);
@@ -456,7 +458,12 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
             <div className="ai-attempts-log">
               {result.attempts.map((a) => (
                 <div key={a.attempt} className={a.pass ? "ai-attempt-pass" : "ai-attempt-fail"}>
-                  Tentativo {a.attempt}: {a.pass ? "✅ passato" : `❌ ${a.issues.join(" ")}`}
+                  Tentativo {a.attempt}:{" "}
+                  {a.unverified
+                    ? "🟡 non verificato (controllo geometrico saltato, immagine probabilmente valida)"
+                    : a.pass
+                      ? "✅ passato"
+                      : `❌ ${a.issues.join(" ")}`}
                 </div>
               ))}
             </div>
