@@ -21,6 +21,7 @@ const ANIM_LABELS = {
   sway: "🎐 Oscillazione",
   bounce: "⬆️ Rimbalzo",
   blink: "✨ Lampeggio",
+  wind: "🌬️ Vento (capobone catena)",
   physics: "🔗 Fisica (pendolo)"
 };
 
@@ -103,7 +104,8 @@ function expandSegmentedParts(partsMap) {
 
   for (const [key, p] of Object.entries(partsMap)) {
     const segments = Math.max(1, Math.round(p.segments) || 1);
-    if (segments <= 1 || p.animationType !== "physics") {
+    const isChainable = p.animationType === "physics" || p.animationType === "wind";
+    if (segments <= 1 || !isChainable) {
       expanded[key] = { ...p, parentKey: resolveParent(p.parentKey), sliced: false };
       continue;
     }
@@ -122,6 +124,11 @@ function expandSegmentedParts(partsMap) {
         fullHeight: p.height,
         cropTop: i * bandHeight,
         sliced: true,
+        // Solo il primo segmento (il "capobone") mantiene il tipo scelto — se è
+        // "Vento" si anima da solo; dal secondo in poi la catena segue sempre a
+        // cascata via Fisica, altrimenti niente si muove (Fisica pura senza un
+        // genitore animato resta ferma alla posa di riposo).
+        animationType: i === 0 ? p.animationType : "physics",
         segments: 1
       };
     }
@@ -732,7 +739,7 @@ export default function CharacterPage() {
                       min="1"
                       max="8"
                       value={editValues.segments}
-                      title="Segmenti (solo con animazione Fisica): divide il pezzo in N fasce che si piegano a cascata"
+                      title="Segmenti (solo con animazione Fisica o Vento): divide il pezzo in N fasce che si piegano a cascata"
                       onChange={(e) => setEditValues((v) => ({ ...v, segments: e.target.value }))}
                     />
                     <span className="tech-edit-actions">
@@ -875,24 +882,37 @@ export default function CharacterPage() {
             </label>
           </div>
           {animationType === "physics" && (
+            <div className="hint" style={{ color: "#9fc4ff" }}>
+              🔗 Un pezzo con "Fisica" reagisce con inerzia e ritardo al movimento del suo genitore (invece di seguirlo
+              rigidamente o oscillare a formula fissa) — se il genitore è fermo (statico), anche questo pezzo resterà
+              fermo alla sua posa di riposo: aggancialo a un genitore che si muove (es. il busto con "Oscillazione") per
+              vederne l'effetto. "Velocità" qui controlla quanto è rigida/reattiva la molla (1 = normale, più alto =
+              più rigido e scattante, più basso = più morbido e "flottante"). Nota: per ora è solo un'anteprima live,
+              non ancora inclusa nel pacchetto Spine esportato.
+            </div>
+          )}
+          {animationType === "wind" && (
+            <div className="hint" style={{ color: "#9fc4ff" }}>
+              🌬️ "Vento" si muove da solo (oscillazione lenta e sottile), anche se il genitore è statico — è pensato
+              per fare da capobone di una catena a più segmenti (vedi sotto): imposta i segmenti e ogni fascia
+              successiva seguirà quella sopra a cascata via Fisica, ricreando l'effetto di capelli/sciarpe/code che
+              ondeggiano al vento con pochissimi bone, come nel rig professionale. Con 1 solo segmento equivale a
+              un'oscillazione dolce del pezzo intero.
+            </div>
+          )}
+          {(animationType === "physics" || animationType === "wind") && (
             <>
-              <div className="hint" style={{ color: "#9fc4ff" }}>
-                🔗 Un pezzo con "Fisica" reagisce con inerzia e ritardo al movimento del suo genitore (invece di seguirlo
-                rigidamente o oscillare a formula fissa) — se il genitore è fermo (statico), anche questo pezzo resterà
-                fermo alla sua posa di riposo: aggancialo a un genitore che si muove (es. il busto con "Oscillazione") per
-                vederne l'effetto. "Velocità" qui controlla quanto è rigida/reattiva la molla (1 = normale, più alto =
-                più rigido e scattante, più basso = più morbido e "flottante"). Nota: per ora è solo un'anteprima live,
-                non ancora inclusa nel pacchetto Spine esportato.
-              </div>
               <label className="field-label" title="Divide l'immagine in N fasce che si piegano a cascata invece di ruotare come un blocco unico — utile per capelli lunghi o tessuti che pendono">
                 Segmenti (1 = pezzo rigido, più segmenti = si piega come una catena)
                 <input type="number" min="1" max="8" value={segments} onChange={(e) => setSegments(e.target.value)} />
               </label>
               {Number(segments) > 1 && (
                 <div className="hint">
-                  ✂️ L'immagine verrà divisa in {Number(segments)} fasce orizzontali uguali, ognuna agganciata
-                  fisicamente alla precedente: il pezzo si piegherà lungo la sua lunghezza invece di ruotare tutto
-                  insieme. L'ancoraggio verticale per questo pezzo diventa sempre "Alto" (pende dall'alto).
+                  ✂️ L'immagine verrà divisa in {Number(segments)} fasce orizzontali uguali. La prima fascia mantiene
+                  l'animazione "{ANIM_LABELS[animationType]}"; dalla seconda in poi seguono sempre a cascata via
+                  Fisica, agganciata ognuna alla precedente: il pezzo si piegherà lungo la sua lunghezza invece di
+                  ruotare tutto insieme. L'ancoraggio verticale per questo pezzo diventa sempre "Alto" (pende
+                  dall'alto).
                 </div>
               )}
             </>
