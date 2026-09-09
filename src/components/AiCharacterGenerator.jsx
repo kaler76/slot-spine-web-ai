@@ -38,11 +38,45 @@ function sleep(ms) {
 
 /** Generare un solo gruppo per volta è più preciso che chiedere tutto insieme in una singola immagine (vale anche per i modelli di immagine più recenti, non solo per la generazione di angolazioni multiple) — l'utente può comunque scegliere "tutto insieme" per restare più veloce quando la qualità di ogni singolo pezzo è già soddisfacente. */
 const GROUP_OPTIONS = [
-  { value: "all", label: "🧩 Tutto insieme (21 elementi in un'unica immagine)" },
+  { value: "all", label: "🧩 Tutto insieme (19 elementi in un'unica immagine)" },
   { value: "face", label: "😊 Solo viso (11 elementi: occhi, pupille, sopracciglia, bocche, testa)" },
   { value: "hair", label: "💇 Solo capelli (7 elementi)" },
-  { value: "body", label: "🧍 Solo corpo (8 elementi: torso, braccia, mani)" }
+  { value: "body", label: "🧍 Solo corpo (5 elementi: torso, braccio sx/dx intero, oggetti)" }
 ];
+
+/** Etichette brevi solo per il menu di scelta — devono rispecchiare l'ordine esatto degli elementi lato server (GROUP_TEMPLATES nell'edge function), il testo completo di ogni elemento resta lì. */
+const ELEMENT_LABELS = {
+  face: [
+    "Testa (viso + frangia)",
+    "Occhio sx aperto",
+    "Occhio dx aperto",
+    "Pupilla sx",
+    "Pupilla dx",
+    "Occhio sx chiuso",
+    "Occhio dx chiuso",
+    "Sopracciglia",
+    "Bocca neutra",
+    "Bocca sorridente",
+    "Bocca aperta"
+  ],
+  hair: [
+    "Capelli retro",
+    "Ornamento centrale",
+    "Forcine laterali",
+    "Nastri laterali",
+    "Orecchino sx",
+    "Orecchino dx",
+    "Perlina decorativa"
+  ],
+  body: [
+    "Corpo/torso",
+    "Braccio sinistro (intero)",
+    "Braccio destro (intero)",
+    "Coppa/contenitore",
+    "Piccoli oggetti decorativi"
+  ]
+};
+const SINGLE_ELEMENT_GROUPS = ["face", "hair", "body"];
 
 export default function AiCharacterGenerator({ characterId, existingParts, onImported }) {
   const [characterDescription, setCharacterDescription] = useState("");
@@ -58,10 +92,27 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
   const [promptText, setPromptText] = useState("");
   const [loadingPrompt, setLoadingPrompt] = useState(false);
 
+  // --- Rigenerazione di un singolo elemento (invece dell'intero gruppo) ---
+  const [singleMode, setSingleMode] = useState(false);
+  const [singleGroup, setSingleGroup] = useState("body");
+  const [singleElementIndex, setSingleElementIndex] = useState(0);
+  const [singlePromptText, setSinglePromptText] = useState("");
+  const [loadingSinglePrompt, setLoadingSinglePrompt] = useState(false);
+  const [generatingSingle, setGeneratingSingle] = useState(false);
+  const [singleVariants, setSingleVariants] = useState(null); // [{ blob }, { blob }]
+  const [singleImportingBlob, setSingleImportingBlob] = useState(null);
+  const [singleImportingKey, setSingleImportingKey] = useState(0);
+
   /** Il prompt mostrato/modificato è specifico per gruppo: se l'utente cambia gruppo dopo averlo generato, va ricostruito, altrimenti si rischia di generare "tutto insieme" con un prompt scritto per "solo viso" (o viceversa). */
   function handleGroupChange(next) {
     setGroup(next);
     setPromptText("");
+  }
+
+  function handleSingleGroupChange(next) {
+    setSingleGroup(next);
+    setSingleElementIndex(0);
+    setSinglePromptText("");
   }
 
   async function resolveReferenceImagesBase64() {
@@ -196,6 +247,105 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
     } finally {
       setGenerating(false);
     }
+  }
+
+  /** Come handleShowPrompt, ma per il prompt del singolo elemento selezionato (nessuna immagine di riferimento gestita qui: la rigenerazione di un pezzo isolato riusa la stessa immagine di riferimento del personaggio già impostata sopra, se presente). */
+  async function handleShowSinglePrompt() {
+    setLoadingSinglePrompt(true);
+    setStatus("⏳ Costruzione del prompt per il singolo elemento...");
+    try {
+      const referenceImagesBase64 = await resolveReferenceImagesBase64();
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+          apikey: SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({
+          characterDescription,
+          group: singleGroup,
+          elementIndex: singleElementIndex,
+          referenceImagesBase64,
+          previewOnly: true
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || data?.error) throw new Error(data?.error || `Errore HTTP ${res.status}`);
+      setSinglePromptText(data.prompt);
+      setStatus("✅ Prompt pronto qui sotto: modificalo pure prima di generare, se vuoi.");
+    } catch (err) {
+      setStatus(`❌ Errore nel costruire il prompt: ${err.message}`);
+    } finally {
+      setLoadingSinglePrompt(false);
+    }
+  }
+
+  /** Genera lo stesso singolo elemento due volte in parallelo (chiamate indipendenti, senza il retry-su-fallimento della sheet intera: qui basta scegliere la variante migliore) così l'utente può scegliere quale delle due usare, invece di dover rigenerare tutta la sheet per un solo pezzo difettoso. */
+  async function handleGenerateSingle() {
+    if (!characterDescription.trim() && !(useReference && hasExistingParts) && !singlePromptText.trim()) {
+      setStatus("⚠️ Descrivi il personaggio, spunta \"parti da un'immagine già caricata\", oppure scrivi un prompt personalizzato.");
+      return;
+    }
+    setGeneratingSingle(true);
+    setSingleVariants(null);
+    setStatus("⏳ Generazione di 2 varianti del singolo elemento...");
+    try {
+      const referenceImagesBase64 = await resolveReferenceImagesBase64();
+      const callOnce = async () => {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+            apikey: SUPABASE_ANON_KEY
+          },
+          body: JSON.stringify({
+            characterDescription,
+            group: singleGroup,
+            elementIndex: singleElementIndex,
+            referenceImagesBase64,
+            promptOverride: singlePromptText.trim() || undefined
+          })
+        });
+        const rawText = await res.text();
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch {
+          throw new Error(`Risposta non valida (status ${res.status}): ${rawText.slice(0, 500)}`);
+        }
+        if (!res.ok || data?.error) throw new Error(data?.error || `Errore HTTP ${res.status}`);
+        return data;
+      };
+
+      const [a, b] = await Promise.all([callOnce(), callOnce()]);
+      setSingleVariants([
+        { blob: base64ToBlob(a.imageBase64), passed: a.passed },
+        { blob: base64ToBlob(b.imageBase64), passed: b.passed }
+      ]);
+      setStatus("✅ Due varianti pronte qui sotto: scegli quella da importare.");
+    } catch (err) {
+      setStatus(`❌ Errore generazione: ${err.message}`);
+    } finally {
+      setGeneratingSingle(false);
+    }
+  }
+
+  function handleUseSingleVariant(blob) {
+    setSingleImportingBlob(blob);
+    setSingleImportingKey((k) => k + 1);
+  }
+
+  function handleDownloadSingleVariant(blob, idx) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `elemento_variante_${idx + 1}.png`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   function handleUseForImport() {
@@ -333,6 +483,96 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
             externalBlob={importingBlob}
             externalBlobKey={importingKey}
           />
+        </>
+      )}
+
+      <h3 className="section-subtitle">🔧 Un pezzo solo è venuto male?</h3>
+      <label className="field-label field-label-inline">
+        <input type="checkbox" checked={singleMode} onChange={(e) => setSingleMode(e.target.checked)} />
+        Rigenera un singolo elemento (invece di tutto il gruppo)
+      </label>
+
+      {singleMode && (
+        <>
+          <div className="hint" style={{ marginTop: 4 }}>
+            Utile quando in una sheet già importata solo un pezzo è difettoso: scegli quale elemento rigenerare,
+            guarda/modifica il suo prompt, e ottieni 2 varianti tra cui scegliere — senza dover rifare tutto il gruppo.
+          </div>
+          <div className="row">
+            <label className="field-label">
+              Gruppo
+              <select value={singleGroup} onChange={(e) => handleSingleGroupChange(e.target.value)}>
+                {SINGLE_ELEMENT_GROUPS.map((g) => (
+                  <option key={g} value={g}>{GROUP_OPTIONS.find((o) => o.value === g)?.label || g}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field-label">
+              Elemento
+              <select
+                value={singleElementIndex}
+                onChange={(e) => {
+                  setSingleElementIndex(Number(e.target.value));
+                  setSinglePromptText("");
+                }}
+              >
+                {ELEMENT_LABELS[singleGroup].map((label, idx) => (
+                  <option key={idx} value={idx}>{label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <button type="button" className="btn secondary" onClick={handleShowSinglePrompt} disabled={loadingSinglePrompt || generatingSingle}>
+            {loadingSinglePrompt ? "⏳ Costruzione prompt..." : "👁️ Mostra il prompt di questo elemento"}
+          </button>
+
+          {singlePromptText && (
+            <label className="field-label">
+              Prompt per Gemini (solo per questo elemento — modificabile)
+              <textarea
+                value={singlePromptText}
+                onChange={(e) => setSinglePromptText(e.target.value)}
+                rows={8}
+                style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
+              />
+            </label>
+          )}
+
+          <button type="button" className="btn" onClick={handleGenerateSingle} disabled={generatingSingle}>
+            {generatingSingle ? "⏳ Generazione 2 varianti..." : "🎨 Genera 2 varianti di questo elemento"}
+          </button>
+
+          {singleVariants && (
+            <div className="ai-single-variants-grid">
+              {singleVariants.map((v, idx) => (
+                <div key={idx} className="ai-single-variant-card">
+                  <img src={URL.createObjectURL(v.blob)} alt={`Variante ${idx + 1}`} className="ai-single-variant-img" />
+                  <div className="btn-row">
+                    <button type="button" className="btn tiny" onClick={() => handleUseSingleVariant(v.blob)}>
+                      📥 Usa questa
+                    </button>
+                    <button type="button" className="btn secondary tiny" onClick={() => handleDownloadSingleVariant(v.blob, idx)}>
+                      ⬇ Scarica
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {singleImportingBlob && (
+            <>
+              <h3 className="section-subtitle">Revisione ed importazione del singolo elemento</h3>
+              <SpriteSheetImporter
+                characterId={characterId}
+                existingParts={existingParts}
+                onImported={onImported}
+                externalBlob={singleImportingBlob}
+                externalBlobKey={singleImportingKey}
+              />
+            </>
+          )}
         </>
       )}
     </div>
