@@ -1,7 +1,12 @@
-// src/lib/partsList.js — PARTS_LIST tipizzato per vista: unica fonte per il
-// blocco "PARTS" interpolato in promptDecompose (vedi getPartsListText),
-// invece di scrivere a mano una lista diversa per ogni vista — che è
-// esattamente il modo in cui queste liste divergono tra loro nel tempo.
+// src/lib/partsList.js — PARTS_LIST tipizzato per vista E per scope: unica
+// fonte per il blocco "PARTS" interpolato in promptDecompose (vedi
+// getPartsListText), invece di scrivere a mano una lista diversa per ogni
+// combinazione vista/scope — che è esattamente il modo in cui queste liste
+// divergono tra loro nel tempo.
+//
+// scope di default è "bust" (mezzo busto, coerente con il formato simbolo
+// slot attuale: niente gambe/pelvi) — "full_body" (con gambe, per il
+// turnaround completo) va richiesto esplicitamente dal chiamante.
 //
 // Ogni parte porta una part_key stabile (riusabile a valle nel rig), il lato
 // secondo la convenzione del PERSONAGGIO (mai dello schermo, SPINE_RULES
@@ -10,6 +15,7 @@
 // ricostruite per intero perché in questa vista sono parzialmente nascoste
 // (SPINE_RULES regola 1 e 5).
 //
+// @typedef {'bust'|'full_body'} Scope
 // @typedef {Object} PartSpec
 // @property {string} key - part_key stabile, snake_case, univoco per vista
 // @property {string} label - descrizione della parte per il prompt, in inglese
@@ -21,30 +27,39 @@
 //   ricostruzione della porzione nascosta in questa vista
 
 const CORE_PARTS = [
-  { key: "head", label: "head, including neck" },
-  { key: "torso", label: "torso, chest to pelvis top" },
-  { key: "pelvis", label: "pelvis / hip block" },
-  { key: "upper_arm", label: "upper arm, shoulder to elbow", limb: true },
-  { key: "forearm", label: "forearm, elbow to wrist", limb: true },
-  { key: "hand", label: "hand, wrist to fingertips", limb: true },
-  { key: "thigh", label: "thigh, hip to knee", limb: true },
-  { key: "shin", label: "shin, knee to ankle", limb: true },
-  { key: "foot", label: "foot, ankle to toe, flat sole", limb: true }
+  { key: "head", label: "head, including neck", scopes: ["bust", "full_body"] },
+  {
+    key: "torso",
+    label: "torso, chest to waist",
+    fullBodyLabel: "torso, chest to pelvis top",
+    scopes: ["bust", "full_body"]
+  },
+  { key: "pelvis", label: "pelvis / hip block", scopes: ["full_body"] },
+  { key: "upper_arm", label: "upper arm, shoulder to elbow", limb: true, scopes: ["bust", "full_body"] },
+  { key: "forearm", label: "forearm, elbow to wrist", limb: true, scopes: ["bust", "full_body"] },
+  { key: "hand", label: "hand, wrist to fingertips", limb: true, scopes: ["bust", "full_body"] },
+  { key: "thigh", label: "thigh, hip to knee", limb: true, scopes: ["full_body"] },
+  { key: "shin", label: "shin, knee to ankle", limb: true, scopes: ["full_body"] },
+  { key: "foot", label: "foot, ankle to toe, flat sole", limb: true, scopes: ["full_body"] }
 ];
 
-/** Espande le parti "limb" (definite una volta) in coppia sinistra/destra secondo la convenzione del PERSONAGGIO — mai dello schermo (SPINE_RULES regola 6). */
-function expandSides(passesBySide) {
+const DEFAULT_SCOPE = "bust";
+
+/** Espande le parti "limb" (definite una volta) in coppia sinistra/destra secondo la convenzione del PERSONAGGIO — mai dello schermo (SPINE_RULES regola 6) — filtrando per scope. */
+function expandSides(passesBySide, scope) {
   const parts = [];
   for (const p of CORE_PARTS) {
+    if (!p.scopes.includes(scope)) continue;
+    const label = scope === "full_body" && p.fullBodyLabel ? p.fullBodyLabel : p.label;
     if (!p.limb) {
-      parts.push({ key: p.key, label: p.label, side: "center", passes: "side", reconstruct: false });
+      parts.push({ key: p.key, label, side: "center", passes: "side", reconstruct: false });
       continue;
     }
     for (const side of ["left", "right"]) {
       const passes = passesBySide[side];
       parts.push({
         key: `${p.key}_${side}`,
-        label: `${side} ${p.label}`,
+        label: `${side} ${label}`,
         side,
         passes,
         reconstruct: passes === "back"
@@ -54,28 +69,38 @@ function expandSides(passesBySide) {
   return parts;
 }
 
-/** @type {Record<'front'|'three_quarter'|'side'|'back', PartSpec[]>} */
-export const PARTS_BY_VIEW = {
-  // 0°: braccia e gambe pendono a fianco del corpo, nessuna occlusione dal torso.
-  front: expandSides({ left: "side", right: "side" }),
-  // 45°: il lato sinistro del personaggio ruota via dalla camera e passa
-  // dietro al torso; il lato destro (vicino alla camera) passa davanti.
-  three_quarter: expandSides({ left: "back", right: "front" }),
-  // 90°, personaggio di profilo verso destra (vedi promptIdentity): il lato
-  // sinistro è quasi interamente nascosto dietro al torso, il destro è il
-  // più vicino alla camera.
-  side: expandSides({ left: "back", right: "front" }),
-  // 180°: personaggio di spalle. Braccia e gambe tornano a fianco del corpo
-  // senza occlusione — le etichette sinistra/destra restano quelle del
-  // personaggio, non si invertono perché lo vediamo da dietro.
-  back: expandSides({ left: "side", right: "side" })
+// Occlusione rispetto al torso, per vista — stessa logica per braccia e
+// gambe (quando presenti): a 0°/180° pendono a fianco del corpo senza
+// coprirsi; a 45°/90° il lato che ruota via dalla camera passa dietro.
+const PASSES_BY_VIEW = {
+  front: { left: "side", right: "side" },
+  three_quarter: { left: "back", right: "front" },
+  side: { left: "back", right: "front" },
+  back: { left: "side", right: "side" }
 };
 
+/** @type {Record<Scope, Record<'front'|'three_quarter'|'side'|'back', PartSpec[]>>} */
+export const PARTS_BY_SCOPE = Object.fromEntries(
+  ["bust", "full_body"].map((scope) => [
+    scope,
+    Object.fromEntries(
+      Object.entries(PASSES_BY_VIEW).map(([view, passesBySide]) => [view, expandSides(passesBySide, scope)])
+    )
+  ])
+);
+
+/** Retrocompatibilità: stesso contenuto di PARTS_BY_SCOPE.bust (scope di default). */
+export const PARTS_BY_VIEW = PARTS_BY_SCOPE[DEFAULT_SCOPE];
+
 /** Converte l'elenco tipizzato in blocco di testo numerato per il prompt — l'unico punto in cui partsList diventa stringa, così non viene mai scritto a mano. */
-export function getPartsListText(view) {
-  const parts = PARTS_BY_VIEW[view];
+export function getPartsListText(view, scope = DEFAULT_SCOPE) {
+  const byView = PARTS_BY_SCOPE[scope];
+  if (!byView) {
+    throw new Error(`Scope sconosciuto: "${scope}". Valori ammessi: ${Object.keys(PARTS_BY_SCOPE).join(", ")}`);
+  }
+  const parts = byView[view];
   if (!parts) {
-    throw new Error(`Vista sconosciuta: "${view}". Valori ammessi: ${Object.keys(PARTS_BY_VIEW).join(", ")}`);
+    throw new Error(`Vista sconosciuta: "${view}". Valori ammessi: ${Object.keys(byView).join(", ")}`);
   }
   return parts
     .map((p, i) => {
