@@ -25,11 +25,15 @@ async function urlToBase64(url) {
 const MAX_ATTEMPTS = 4;
 const RETRY_DELAY_MS = 4000;
 
-/** Errori transitori lato Gemini (sovraccarico momentaneo, rate limit) per cui ha senso riprovare automaticamente — a differenza di un tetto di spesa superato o di un errore di validazione, che non si risolvono riprovando. */
+/** Errori transitori lato Gemini (sovraccarico momentaneo, rate limit, filtro di sicurezza scattato per errore) per cui ha senso riprovare automaticamente — a differenza di un tetto di spesa superato o di un errore di validazione, che non si risolvono riprovando. PROHIBITED_CONTENT/SAFETY sono inclusi perché il filtro di Gemini è noto per dare falsi positivi non deterministici sullo stesso identico prompt. */
 function isRetryableApiError(message) {
   const m = String(message || "").toLowerCase();
   if (m.includes("spending cap") || m.includes("resource_exhausted")) return false;
-  return m.includes("503") || m.includes("unavailable") || m.includes("high demand") || m.includes("429") || m.includes("overload");
+  return (
+    m.includes("503") || m.includes("unavailable") || m.includes("high demand") ||
+    m.includes("429") || m.includes("overload") ||
+    m.includes("prohibited_content") || m.includes("safety")
+  );
 }
 
 function sleep(ms) {
@@ -38,7 +42,7 @@ function sleep(ms) {
 
 /** Generare un solo gruppo per volta è più preciso che chiedere tutto insieme in una singola immagine (vale anche per i modelli di immagine più recenti, non solo per la generazione di angolazioni multiple) — l'utente può comunque scegliere "tutto insieme" per restare più veloce quando la qualità di ogni singolo pezzo è già soddisfacente. */
 const GROUP_OPTIONS = [
-  { value: "all", label: "🧩 Tutto insieme (19 elementi in un'unica immagine)" },
+  { value: "all", label: "🧩 Tutto insieme (23 elementi in un'unica immagine)" },
   { value: "face", label: "😊 Solo viso (11 elementi: occhi, pupille, sopracciglia, bocche, testa)" },
   { value: "hair", label: "💇 Solo capelli (7 elementi)" },
   { value: "body", label: "🧍 Solo corpo (5 elementi: torso, braccio sx/dx intero, oggetti)" }
@@ -212,12 +216,13 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         try {
           data = await generateOnce({ referenceImagesBase64, correction, referenceAnalysis, referenceAnalysisError });
         } catch (err) {
-          // Un sovraccarico momentaneo di Gemini (503/429 transitorio) merita un altro
+          // Un sovraccarico momentaneo di Gemini (503/429) o un blocco del filtro di
+          // sicurezza (spesso un falso positivo non deterministico) meritano un altro
           // tentativo automatico invece di arrendersi subito — a differenza di un errore
           // definitivo (es. tetto di spesa superato), che non si risolve riprovando.
           if (isRetryableApiError(err.message) && attempt < MAX_ATTEMPTS) {
             attempts.push({ attempt, pass: false, issues: [`${err.message} — nuovo tentativo automatico tra qualche secondo...`] });
-            setStatus(`⏳ Gemini temporaneamente sovraccarico, nuovo tentativo tra ${RETRY_DELAY_MS / 1000}s...`);
+            setStatus(`⏳ ${err.message.toLowerCase().includes("prohibited_content") || err.message.toLowerCase().includes("safety") ? "Il filtro di sicurezza di Gemini ha bloccato questo tentativo" : "Gemini temporaneamente sovraccarico"}, nuovo tentativo tra ${RETRY_DELAY_MS / 1000}s...`);
             await sleep(RETRY_DELAY_MS);
             continue;
           }
@@ -414,7 +419,7 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
       </label>
       <div className="hint" style={{ marginTop: 8 }}>
         {group === "all"
-          ? "Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato completo sotto le spalle/ascelle (come se le braccia non ci fossero) e le braccia sono pezzi separati (braccio + avambraccio con mano): così, quando le animi in Character, non restano buchi quando si muovono rispetto al corpo."
+          ? "Genera tutti gli elementi (viso, capelli, accessori, corpo, braccia, oggetti) in un'unica immagine, con ampi margini di sicurezza tra ciascuno per evitare che si tocchino. Il torso viene generato con la spalla pulita (senza pauldron/decorazioni) e ogni braccio è UN pezzo intero dalla spalla alle dita, con un accessorio (pauldron, manica, fascia) che coprirà il giunto spalla-torso quando li sovrapponi in Character: così non restano buchi né doppie decorazioni quando li muovi."
           : "Generare un gruppo alla volta è più preciso di chiedere tutto in un'unica immagine (meno elementi da posizionare = meno errori) — ripeti la generazione per ogni gruppo che ti serve e importali tutti sullo stesso personaggio."}
       </div>
 
