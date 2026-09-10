@@ -323,16 +323,20 @@ export default function CharacterPage() {
   }
 
   async function handleSaveName() {
+    // eslint-disable-next-line no-console
+    console.log("[handleSaveName] invocato", { nameDraft, characterName: character?.name });
     const trimmed = nameDraft.trim();
     if (!trimmed) {
       setStatus("⚠️ Il nome non può essere vuoto.");
       return;
     }
     if (trimmed === character.name) {
+      setStatus("ℹ️ Nome invariato, nessuna modifica da salvare.");
       setEditingName(false);
       return;
     }
     setSavingName(true);
+    setStatus(`⏳ Rinomino in "${trimmed}"...`);
     try {
       await renameCharacter(character.id, trimmed);
       setEditingName(false);
