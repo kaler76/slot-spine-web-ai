@@ -5,10 +5,19 @@ import CharacterSprite from "./CharacterSprite.jsx";
 
 const STRIP_LEN = 22;
 
-/** Immagine da mostrare per un elemento fermo durante lo scorrimento veloce (blur): niente animazione, solo un'anteprima statica. */
+/**
+ * Immagine da mostrare per un elemento fermo durante lo scorrimento veloce (blur): niente
+ * animazione, solo un'anteprima statica. Per un character si sceglie la parte più grande per
+ * area (in genere il torso): la prima parte radice per z-index può benissimo essere un
+ * accessorio secondario (es. i capelli, se hanno z-index più basso del torso) invece del
+ * corpo principale, apparendo isolata e fuori scala rispetto all'intero character.
+ */
 function restingImage(item) {
   if (item.kind === "character") {
-    const body = item.parts.find((p) => (p.parent_key || "root") === "root") || item.parts[0];
+    const body = item.parts.reduce(
+      (largest, p) => (p.width * p.height > (largest?.width || 0) * (largest?.height || 0) ? p : largest),
+      null
+    );
     return body?.image_url;
   }
   return item.animations.find((a) => a.animation_type === "idle")?.image_url || item.animations[0]?.image_url;
