@@ -5,21 +5,8 @@ import CharacterSprite from "./CharacterSprite.jsx";
 
 const STRIP_LEN = 22;
 
-/**
- * Immagine da mostrare per un elemento fermo durante lo scorrimento veloce (blur): niente
- * animazione, solo un'anteprima statica. Per un character si sceglie la parte più grande per
- * area (in genere il torso): la prima parte radice per z-index può benissimo essere un
- * accessorio secondario (es. i capelli, se hanno z-index più basso del torso) invece del
- * corpo principale, apparendo isolata e fuori scala rispetto all'intero character.
- */
+/** Immagine da mostrare per un simbolo fermo durante lo scorrimento veloce (blur): niente animazione, solo un'anteprima statica. */
 function restingImage(item) {
-  if (item.kind === "character") {
-    const body = item.parts.reduce(
-      (largest, p) => (p.width * p.height > (largest?.width || 0) * (largest?.height || 0) ? p : largest),
-      null
-    );
-    return body?.image_url;
-  }
   return item.animations.find((a) => a.animation_type === "idle")?.image_url || item.animations[0]?.image_url;
 }
 
@@ -154,7 +141,19 @@ export default function ReelColumn({ pool, visibleRows, spinToken, duration, for
               (le righe finali, in cima allo striscione) invece del riempimento. */}
           {renderStrip.map((item, i) => (
             <div key={i} className="reel-cell" style={{ height: cellSize }}>
-              <img src={restingImage(item)} alt={item.name} className="reel-symbol-img" />
+              {item.kind === "character" ? (
+                // Un character non ha un'unica immagine "di riposo": va composto per intero
+                // (in posa statica, senza animazione) invece di mostrare una sua singola
+                // parte isolata (es. i soli capelli), che apparirebbe fuori scala e senza senso.
+                <CharacterSprite
+                  character={item}
+                  boxWidth={Math.round(cellSize * 0.86)}
+                  boxHeight={Math.round(cellSize * 0.9)}
+                  playing={false}
+                />
+              ) : (
+                <img src={restingImage(item)} alt={item.name} className="reel-symbol-img" />
+              )}
             </div>
           ))}
         </div>
