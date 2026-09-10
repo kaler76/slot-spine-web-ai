@@ -7,8 +7,38 @@ const ANIM_LABELS = {
   static: "⏸️ Fermo",
   sway: "🎐 Oscillazione",
   bounce: "⬆️ Rimbalzo",
-  blink: "✨ Lampeggio"
+  blink: "✨ Lampeggio",
+  wind: "🌬️ Vento (capobone catena)",
+  physics: "🔗 Fisica (pendolo)"
 };
+
+/**
+ * Suggerisce un'animazione plausibile per una tessera rilevata, in assenza di
+ * qualunque informazione semantica sul suo contenuto (il rilevatore non sa se
+ * un blob è "un orecchino" o "un braccio": vede solo posizione/dimensione).
+ * Euristica basata solo su geometria relativa alle altre tessere dello stesso
+ * foglio, pensata per essere prudente: il pezzo più grande (quasi sempre
+ * torso/corpo principale) resta Fermo, i pezzi piccoli in alto (verosimilmente
+ * orecchini/ciondoli/ornamenti del copricapo) prendono Fisica, le forme
+ * allungate (ciocche di capelli, nastri, piume) prendono Vento, tutto il resto
+ * di dimensione medio-piccola prende una Oscillazione generica. È solo un
+ * punto di partenza: l'utente rivede e corregge nella lista prima di importare.
+ */
+function guessAnimationType(region, allRegions) {
+  const maxArea = Math.max(...allRegions.map((r) => r.w * r.h));
+  const minCenterY = Math.min(...allRegions.map((r) => r.y + r.h / 2));
+  const maxCenterY = Math.max(...allRegions.map((r) => r.y + r.h / 2));
+  const area = region.w * region.h;
+  const relSize = maxArea > 0 ? area / maxArea : 1;
+  const centerY = region.y + region.h / 2;
+  const relY = maxCenterY > minCenterY ? (centerY - minCenterY) / (maxCenterY - minCenterY) : 0;
+  const aspect = Math.max(region.w / region.h, region.h / region.w);
+
+  if (relSize >= 0.6) return "static";
+  if (aspect >= 2.5) return "wind";
+  if (relY <= 0.35 && relSize < 0.15) return "physics";
+  return "sway";
+}
 
 /** Nomi che identificano un arto (braccio/gamba, IT o EN): questi pezzi vanno avvicinati al genitore per sovrapporsi al giunto invece di restare allo stacco che il foglio generato lascia apposta per il rilevamento. */
 const LIMB_NAME_PATTERN = /braccio|avambraccio|gamba|coscia|\barm\b|\bleg\b/i;
@@ -109,7 +139,7 @@ export async function processSpriteSheetBlob(blob) {
       sheetCenterY: region.y + region.h / 2,
       name: `parte_${idx + 1}`,
       parentKey: "root",
-      animationType: "static",
+      animationType: guessAnimationType(region, artRegions),
       anchorX: "center",
       anchorY: "center",
       zIndex: idx * 10,
@@ -145,7 +175,7 @@ export default function SpriteSheetImporter({ characterId, existingParts, onImpo
       const { parts, labelCount } = await processSpriteSheetBlob(blob);
       setDetectedParts(parts);
       setStatus(
-        `✅ Rilevate ${parts.length} illustrazioni (${labelCount} etichette di testo escluse automaticamente). Rivedi nome/genitore/animazione qui sotto prima di importare.`
+        `✅ Rilevate ${parts.length} illustrazioni (${labelCount} etichette di testo escluse automaticamente). Animazione pre-suggerita in base a forma/posizione: rivedi nome/genitore/animazione qui sotto prima di importare.`
       );
     } catch (err) {
       setStatus(`❌ Errore analisi: ${err.message}`);
