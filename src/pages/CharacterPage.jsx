@@ -14,7 +14,8 @@ import {
   saveCharacterPart,
   deleteCharacterPart,
   updateCharacterPartMetadata,
-  saveCharacterExport
+  saveCharacterExport,
+  renameCharacter
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
 
@@ -176,6 +177,11 @@ export default function CharacterPage() {
   const [editValues, setEditValues] = useState({});
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // --- Rinomina character ---
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -308,6 +314,34 @@ export default function CharacterPage() {
       setStatus(`❌ Errore salvataggio parte: ${err.message}`);
     } finally {
       setSavingPart(false);
+    }
+  }
+
+  function startEditingName() {
+    setNameDraft(character.name);
+    setEditingName(true);
+  }
+
+  async function handleSaveName() {
+    const trimmed = nameDraft.trim();
+    if (!trimmed) {
+      setStatus("⚠️ Il nome non può essere vuoto.");
+      return;
+    }
+    if (trimmed === character.name) {
+      setEditingName(false);
+      return;
+    }
+    setSavingName(true);
+    try {
+      await renameCharacter(character.id, trimmed);
+      setEditingName(false);
+      setStatus(`✅ Character rinominato in "${trimmed}".`);
+      await refresh();
+    } catch (err) {
+      setStatus(`❌ Errore rinomina: ${err.message}`);
+    } finally {
+      setSavingName(false);
     }
   }
 
@@ -664,7 +698,31 @@ export default function CharacterPage() {
   return (
     <div className="page">
       <Link to="/characters" className="back-link">← Tutti i character</Link>
-      <h1>🧙 {character.name}</h1>
+      {editingName ? (
+        <div className="row char-name-edit">
+          <input
+            type="text"
+            value={nameDraft}
+            autoFocus
+            onChange={(e) => setNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSaveName();
+              if (e.key === "Escape") setEditingName(false);
+            }}
+          />
+          <button type="button" className="btn tiny" disabled={savingName} onClick={handleSaveName}>✓</button>
+          <button type="button" className="btn tiny secondary" disabled={savingName} onClick={() => setEditingName(false)}>✕</button>
+        </div>
+      ) : (
+        <h1>
+          🧙 {character.name}{" "}
+          <button type="button" className="btn tiny secondary" title="Rinomina character" onClick={startEditingName}>✏️</button>
+        </h1>
+      )}
+      <div className="hint">
+        Il nome è anche ciò che collega questo character ai Rulli: deve coincidere esattamente con il nome di un
+        simbolo del progetto Aztec importato (es. "sym5") perché compaia lì al posto suo — vedi <Link to="/reels">Rulli</Link>.
+      </div>
 
       {character.parts.length > 0 && (
         <>

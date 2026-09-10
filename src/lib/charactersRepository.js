@@ -236,3 +236,14 @@ export async function updateCharacterRotationSpeed(characterId, speed) {
     .eq("id", characterId);
   if (error) throw error;
 }
+
+/**
+ * Rinomina un character: il nome è anche l'unico collegamento con i Rulli (vedi
+ * ReelsPage/listCharactersForReels), che confronta `name` con i nomi dei simboli
+ * del progetto aztec importato — va quindi rinominato qui, non solo scelto in
+ * fase di creazione.
+ */
+export async function renameCharacter(characterId, name) {
+  const { error } = await supabase.from(CHARACTERS_TABLE).update({ name }).eq("id", characterId);
+  if (error) throw error;
+}
