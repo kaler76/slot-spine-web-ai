@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { FilesetResolver, PoseLandmarker, ImageSegmenter } from "@mediapipe/tasks-vision";
-import { recognizeParts, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
+import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
+import { recognizeParts, refineObjectWithMask, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 const POSE_MODEL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task";
+const OBJECT_MODEL =
+  "https://storage.googleapis.com/mediapipe-models/interactive_segmenter/magic_touch/float32/1/magic_touch.tflite";
 const SEG_MODEL =
   "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite";
 
@@ -49,7 +51,19 @@ function loadModels() {
         outputCategoryMask: true,
         outputConfidenceMasks: false
       });
-      return { pose, segmenter };
+      // segmentatore "a punto": serve solo se c'è un oggetto tenuto davanti al corpo
+      let objectSegmenter = null;
+      try {
+        objectSegmenter = await InteractiveSegmenterLegacy.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: OBJECT_MODEL },
+          outputConfidenceMasks: true,
+          outputCategoryMask: false
+        });
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("Segmentatore oggetti non disponibile:", e);
+      }
+      return { pose, segmenter, objectSegmenter };
     })();
     modelsPromise.catch(() => {
       modelsPromise = null;
@@ -89,7 +103,7 @@ export default function RecognizePage() {
     setResult(null);
     try {
       setStatus("⏳ Carico i modelli (solo la prima volta, ~30 MB)...");
-      const { pose, segmenter } = await loadModels();
+      const { pose, segmenter, objectSegmenter } = await loadModels();
       const { img } = await loadImage(file);
       const W = img.naturalWidth;
       const H = img.naturalHeight;
@@ -124,6 +138,27 @@ export default function RecognizePage() {
       mask.close?.();
 
       const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, rgba });
+      if (objectSegmenter && rec.objectSeeds.length) {
+        setStatus("⏳ Rifinisco l'oggetto tenuto in mano...");
+        for (const seed of rec.objectSeeds) {
+          const res = objectSegmenter.segment(c, { keypoint: { x: seed.x / W, y: seed.y / H } });
+          const m = res.confidenceMasks?.[0];
+          if (!m) continue;
+          let probs = m.getAsFloat32Array();
+          if (m.width !== W || m.height !== H) {
+            const out = new Float32Array(W * H);
+            for (let y = 0; y < H; y++)
+              for (let x = 0; x < W; x++)
+                out[y * W + x] = probs[Math.floor((y * m.height) / H) * m.width + Math.floor((x * m.width) / W)];
+            probs = out;
+          } else {
+            probs = Float32Array.from(probs);
+          }
+          res.close?.();
+          const { stats } = refineObjectWithMask({ parts: rec.parts, width: W, height: H, mask: probs, handDisks: rec.handDisks });
+          rec.stats = stats;
+        }
+      }
       sourceRef.current = { img, W, H };
       setResult({ W, H, landmarks, categories, hasAlpha, ...rec, fileName: file.name });
       setStatus(`✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}.`);

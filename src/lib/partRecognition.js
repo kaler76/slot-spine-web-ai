@@ -142,45 +142,150 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
   const parts = new Uint8Array(W * H);
   const outside = new Uint8Array(W * H);
   const counts = new Array(PARTS.length).fill(0);
+  const hatLimitY = Math.max(P(LM.nose).y, Math.min(P(LM.earSx).y, P(LM.earDx).y));
+  const beardLimitY = neckBase.y + 0.4 * shoulderW;
+
+  /** Arto più adatto per il pixel (mano/avambraccio prima del braccio, che sta dietro), o null. */
+  function armLabel(x, y, i) {
+    let best = null;
+    for (const a of arms) {
+      if (a.vis < 0.3) continue;
+      const dHand = Math.hypot(x - a.hand.x, y - a.hand.y);
+      const dFore = segDist(x, y, a.e, a.w);
+      const dUp = segDist(x, y, a.s, a.e);
+      const inTorso = x >= torsoMinX && x <= torsoMaxX && y > neckBase.y;
+      const sameColor =
+        a.handColor && rgba
+          ? Math.hypot(rgba[i * 4] - a.handColor[0], rgba[i * 4 + 1] - a.handColor[1], rgba[i * 4 + 2] - a.handColor[2]) < 70
+          : false;
+      // fuori dal busto la sagoma di mano/avambraccio può essere più larga delle stime (bordi, dita aperte)
+      const outerFore = !inTorso && dFore <= R_FORE * 1.5;
+      if (dHand <= a.handR || dFore <= R_FORE || outerFore || (!inTorso && sameColor && dHand <= a.handRExt)) {
+        const d = Math.min(dHand / a.handR, dFore / R_FORE);
+        if (!best || d < best.d) best = { d, label: PART[`avambraccio_${a.side}`] };
+      } else if (dUp <= R_UPPER && y > a.s.y - 0.1 * shoulderW && outerSide(x, y, a) > -0.04 * shoulderW) {
+        const d = dUp / R_UPPER + 1;
+        if (!best || d < best.d) best = { d, label: PART[`braccio_${a.side}`] };
+      }
+    }
+    return best ? best.label : null;
+  }
+
   for (let y = 0; y < H; y++)
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
       if (!fg[i]) continue;
       const c = categories[i];
-      let label = PART.busto;
-
+      const isHeadMaterial = c === SEG.faceSkin || c === SEG.hair;
       const inHeadBand = x >= headMinX && x <= headMaxX && y < neckBase.y;
-      if (inHeadBand) {
-        const hatLimitY = Math.max(P(LM.nose).y, Math.min(P(LM.earSx).y, P(LM.earDx).y));
-        if ((c === SEG.others && y < hatLimitY) || (c === SEG.clothes && y < faceTop + 0.15 * faceW)) label = PART.cappello;
-        else if (y > faceBottom && c !== SEG.bodySkin && c !== SEG.faceSkin && c !== SEG.hair) label = PART.busto; // colletto/giacca sotto il mento
-        else label = PART.testa;
+      // barba/capelli lunghi che scendono sotto la base del collo, in linea col viso
+      const inBeard = !inHeadBand && y < beardLimitY && x >= faceMinX && x <= faceMaxX && (isHeadMaterial || c === SEG.bodySkin);
+      let label;
+
+      if (inHeadBand && ((c === SEG.others && y < hatLimitY) || (c === SEG.clothes && y < faceTop + 0.15 * faceW))) {
+        label = PART.cappello;
+      } else if ((inHeadBand || inBeard) && isHeadMaterial) {
+        label = PART.testa; // viso e capelli restano sempre alla testa
       } else {
-        // arti: mano/avambraccio prima del braccio (sono davanti)
-        let best = null;
-        for (const a of arms) {
-          if (a.vis < 0.3) continue;
-          const dHand = Math.hypot(x - a.hand.x, y - a.hand.y);
-          const dFore = segDist(x, y, a.e, a.w);
-          const dUp = segDist(x, y, a.s, a.e);
-          const inTorso = x >= torsoMinX && x <= torsoMaxX && y > neckBase.y;
-          const sameColor =
-            a.handColor && rgba
-              ? Math.hypot(rgba[i * 4] - a.handColor[0], rgba[i * 4 + 1] - a.handColor[1], rgba[i * 4 + 2] - a.handColor[2]) < 70
-              : false;
-          if (dHand <= a.handR || dFore <= R_FORE || (!inTorso && sameColor && dHand <= a.handRExt)) {
-            const d = Math.min(dHand / a.handR, dFore / R_FORE);
-            if (!best || d < best.d) best = { d, label: PART[`avambraccio_${a.side}`] };
-          } else if (dUp <= R_UPPER && y > a.s.y - 0.1 * shoulderW && outerSide(x, y, a) > -0.04 * shoulderW) {
-            const d = dUp / R_UPPER + 1; // priorità più bassa della mano/avambraccio
-            if (!best || d < best.d) best = { d, label: PART[`braccio_${a.side}`] };
-          }
+        // un braccio alzato può entrare nella fascia della testa: la mano/manica vince sulla testa
+        const arm = armLabel(x, y, i);
+        if (arm) label = arm;
+        else if ((inHeadBand || inBeard) && c === SEG.bodySkin) label = PART.testa; // collo/orecchie
+        else if (inHeadBand && y <= faceBottom) label = PART.testa;
+        else if (inHeadBand) label = PART.busto; // colletto/giacca sotto il mento
+        else {
+          label = PART.busto;
+          if (x < torsoMinX || x > torsoMaxX || y < neckBase.y) outside[i] = 1; // candidato "oggetto", deciso dopo
         }
-        if (best) label = best.label;
-        else if (x < torsoMinX || x > torsoMaxX || y < neckBase.y) outside[i] = 1; // candidato "oggetto", deciso dopo
       }
       parts[i] = label;
     }
+
+  // Oggetto tenuto in mano DAVANTI al corpo (es. sacchetto di monete): regione connessa,
+  // dentro la sagoma del busto, di una categoria diversa dai vestiti (pelle/accessori/capelli
+  // secondo il modello), che parte dalla mano. Esclusa la mano vera (raggio stretto).
+  // Limiti di area per non prendere la pancia scoperta o il collo (es. Sym11 a busto nudo).
+  const objectSeeds = [];
+  {
+    const cand = (i) => fg[i] && parts[i] !== PART.testa && parts[i] !== PART.cappello &&
+      (categories[i] === SEG.bodySkin || categories[i] === SEG.others || categories[i] === SEG.hair);
+    const inTorsoBox = (x, y) => x >= torsoMinX && x <= torsoMaxX && y > neckBase.y;
+    const minArea = 0.03 * shoulderW * shoulderW;
+    const maxArea = 0.6 * shoulderW * shoulderW;
+    const seen = new Uint8Array(W * H);
+    for (const a of arms) {
+      if (a.vis < 0.3) continue;
+      const comp = [];
+      const stack = [];
+      const r = a.handRExt;
+      for (let y = Math.max(0, Math.floor(a.hand.y - r)); y <= Math.min(H - 1, Math.ceil(a.hand.y + r)); y++)
+        for (let x = Math.max(0, Math.floor(a.hand.x - r)); x <= Math.min(W - 1, Math.ceil(a.hand.x + r)); x++) {
+          const i = y * W + x;
+          if (!seen[i] && cand(i) && inTorsoBox(x, y) && Math.hypot(x - a.hand.x, y - a.hand.y) <= r) {
+            seen[i] = 1;
+            stack.push(i);
+          }
+        }
+      let tooBig = false;
+      while (stack.length) {
+        const i = stack.pop();
+        comp.push(i);
+        if (comp.length > maxArea * 1.5) { tooBig = true; break; }
+        const x = i % W, y = (i - x) / W;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const j = ny * W + nx;
+          if (!seen[j] && cand(j) && inTorsoBox(nx, ny)) {
+            seen[j] = 1;
+            stack.push(j);
+          }
+        }
+      }
+      if (tooBig) continue;
+      const handProper = (i) => {
+        const x = i % W, y = (i - x) / W;
+        return Math.hypot(x - a.hand.x, y - a.hand.y) <= a.handR;
+      };
+      const objectPix = comp.filter((i) => !handProper(i));
+      if (objectPix.length >= minArea && objectPix.length <= maxArea) {
+        for (const i of objectPix) parts[i] = PART.oggetto_in_mano;
+        let sx = 0, sy = 0;
+        for (const i of objectPix) { sx += i % W; sy += Math.floor(i / W); }
+        objectSeeds.push({ x: sx / objectPix.length, y: sy / objectPix.length, side: a.side });
+        // Il modello può classificare parti dell'oggetto come "vestiti" (bordo, apertura, monete):
+        // crescita per colore dai pixel dell'oggetto, entro una distanza limitata.
+        if (rgba) {
+          let mr = 0, mg = 0, mb = 0;
+          for (const i of objectPix) { mr += rgba[i * 4]; mg += rgba[i * 4 + 1]; mb += rgba[i * 4 + 2]; }
+          mr /= objectPix.length; mg /= objectPix.length; mb /= objectPix.length;
+          const maxSteps = Math.round(0.2 * shoulderW);
+          let frontier = objectPix;
+          const grown = new Uint8Array(W * H);
+          for (const i of objectPix) grown[i] = 1;
+          for (let step = 0; step < maxSteps && frontier.length; step++) {
+            const next = [];
+            for (const i of frontier) {
+              const x = i % W, y = (i - x) / W;
+              for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+                const nx = x + dx, ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+                const j = ny * W + nx;
+                if (grown[j] || !fg[j] || !inTorsoBox(nx, ny) || parts[j] === PART.testa || parts[j] === PART.cappello || handProper(j)) continue;
+                const d = Math.hypot(rgba[j * 4] - mr, rgba[j * 4 + 1] - mg, rgba[j * 4 + 2] - mb);
+                if (d < 90) {
+                  grown[j] = 1;
+                  parts[j] = PART.oggetto_in_mano;
+                  next.push(j);
+                }
+              }
+            }
+            frontier = next;
+          }
+        }
+      }
+    }
+  }
 
   // Oggetto tenuto in mano = componente connessa dei pixel "fuori dal corpo" che tocca una mano.
   // (Non una distanza fissa dalla mano: un cerchio da giocoliere o un bastone lungo si allontanano molto.)
@@ -220,5 +325,31 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
     mano_sx: arms[0].hand, mano_dx: arms[1].hand
   };
   const stats = Object.fromEntries(PARTS.map((p, i) => [p, counts[i]]).filter(([p, n]) => p !== "—" && n > 0));
-  return { parts, joints, stats, warnings };
+  const handDisks = arms.filter((a) => a.vis >= 0.3).map((a) => ({ x: a.hand.x, y: a.hand.y, r: a.handR }));
+  return { parts, joints, stats, warnings, objectSeeds, handDisks };
+}
+
+/**
+ * Rifinitura con un segmentatore "a punto" (MediaPipe interactive segmenter): dato il punto
+ * centrale dell'oggetto tenuto davanti al corpo, il modello restituisce la maschera dell'intero
+ * oggetto (anche le parti che la segmentazione per categorie confonde con i vestiti).
+ * Testa, cappello e mano vera restano dove sono.
+ * @param {Uint8Array} parts - etichette (modificate sul posto)
+ * @param {Float32Array|Uint8Array} mask - confidenza per pixel 0..1 (o 0..255), stessa dimensione dell'immagine
+ */
+export function refineObjectWithMask({ parts, width: W, height: H, mask, handDisks = [], threshold = 0.5 }) {
+  const scale = mask instanceof Float32Array ? 1 : 255;
+  let changed = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (!parts[i] || mask[i] / scale < threshold) continue;
+    if (parts[i] === PART.testa || parts[i] === PART.cappello || parts[i] === PART.oggetto_in_mano) continue;
+    const x = i % W, y = (i - x) / W;
+    if (handDisks.some((h) => Math.hypot(x - h.x, y - h.y) <= h.r)) continue;
+    parts[i] = PART.oggetto_in_mano;
+    changed++;
+  }
+  const counts = new Array(PARTS.length).fill(0);
+  for (let i = 0; i < W * H; i++) if (parts[i]) counts[parts[i]]++;
+  const stats = Object.fromEntries(PARTS.map((p, i) => [p, counts[i]]).filter(([p, n]) => p !== "—" && n > 0));
+  return { changed, stats };
 }
