@@ -201,6 +201,49 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
       parts[i] = label;
     }
 
+  // La testa (con cappello/elmo) è UN blocco: isole di "testa"/"cappello" staccate dal blocco
+  // principale (es. la punta di una spada alzata che entra nella fascia della testa) tornano
+  // al corpo e diventano candidate "oggetto" (decise dopo dalla connessione con la mano).
+  {
+    const isHead = (l) => l === PART.testa || l === PART.cappello;
+    const comp = new Int32Array(W * H).fill(-1);
+    const sizes = [];
+    for (let s0 = 0; s0 < W * H; s0++) {
+      if (!isHead(parts[s0]) || comp[s0] >= 0) continue;
+      const id = sizes.length;
+      let n = 0;
+      const stack = [s0];
+      comp[s0] = id;
+      while (stack.length) {
+        const i = stack.pop();
+        n++;
+        const x = i % W, y = (i - x) / W;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const j = ny * W + nx;
+            if (comp[j] < 0 && isHead(parts[j])) {
+              comp[j] = id;
+              stack.push(j);
+            }
+          }
+      }
+      sizes.push(n);
+    }
+    if (sizes.length > 1) {
+      const main = sizes.indexOf(Math.max(...sizes));
+      let moved = 0;
+      for (let i = 0; i < W * H; i++)
+        if (comp[i] >= 0 && comp[i] !== main) {
+          parts[i] = PART.busto;
+          outside[i] = 1;
+          moved++;
+        }
+      if (moved > 0.02 * sizes[main]) warnings.push(`Testa: ${moved} pixel staccati dalla testa (es. punta di un oggetto alzato) riassegnati.`);
+    }
+  }
+
   // Oggetto tenuto in mano DAVANTI al corpo (es. sacchetto di monete): regione connessa,
   // dentro la sagoma del busto, di una categoria diversa dai vestiti (pelle/accessori/capelli
   // secondo il modello), che parte dalla mano. Esclusa la mano vera (raggio stretto).
@@ -365,4 +408,30 @@ export function refineObjectWithMask({ parts, width: W, height: H, mask, handDis
   for (let i = 0; i < W * H; i++) if (parts[i]) counts[parts[i]]++;
   const stats = Object.fromEntries(PARTS.map((p, i) => [p, counts[i]]).filter(([p, n]) => p !== "—" && n > 0));
   return { changed, stats, rejected };
+}
+
+/**
+ * Primo piano per immagini SENZA trasparenza ma con sfondo uniforme (es. nero pieno): il
+ * segmentatore per categorie è addestrato su persone e perde oggetti sottili e metallici (la lama
+ * di una spada). Qui: pixel lontani dal colore del bordo = primo piano, uniti al primo piano del
+ * segmentatore (che recupera i contorni scuri vicini al nero). Restituisce un alpha 0/255 o null
+ * se il bordo non è uniforme (sfondo vero: si resta sul segmentatore).
+ */
+export function foregroundFromUniformBorder({ width: W, height: H, rgba, categories, minDist = 40, maxBorderStd = 12 }) {
+  const ch = [[], [], []];
+  const push = (x, y) => {
+    const i = (y * W + x) * 4;
+    ch[0].push(rgba[i]); ch[1].push(rgba[i + 1]); ch[2].push(rgba[i + 2]);
+  };
+  for (let x = 0; x < W; x += 2) { push(x, 0); push(x, H - 1); }
+  for (let y = 0; y < H; y += 2) { push(0, y); push(W - 1, y); }
+  const mean = ch.map((c) => c.reduce((a, b) => a + b, 0) / c.length);
+  const std = Math.max(...ch.map((c, k) => Math.sqrt(c.reduce((a, b) => a + (b - mean[k]) ** 2, 0) / c.length)));
+  if (std > maxBorderStd) return null;
+  const alpha = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    const d = Math.hypot(rgba[i * 4] - mean[0], rgba[i * 4 + 1] - mean[1], rgba[i * 4 + 2] - mean[2]);
+    alpha[i] = d >= minDist || (categories && categories[i] !== SEG.background) ? 255 : 0;
+  }
+  return alpha;
 }

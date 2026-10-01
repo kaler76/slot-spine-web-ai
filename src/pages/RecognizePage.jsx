@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
-import { recognizeParts, refineObjectWithMask, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
+import { recognizeParts, refineObjectWithMask, foregroundFromUniformBorder, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
 import { resolvePose } from "../lib/poseRecovery.js";
 import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
+import ManualPosePicker from "../components/ManualPosePicker.jsx";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
@@ -98,12 +99,15 @@ export default function RecognizePage() {
   const [showPose, setShowPose] = useState(true);
   const canvasRef = useRef(null);
   const sourceRef = useRef(null);
+  // posa manuale: immagine già caricata in attesa dei 9 click
+  const [manual, setManual] = useState(null);
 
   async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setBusy(true);
     setResult(null);
+    setManual(null);
     try {
       setStatus("⏳ Carico i modelli (solo la prima volta, ~30 MB)...");
       const { pose, segmenter, objectSegmenter } = await loadModels();
@@ -121,14 +125,49 @@ export default function RecognizePage() {
       const alpha = hasAlpha ? Uint8Array.from({ length: W * H }, (_, i) => rgba[i * 4 + 3]) : undefined;
 
       setStatus("⏳ Riconosco posa e categorie...");
-      const recovered = await resolvePose({
-        detect: () => pose.detect(c), width: W, height: H,
-        recover: async () => {
-          setStatus("⏳ Preparazione del personaggio...");
-          return recoverPose(c);
-        }
-      });
+      const job = { file, img, c, W, H, rgba, alpha, hasAlpha, segmenter, objectSegmenter };
+      let recovered;
+      try {
+        recovered = await resolvePose({
+          detect: () => pose.detect(c), width: W, height: H,
+          recover: async () => {
+            setStatus("⏳ Preparazione del personaggio...");
+            return recoverPose(c);
+          }
+        });
+      } catch {
+        // né MediaPipe né il recupero sul server: si chiede la posa all'utente (9 click)
+        setManual(job);
+        setStatus("");
+        return;
+      }
+      await finishAnalysis(job, recovered);
+    } catch (err) {
+      setStatus(`❌ ${err.message || err}`);
+    } finally {
+      setBusy(false);
+      if (e.target) e.target.value = "";
+    }
+  }
+
+  async function handleManualPose({ landmarks, heldObjects }) {
+    const job = manual;
+    setManual(null);
+    setBusy(true);
+    try {
+      await finishAnalysis(job, { landmarks, heldObjects, source: "manual" });
+    } catch (err) {
+      setStatus(`❌ ${err.message || err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Segmentazione + regole delle parti, a posa già nota (automatica, recuperata o manuale). */
+  async function finishAnalysis({ file, img, c, W, H, rgba, alpha, hasAlpha, segmenter, objectSegmenter }, recovered) {
+    {
       const { landmarks } = recovered;
+      setStatus("⏳ Riconosco le categorie e propongo le parti...");
 
       const segRes = segmenter.segment(c);
       const mask = segRes.categoryMask;
@@ -145,7 +184,10 @@ export default function RecognizePage() {
       }
       mask.close?.();
 
-      const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, rgba });
+      // senza trasparenza ma con sfondo uniforme (es. nero): primo piano anche dal colore dello
+      // sfondo, così oggetti sottili/metallici (lame) e contorni non vengono persi
+      const keyed = alpha ? null : foregroundFromUniformBorder({ width: W, height: H, rgba, categories });
+      const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha: alpha || keyed || undefined, rgba });
       if (objectSegmenter && rec.objectSeeds.length) {
         setStatus("⏳ Rifinisco l'oggetto tenuto in mano...");
         for (const seed of rec.objectSeeds) {
@@ -185,12 +227,9 @@ export default function RecognizePage() {
       }
       sourceRef.current = { img, W, H, rgba };
       setResult({ W, H, landmarks, categories, hasAlpha, ...rec, poseSource: recovered.source, heldObjects: recovered.heldObjects, fileName: file.name });
-      setStatus(`✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}.`);
-    } catch (err) {
-      setStatus(`❌ ${err.message || err}`);
-    } finally {
-      setBusy(false);
-      if (e.target) e.target.value = "";
+      setStatus(
+        `✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}${recovered.source === "manual" ? " — posa indicata a mano" : recovered.source === "vision" ? " — posa recuperata sul server" : ""}.`
+      );
     }
   }
 
@@ -315,6 +354,18 @@ export default function RecognizePage() {
         )}
       </div>
       {status && <div className="status">{status}</div>}
+      {manual && (
+        <ManualPosePicker
+          img={manual.img}
+          width={manual.W}
+          height={manual.H}
+          onDone={handleManualPose}
+          onCancel={() => {
+            setManual(null);
+            setStatus("Analisi annullata.");
+          }}
+        />
+      )}
       {result && (
         <>
           <div className="row" style={{ gap: 12, flexWrap: "wrap", margin: "8px 0" }}>

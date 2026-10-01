@@ -14,6 +14,67 @@
 
 import { LM } from "./partRecognition.js";
 
+/** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
+export const CHROMA_COLORS = [
+  { name: "blue", hex: "#0018FF", rgb: [0, 24, 255] },
+  { name: "green", hex: "#00FF00", rgb: [0, 255, 0] },
+  { name: "magenta", hex: "#FF00FF", rgb: [255, 0, 255] }
+];
+
+/** Quota dei pixel del personaggio "vicini" a un colore (sparirebbero con quel colore di sfondo). */
+export function colorShareInCharacter({ width: W, height: H, rgba }, rgb, { near = 140 } = {}) {
+  const bg = borderColor({ width: W, height: H, rgba });
+  let n = 0, hit = 0;
+  const step = Math.max(1, Math.floor((W * H) / 60000));
+  for (let i = 0; i < W * H; i += step) {
+    const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2], a = rgba[i * 4 + 3];
+    if (a < 128 || Math.hypot(r - bg[0], g - bg[1], b - bg[2]) < 40) continue; // sfondo dell'originale
+    n++;
+    if (Math.hypot(r - rgb[0], g - rgb[1], b - rgb[2]) < near) hit++;
+  }
+  return n ? hit / n : 0;
+}
+
+/**
+ * Sceglie il colore di sfondo per la tavola esplosa: quello MENO presente nel personaggio
+ * (caso reale: cavaliere con tabarro blu su sfondo blu -> il tabarro sparisce allo scontorno).
+ * A parità vince l'ordine di CHROMA_COLORS (blu, verificato sul folletto).
+ */
+export function chooseChromaColor(original) {
+  let best = null;
+  for (const c of CHROMA_COLORS) {
+    const share = colorShareInCharacter(original, c.rgb);
+    if (!best || share < best.share - 0.002) best = { ...c, share };
+  }
+  return best;
+}
+
+/** Pezzi massimi in una tavola esplosa: oltre, il modello ha frammentato il personaggio. */
+export const MAX_PIECES = 12;
+
+/**
+ * Controlli PRIMA di elaborare la tavola, con un messaggio chiaro invece di decine di pezzi
+ * sbagliati (caso reale: caricata l'immagine originale al posto della tavola):
+ *  - la tavola non deve essere l'immagine originale;
+ *  - lo sfondo deve essere un colore "chroma" (saturo, es. blu #0018FF), non nero/bianco/grigio:
+ *    con uno sfondo neutro i contorni scuri del disegno sparirebbero insieme allo sfondo.
+ */
+export function checkSheet(sheet, original) {
+  if (original && sheet.width === original.width && sheet.height === original.height) {
+    let diff = 0, n = 0;
+    const step = Math.max(1, Math.floor((sheet.width * sheet.height) / 50000));
+    for (let i = 0; i < sheet.width * sheet.height; i += step, n++)
+      for (let k = 0; k < 3; k++) diff += Math.abs(sheet.rgba[i * 4 + k] - original.rgba[i * 4 + k]);
+    if (diff / (n * 3) < 6)
+      throw new Error("Hai caricato l'immagine ORIGINALE come tavola: serve la tavola esplosa (pezzi staccati su sfondo blu) generata con il prompt.");
+  }
+  const bg = borderColor(sheet);
+  if (Math.max(...bg) - Math.min(...bg) < 80)
+    throw new Error(
+      `Lo sfondo della tavola non è un colore pieno saturo (rgb ${bg.join(",")}): serve uno sfondo chroma, es. blu #0018FF. Con nero, bianco o grigio i contorni del disegno verrebbero tagliati.`
+    );
+}
+
 /** Errore medio massimo perché una tavola sia considerata fedele (pixel dell'originale conservati). */
 export const FIDELITY_MAX = 50;
 
@@ -341,9 +402,21 @@ function rigInfo(p, joints, landmarks) {
  */
 export function importExplodedSheet({ sheet, original, landmarks, joints, minArea }) {
   const warnings = [];
+  checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
+  if (original) {
+    const share = colorShareInCharacter(original, bg);
+    if (share > 0.005)
+      warnings.push(
+        `Il colore dello sfondo della tavola (rgb ${bg.join(",")}) è presente nel personaggio (${Math.round(share * 100)}% dei pixel): quelle zone possono sparire allo scontorno. Rigenera la tavola con lo sfondo consigliato da "Copia prompt".`
+      );
+  }
   const { lab, comps } = splitComponents(alpha, sheet.width, sheet.height, minArea ?? Math.round(0.0004 * sheet.width * sheet.height));
   if (!comps.length) throw new Error("Nessun pezzo trovato: lo sfondo della tavola deve essere a tinta unita.");
+  if (comps.length > MAX_PIECES)
+    throw new Error(
+      `Tavola troppo frammentata: ${comps.length} pezzi (massimo ${MAX_PIECES}). Il modello ha diviso il personaggio in troppe parti (es. ogni piastra dell'armatura): rigenera la tavola chiedendo al massimo 6-8 pezzi grandi.`
+    );
   let pieces = comps.map((c) => ({ area: c.area, ...cutPiece(sheet, alpha, lab, c, bg) }));
   const biggest = pieces.reduce((a, b) => (b.area > a.area ? b : a));
   const scale = estimateScale(biggest, original);

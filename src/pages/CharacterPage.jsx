@@ -20,7 +20,7 @@ import {
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
 import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
-import { addTorsoBreathMesh, addHeadMesh } from "../lib/torsoMesh.js";
+import { addTorsoBreathMesh, addHeadMesh, isRigidMaterial, metalShare } from "../lib/torsoMesh.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -49,6 +49,24 @@ function sanitizeKey(name) {
  * avviene nel DOM annidato. Serve per calcolare un bounding box dell'anteprima
  * che includa anche le parti ruotate, non solo la loro posizione non ruotata.
  */
+/** Pixel RGBA di un'immagine remota (Storage pubblico): per decidere il materiale delle parti. */
+function loadImagePixels(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      const c = document.createElement("canvas");
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      resolve(ctx.getImageData(0, 0, c.width, c.height).data);
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 function resolveAbsoluteTransform(key, partsMap) {
   const chain = [];
   let current = key;
@@ -178,9 +196,10 @@ export default function CharacterPage() {
   // busto come mesh pesata con respiro: solo export, richiede Spine Professional
   const [meshTorso, setMeshTorso] = useState(() => {
     try {
-      return localStorage.getItem("spine.meshTorso") === "1";
+      // mesh automatiche di default; "0" solo se l'utente le ha disattivate (Spine Essential)
+      return localStorage.getItem("spine.meshTorso") !== "0";
     } catch {
-      return false;
+      return true;
     }
   });
   const [showTurnaroundTester, setShowTurnaroundTester] = useState(false);
@@ -766,16 +785,36 @@ export default function CharacterPage() {
       if (meshTorso) {
         const meshParts = orderedPartKeys.map((k) => ({ partKey: k, ...previewPartsMap[k] }));
         const done = [];
-        const r = addTorsoBreathMesh(skeletonJson, meshParts);
-        if (r.applied) {
-          skeletonJson = r.json;
-          done.push("busto (respiro)");
-        } else note += ` ⚠️ Mesh del busto non applicata: ${r.reason}.`;
-        const rh = addHeadMesh(skeletonJson, meshParts);
-        if (rh.applied) {
-          skeletonJson = rh.json;
-          done.push("testa (cappello e barba in ritardo)");
-        } else note += ` ⚠️ Mesh della testa non applicata: ${rh.reason}.`;
+        // materiale: parti metalliche (elmo, corazza) restano rigide, niente deformazione
+        const rigidOf = async (role) => {
+          const part = meshParts.find((p) => p.role === role);
+          const row = part && character.parts.find((p) => p.part_key === part.partKey);
+          if (!row?.image_url) return { rigid: false };
+          try {
+            const px = await loadImagePixels(row.image_url);
+            return { rigid: isRigidMaterial(px), share: metalShare(px), key: part.partKey };
+          } catch {
+            return { rigid: false };
+          }
+        };
+        const torsoMat = await rigidOf("torso");
+        if (torsoMat.rigid) note += ` Busto rigido (metallo ${Math.round(torsoMat.share * 100)}%): niente respiro.`;
+        else {
+          const r = addTorsoBreathMesh(skeletonJson, meshParts);
+          if (r.applied) {
+            skeletonJson = r.json;
+            done.push("busto (respiro)");
+          } else note += ` ⚠️ Mesh del busto non applicata: ${r.reason}.`;
+        }
+        const headMat = await rigidOf("head");
+        if (headMat.rigid) note += ` Testa rigida (metallo ${Math.round(headMat.share * 100)}%, es. elmo): niente cappello/barba deformabili.`;
+        else {
+          const rh = addHeadMesh(skeletonJson, meshParts);
+          if (rh.applied) {
+            skeletonJson = rh.json;
+            done.push("testa (cappello e barba in ritardo)");
+          } else note += ` ⚠️ Mesh della testa non applicata: ${rh.reason}.`;
+        }
         if (done.length) note = ` Mesh: ${done.join(", ")} — aprire con Spine Professional.${note}`;
       }
       await saveCharacterExport({ characterId: character.id, skeletonJson, atlasText });
@@ -1296,7 +1335,7 @@ export default function CharacterPage() {
                 }
               }}
             />{" "}
-            🫁 Mesh nell'export: busto che respira, cappello e barba che ondeggiano (richiede Spine Professional)
+            🫁 Mesh automatiche nell'export: busto che respira, cappello e barba che ondeggiano; le parti di metallo restano rigide (richiede Spine Professional — togli la spunta per Spine Essential)
           </label>
           <div className="btn-row">
             <button type="button" className="btn secondary" onClick={handleDownload}>

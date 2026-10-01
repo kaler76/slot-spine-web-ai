@@ -195,3 +195,24 @@ export function addHeadMesh(skeletonJson, parts, rules = HEAD_MESH_RULES) {
   anim.bones[chinName] = { rotate: track(rules.chinSway, rules.chinLag) };
   return { json, applied: true };
 }
+
+// ---------------------------------------------------------------- materiale rigido
+/**
+ * Quota "metallo" di un'immagine RGBA: pixel opachi poco saturi e non scuri (acciaio, argento).
+ * Serve a decidere da solo se una parte può deformarsi (stoffa, pelle, barba) o deve restare
+ * rigida (elmo, corazza): una mesh che respira su una piastra di metallo la piega in modo falso.
+ * Soglia tarata su due casi (folletto: 0.01 stoffa; cavaliere: 0.13-0.25 armatura): provvisoria.
+ */
+export const RIGID_METAL_SHARE = 0.08;
+export function metalShare(rgba) {
+  let n = 0, metal = 0;
+  for (let i = 0; i < rgba.length; i += 4 * 3) {
+    if (rgba[i + 3] < 128) continue;
+    const r = rgba[i], g = rgba[i + 1], b = rgba[i + 2];
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    n++;
+    if (mx > 89 && (mx - mn) / mx < 0.2) metal++;
+  }
+  return n ? metal / n : 0;
+}
+export const isRigidMaterial = (rgba) => metalShare(rgba) >= RIGID_METAL_SHARE;

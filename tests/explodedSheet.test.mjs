@@ -58,3 +58,26 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
     assert.ok(diff / n <= expected.maxDiffShare, `pixel diversi ${((diff / n) * 100).toFixed(1)}%`);
   });
 }
+
+import { checkSheet, MAX_PIECES } from "../src/lib/explodedSheet.js";
+
+test("tavola: l'immagine originale caricata come tavola viene rifiutata", () => {
+  const original = read(path.join(root, "folletto", "original.png"));
+  assert.throws(() => importExplodedSheet({ sheet: original, original }), /ORIGINALE/);
+});
+
+test("tavola: sfondo nero (non chroma) rifiutato", () => {
+  const W = 60, H = 40, rgba = new Uint8ClampedArray(W * H * 4);
+  for (let i = 0; i < W * H; i++) rgba[i * 4 + 3] = 255;
+  assert.throws(() => checkSheet({ width: W, height: H, rgba }), /chroma/);
+});
+
+test(`tavola: più di ${MAX_PIECES} pezzi = troppo frammentata`, () => {
+  const W = 400, H = 400, rgba = new Uint8ClampedArray(W * H * 4);
+  for (let i = 0; i < W * H; i++) rgba.set([0, 24, 255, 255], i * 4);
+  for (let k = 0; k < 16; k++) {
+    const x0 = 20 + (k % 4) * 95, y0 = 20 + Math.floor(k / 4) * 95;
+    for (let y = y0; y < y0 + 50; y++) for (let x = x0; x < x0 + 50; x++) rgba.set([200, 150, 60, 255], (y * W + x) * 4);
+  }
+  assert.throws(() => importExplodedSheet({ sheet: { width: W, height: H, rgba }, original: { width: W, height: H, rgba: new Uint8ClampedArray(W * H * 4) } }), /frammentata/);
+});

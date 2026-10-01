@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
-import { importExplodedSheet } from "../lib/explodedSheet.js";
+import { importExplodedSheet, chooseChromaColor } from "../lib/explodedSheet.js";
 import { composePieces } from "../lib/partExtraction.js";
 import { preserveSharedGrip } from "../lib/sharedGrip.js";
 import { piecesToCharacterParts } from "../lib/characterFromPieces.js";
@@ -9,12 +9,20 @@ import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.
 
 // Prompt per far generare la tavola esplosa a un modello di immagini (Gemini / ChatGPT),
 // allegando l'immagine originale del personaggio.
-export const EXPLODED_PROMPT = `Using the attached character image, create an EXPLODED VIEW sheet of the same character for 2D skeletal animation (Spine).
+/**
+ * Prompt per la tavola esplosa. Lo sfondo è scelto sul personaggio (chooseChromaColor): il colore
+ * meno presente nel disegno, così nessuna parte (es. un tabarro blu) sparisce allo scontorno.
+ */
+export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }) {
+  return `Using the attached character image, create an EXPLODED VIEW sheet of the same character for 2D skeletal animation (Spine).
 - Same character, same art style, same scale and same proportions as the original. Do not redesign anything.
-- Split it into separate pieces: HEAD (including hat/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and EVERY HELD OBJECT as its own piece.
+- Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and EVERY HELD OBJECT as its own piece (a sword or staff is ONE piece). Do NOT split armor, clothing or accessories into small plates or fragments.
+- Do NOT change the pose: every piece keeps EXACTLY the same angle and shape it has in the original (bent or crossed arms stay bent or crossed, a raised arm stays raised). Only move pieces apart, never rotate, straighten or re-pose them.
 - Keep every piece as close as possible to its original position, just moved apart so that no piece touches or overlaps another (clear gap between pieces).
 - Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding an object.
-- Background: flat solid pure blue #0018FF, no gradient, no shadows, no glow, no particles, no text.`;
+- Background: flat solid pure ${chroma.name} ${chroma.hex}, no gradient, no shadows, no glow, no particles, no text. The character must not contain this background color.`;
+}
+export const EXPLODED_PROMPT = buildExplodedPrompt();
 
 function loadImage(file) {
   return new Promise((resolve, reject) => {
@@ -47,6 +55,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [view, setView] = useState("compare");
   const canvasRef = useRef(null);
   const navigate = useNavigate();
+  // sfondo della tavola scelto sul personaggio (colore assente dal disegno)
+  const chroma = useMemo(() => (original?.rgba ? chooseChromaColor(original) : null), [original]);
 
   /** Crea un character (Supabase) con un osso per pezzo e apre la sua pagina per animarlo. */
   async function createCharacterFromPieces() {
@@ -198,9 +208,16 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         Carica la tavola con il personaggio già diviso in pezzi staccati (testa, busto, braccia, oggetti) su sfondo a
         tinta unita. L'app scontorna ogni pezzo, lo rimette al suo posto sull'immagine qui sopra, gli dà il nome dalla
         posa e decide chi sta davanti. Per generarla: allega l'immagine originale a Gemini/ChatGPT con questo prompt{" "}
-        <button type="button" className="btn secondary" onClick={() => navigator.clipboard?.writeText(EXPLODED_PROMPT)}>
+        <button type="button" className="btn secondary" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined))}>
           📋 Copia prompt
         </button>
+        {chroma && (
+          <span style={{ marginLeft: 8 }}>
+            sfondo consigliato per questo personaggio:{" "}
+            <span style={{ display: "inline-block", width: 12, height: 12, background: chroma.hex, verticalAlign: "middle", borderRadius: 2 }} />{" "}
+            <b>{chroma.hex}</b>
+          </span>
+        )}
       </div>
       <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <input type="file" accept="image/*" disabled={busy} onChange={handleSheet} />
