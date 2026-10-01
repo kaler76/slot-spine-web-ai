@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { toSpine41 } from "./spineFormat";
 
 /**
  * Costruisce e scarica lo zip Spine per una variante di animazione già salvata
@@ -8,7 +9,7 @@ export async function downloadSpinePackage({ symbolName, animationType, imageUrl
   const zip = new JSZip();
   const safeName = sanitizeName(symbolName);
 
-  zip.file(`${safeName}.json`, JSON.stringify(skeletonJson, null, 2));
+  zip.file(`${safeName}.json`, JSON.stringify(toSpine41(skeletonJson), null, 2));
   zip.file(`${safeName}.atlas`, atlasText);
 
   const imageResponse = await fetch(imageUrl);
@@ -26,7 +27,7 @@ export async function downloadAllAnimationsPackage({ symbolName, animations }) {
 
   for (const anim of animations) {
     const folder = zip.folder(anim.animation_type);
-    folder.file(`${safeName}.json`, JSON.stringify(anim.skeleton_json, null, 2));
+    folder.file(`${safeName}.json`, JSON.stringify(toSpine41(anim.skeleton_json), null, 2));
     folder.file(`${safeName}.atlas`, anim.atlas_text);
     const imageResponse = await fetch(anim.image_url);
     const imageBlob = await imageResponse.blob();
@@ -45,7 +46,7 @@ export async function downloadBackgroundPackage({ backgroundName, skeletonJson, 
   const zip = new JSZip();
   const safeName = sanitizeName(backgroundName);
 
-  zip.file(`${safeName}.json`, JSON.stringify(skeletonJson, null, 2));
+  zip.file(`${safeName}.json`, JSON.stringify(toSpine41(skeletonJson), null, 2));
   zip.file(`${safeName}.atlas`, atlasText);
 
   for (const layer of layers) {
@@ -74,7 +75,7 @@ export async function downloadCharacterPackage({ characterName, skeletonJson, at
   const zip = new JSZip();
   const safeName = sanitizeName(characterName);
 
-  zip.file(`${safeName}.json`, JSON.stringify(skeletonJson, null, 2));
+  zip.file(`${safeName}.json`, JSON.stringify(toSpine41(skeletonJson), null, 2));
   zip.file(`${safeName}.atlas`, atlasText);
 
   for (const part of parts) {
