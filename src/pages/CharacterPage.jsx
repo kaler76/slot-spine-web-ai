@@ -20,6 +20,7 @@ import {
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
 import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
+import { addTorsoBreathMesh, addHeadMesh } from "../lib/torsoMesh.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -174,6 +175,14 @@ export default function CharacterPage() {
 
   const [playing, setPlaying] = useState(false);
   const [savingExport, setSavingExport] = useState(false);
+  // busto come mesh pesata con respiro: solo export, richiede Spine Professional
+  const [meshTorso, setMeshTorso] = useState(() => {
+    try {
+      return localStorage.getItem("spine.meshTorso") === "1";
+    } catch {
+      return false;
+    }
+  });
   const [showTurnaroundTester, setShowTurnaroundTester] = useState(false);
 
   // --- Editing inline parti esistenti ---
@@ -752,8 +761,25 @@ export default function CharacterPage() {
           height: previewPartsMap[k].height
         }))
       );
-      await saveCharacterExport({ characterId: character.id, skeletonJson: skeletonData, atlasText });
-      setStatus("✅ Export generato e salvato.");
+      let skeletonJson = skeletonData;
+      let note = "";
+      if (meshTorso) {
+        const meshParts = orderedPartKeys.map((k) => ({ partKey: k, ...previewPartsMap[k] }));
+        const done = [];
+        const r = addTorsoBreathMesh(skeletonJson, meshParts);
+        if (r.applied) {
+          skeletonJson = r.json;
+          done.push("busto (respiro)");
+        } else note += ` ⚠️ Mesh del busto non applicata: ${r.reason}.`;
+        const rh = addHeadMesh(skeletonJson, meshParts);
+        if (rh.applied) {
+          skeletonJson = rh.json;
+          done.push("testa (cappello e barba in ritardo)");
+        } else note += ` ⚠️ Mesh della testa non applicata: ${rh.reason}.`;
+        if (done.length) note = ` Mesh: ${done.join(", ")} — aprire con Spine Professional.${note}`;
+      }
+      await saveCharacterExport({ characterId: character.id, skeletonJson, atlasText });
+      setStatus(`✅ Export generato e salvato.${note}`);
       await refresh();
     } catch (err) {
       setStatus(`❌ Errore export: ${err.message}`);
@@ -1257,6 +1283,21 @@ export default function CharacterPage() {
               ⚙️ Genera export
             </button>
           </div>
+          <label className="field-label-inline" title="Busto: mesh legata a bacino e petto (il petto respira, i piedi restano fermi). Testa: mesh a tre fasce (cima, viso, mento) con cappello e barba che ondeggiano in ritardo. Si vede solo in Spine (Professional).">
+            <input
+              type="checkbox"
+              checked={meshTorso}
+              onChange={(e) => {
+                setMeshTorso(e.target.checked);
+                try {
+                  localStorage.setItem("spine.meshTorso", e.target.checked ? "1" : "0");
+                } catch {
+                  /* preferenza non salvata: nessun problema */
+                }
+              }}
+            />{" "}
+            🫁 Mesh nell'export: busto che respira, cappello e barba che ondeggiano (richiede Spine Professional)
+          </label>
           <div className="btn-row">
             <button type="button" className="btn secondary" onClick={handleDownload}>
               ⬇ Scarica pacchetto

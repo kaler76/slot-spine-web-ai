@@ -14,7 +14,11 @@ export function toSpine41(skeletonJson) {
 
   if (json.skeleton) json.skeleton.images = "./";
 
-  if (Array.isArray(json.bones)) json.bones = sortBonesTopologically(json.bones);
+  if (Array.isArray(json.bones)) {
+    const before = json.bones.map((b) => b.name);
+    json.bones = sortBonesTopologically(json.bones);
+    remapWeightedMeshes(json, before);
+  }
 
   for (const anim of Object.values(json.animations || {})) {
     for (const timelines of Object.values(anim.bones || {})) {
@@ -48,4 +52,26 @@ function sortBonesTopologically(bones) {
     }
   }
   return out;
+}
+
+/**
+ * Le mesh pesate indicano le ossa per INDICE nell'array bones: dopo il riordino
+ * topologico gli indici vanno riportati alla nuova posizione delle stesse ossa.
+ */
+function remapWeightedMeshes(json, beforeNames) {
+  const newIndex = new Map(json.bones.map((b, i) => [b.name, i]));
+  const map = beforeNames.map((n) => newIndex.get(n));
+  if (map.every((v, i) => v === i)) return;
+  for (const skin of json.skins || []) {
+    for (const slot of Object.values(skin.attachments || {})) {
+      for (const att of Object.values(slot)) {
+        if (att.type !== "mesh" || !att.uvs || att.vertices.length === att.uvs.length) continue; // non pesata
+        const v = att.vertices;
+        for (let i = 0; i < v.length; ) {
+          const count = v[i++];
+          for (let k = 0; k < count; k++, i += 4) v[i] = map[v[i]];
+        }
+      }
+    }
+  }
 }
