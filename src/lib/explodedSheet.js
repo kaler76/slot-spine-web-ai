@@ -14,6 +14,9 @@
 
 import { LM } from "./partRecognition.js";
 
+/** Errore medio massimo perché una tavola sia considerata fedele (pixel dell'originale conservati). */
+export const FIDELITY_MAX = 50;
+
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
 
 /** Colore di sfondo = mediana dei pixel del bordo dell'immagine. */
@@ -90,7 +93,47 @@ function cutPiece(img, alpha, lab, comp, bg, pad = 3) {
       for (let k = 0; k < 3; k++) out[li + k] = (rgba[gi * 4 + k] - (1 - a) * bg[k]) / a; // despill
       out[li + 3] = Math.round(a * 255);
     }
+  suppressSpill(out, w, h, bg);
   return { sheetX: x0, sheetY: y0, width: w, height: h, rgba: out };
+}
+
+/**
+ * Alone di sfondo sui bordi (filo blu/violaceo attorno ai pezzi): nella fascia di SPILL_BAND
+ * pixel dal bordo trasparente il canale dominante dello sfondo (es. il blu) non può superare
+ * il massimo degli altri due; il primo pixel del bordo viene anche reso più trasparente.
+ */
+const SPILL_BAND = 3;
+function suppressSpill(out, w, h, bg) {
+  const k = bg.indexOf(Math.max(...bg)); // canale dominante dello sfondo
+  if (bg[k] - Math.max(...bg.filter((_, i) => i !== k)) < 80) return; // sfondo non "chroma"
+  const dist = new Int32Array(w * h).fill(SPILL_BAND + 1);
+  const q = [];
+  for (let i = 0; i < w * h; i++)
+    if (out[i * 4 + 3] === 0) {
+      dist[i] = 0;
+      q.push(i);
+    }
+  for (let qi = 0; qi < q.length; qi++) {
+    const i = q[qi];
+    if (dist[i] >= SPILL_BAND) continue;
+    const x = i % w, y = (i - x) / w;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const j = ny * w + nx;
+      if (dist[j] > dist[i] + 1) {
+        dist[j] = dist[i] + 1;
+        q.push(j);
+      }
+    }
+  }
+  for (let i = 0; i < w * h; i++) {
+    if (!out[i * 4 + 3] || dist[i] > SPILL_BAND) continue;
+    const o = [out[i * 4], out[i * 4 + 1], out[i * 4 + 2]];
+    const cap = Math.max(...o.filter((_, j) => j !== k));
+    if (o[k] > cap) out[i * 4 + k] = cap;
+    if (dist[i] === 1) out[i * 4 + 3] = Math.round(out[i * 4 + 3] * 0.6);
+  }
 }
 
 /** Campioni (pixel opachi) del pezzo per il confronto con l'originale. */
@@ -128,7 +171,7 @@ function matchError(piece, samples, orig, tx, ty, s, T = 120) {
  * Posizione del pezzo nell'originale: ricerca grossolana a passo `coarse` px su tutta
  * l'immagine con pochi campioni, poi rifinitura a 1 px con più campioni.
  */
-export function alignPiece(piece, orig, s = 1, { coarse = 8, nFew = 200 } = {}) {
+export function alignPiece(piece, orig, s = 1, { coarse = 8, nFew = 200, window = null } = {}) {
   const few = samplesOf(piece, nFew);
   const mid = samplesOf(piece, 1000);
   const many = samplesOf(piece, 4000);
@@ -136,6 +179,8 @@ export function alignPiece(piece, orig, s = 1, { coarse = 8, nFew = 200 } = {}) 
   let best = { x: 0, y: 0, err: Infinity };
   for (let ty = -Math.round(ph / 2); ty <= orig.height - ph / 2; ty += coarse)
     for (let tx = -Math.round(pw / 2); tx <= orig.width - pw / 2; tx += coarse) {
+      // finestra opzionale: il CENTRO del pezzo deve cadere entro r da (cx,cy)
+      if (window && Math.hypot(tx + pw / 2 - window.cx, ty + ph / 2 - window.cy) > window.r) continue;
       const e = matchError(piece, few, orig, tx, ty, s);
       if (e < best.err) best = { x: tx, y: ty, err: e };
     }
@@ -310,8 +355,39 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
   });
   labelPieces(pieces, landmarks);
+  // Un oggetto è TENUTO in mano: se è finito lontano da entrambe le mani (tavola ridisegnata,
+  // confronto ambiguo), lo si ricerca solo attorno alle mani.
+  const hands = [joints?.mano_sx || landmarks?.[LM.wristSx], joints?.mano_dx || landmarks?.[LM.wristDx]].filter(Boolean);
+  const sw = landmarks ? Math.hypot(landmarks[LM.shoulderSx].x - landmarks[LM.shoulderDx].x, landmarks[LM.shoulderSx].y - landmarks[LM.shoulderDx].y) : 0;
+  if (hands.length && sw) {
+    for (const p of pieces) {
+      if (!p.name.startsWith("oggetto")) continue;
+      const c = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+      const r = 0.5 * sw + Math.max(p.width, p.height) / 2;
+      if (hands.some((h) => Math.hypot(c.x - h.x, c.y - h.y) <= r)) continue;
+      let best = null;
+      for (const h of hands) {
+        const pos = alignPiece(p, original, 1, { window: { cx: h.x, cy: h.y, r } });
+        if (!best || pos.err < best.err) best = pos;
+      }
+      if (best && isFinite(best.err)) {
+        warnings.push(`${p.name}: lontano dalle mani, riposizionato vicino alla mano (errore ${best.err.toFixed(0)}).`);
+        Object.assign(p, { x: best.x, y: best.y, matchError: +best.err.toFixed(1) });
+      }
+    }
+  }
   const front = orderPieces(pieces, original);
   for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks));
   pieces.sort((a, b) => a.order - b.order);
-  return { pieces, scale, front, bg, warnings };
+  // Fedeltà della tavola: errore medio pesato sull'area. Una tavola che RIDISEGNA il personaggio
+  // (proporzioni, dettagli, posa diversi) non si ricompone sull'originale e non va usata come
+  // dato di addestramento.
+  const totA = pieces.reduce((a, p) => a + p.area, 0) || 1;
+  const fidelityError = +(pieces.reduce((a, p) => a + p.matchError * p.area, 0) / totA).toFixed(1);
+  const faithful = fidelityError <= FIDELITY_MAX;
+  if (!faithful)
+    warnings.unshift(
+      `Tavola NON fedele all'originale (errore medio ${fidelityError}, limite ${FIDELITY_MAX}): il modello ha ridisegnato il personaggio. Ricomposizione approssimata, da non usare per il dataset.`
+    );
+  return { pieces, scale, front, bg, warnings, fidelityError, faithful };
 }

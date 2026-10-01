@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
 import { importExplodedSheet } from "../lib/explodedSheet.js";
 import { composePieces } from "../lib/partExtraction.js";
+import { piecesToCharacterParts } from "../lib/characterFromPieces.js";
+import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 
 // Prompt per far generare la tavola esplosa a un modello di immagini (Gemini / ChatGPT),
 // allegando l'immagine originale del personaggio.
@@ -42,6 +45,33 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [res, setRes] = useState(null);
   const [view, setView] = useState("compare");
   const canvasRef = useRef(null);
+  const navigate = useNavigate();
+
+  /** Crea un character (Supabase) con un osso per pezzo e apre la sua pagina per animarlo. */
+  async function createCharacterFromPieces() {
+    if (!res) return;
+    if (!res.faithful && !window.confirm("La tavola NON è fedele all'originale: creare comunque il character?")) return;
+    const base = (fileName || "personaggio").replace(/\.[^.]+$/, "");
+    const name = window.prompt("Nome del nuovo character:", base);
+    if (!name) return;
+    setBusy(true);
+    try {
+      const { parts } = piecesToCharacterParts(res.pieces);
+      setStatus("⏳ Creo il character...");
+      const character = await createCharacter(name);
+      for (const [k, part] of parts.entries()) {
+        setStatus(`⏳ Carico ${part.partKey} (${k + 1}/${parts.length})...`);
+        const piece = res.pieces.find((p) => p.name === part.partKey);
+        const imageBlob = await toBlob(pieceCanvas(piece));
+        await saveCharacterPart({ characterId: character.id, ...part, imageBlob });
+      }
+      navigate(`/character/${character.id}`);
+    } catch (err) {
+      setStatus(`❌ Creazione character: ${err.message || err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleSheet(e) {
     const file = e.target.files?.[0];
@@ -60,7 +90,11 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
       const out = importExplodedSheet({ sheet, original, landmarks, joints });
       setRes({ ...out, sheetName: file.name });
-      setStatus(`✅ ${out.pieces.length} pezzi separati e rimessi al loro posto${out.scale !== 1 ? ` (scala ${out.scale.toFixed(2)})` : ""}.`);
+      setStatus(
+        out.faithful
+          ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto${out.scale !== 1 ? ` (scala ${out.scale.toFixed(2)})` : ""}. Tavola fedele (errore ${out.fidelityError}).`
+          : `⚠️ ${out.pieces.length} pezzi separati, ma la tavola NON è fedele all'originale (errore ${out.fidelityError}): ricomposizione approssimata.`
+      );
     } catch (err) {
       setStatus(`❌ ${err.message || err}`);
     } finally {
@@ -122,6 +156,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       sheet: res.sheetName,
       size: [original.width, original.height],
       scale: res.scale,
+      fedele: res.faithful,
+      erroreFedelta: res.fidelityError,
       note: "x,y = angolo in alto a sinistra del pezzo nell'immagine originale; pivot in coordinate dell'immagine originale; order = ordine di disegno (0 = dietro).",
       pieces: res.pieces.map((p) => ({
         name: p.name,
@@ -174,6 +210,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
               <option value="boxes">Pezzi, ordine e pivot</option>
             </select>
             <button type="button" className="btn secondary" onClick={downloadZip}>⬇️ Scarica pezzi (ZIP)</button>
+            <button type="button" className="btn" disabled={busy} onClick={createCharacterFromPieces}>🦴 Crea character</button>
           </>
         )}
       </div>

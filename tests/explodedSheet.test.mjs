@@ -26,6 +26,11 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
   const expected = JSON.parse(fs.readFileSync(path.join(dir, "expected.json"), "utf8"));
   const r = importExplodedSheet({ sheet, original, landmarks });
 
+  test(`${name}: fedeltà della tavola (${r.fidelityError})`, () => {
+    assert.equal(r.faithful, expected.faithful ?? true);
+  });
+  if (expected.faithful === false) continue; // tavola da scartare: niente altri controlli
+
   test(`${name}: pezzi e ordine di disegno`, () => {
     assert.deepEqual(r.pieces.map((p) => p.name), expected.pieces.map((p) => p.name));
   });

@@ -129,6 +129,7 @@ const TEMPLATES = {
 
 export const AVAILABLE_PART_ANIMATION_TYPES = Object.keys(TEMPLATES);
 
+/** Track "a tre chiavi" del singolo tipo (versione storica, durate diverse per parte). */
 export function buildPartTrack(animationType, partKey, speed = 1) {
   const fn = TEMPLATES[animationType];
   if (!fn) {
@@ -139,17 +140,109 @@ export function buildPartTrack(animationType, partKey, speed = 1) {
   return fn(partKey, speed);
 }
 
+// ---------------------------------------------------------------- loop ambient v2
+// Regole approvate sul folletto (2026-10-01, "PERFETTO"):
+//  1. UN solo ciclo per tutte le parti (LOOP_SECONDS): ogni parte fa un numero intero di
+//     oscillazioni nel ciclo, così il loop si chiude senza scatti (prima ogni parte aveva la
+//     sua durata e le più corte restavano ferme fino alla fine della timeline).
+//  2. Oscillazioni simmetriche attorno alla posa di riposo (sinusoide), campionate a SAMPLE_FPS.
+//  3. Ampiezza per RUOLO: testa ±2.5°, braccio ±2°, braccio alzato (mano sopra la spalla:
+//     pivot nella metà bassa dell'immagine) = saluto ±9° con 2 oscillazioni, oggetto ±3.5°
+//     in ritardo sul braccio (peso), altre parti ±3°. Vento: metà ampiezza, ciclo intero.
+//  4. Fase diversa per parte (non si muove tutto all'unisono).
+export const LOOP_SECONDS = 4;
+export const SAMPLE_FPS = 15;
+export const AMBIENT_RULES_VERSION = "2026-10-01.v2";
+
+const ROLE_SWAY = { head: 2.5, arm: 2, forearm: 2, hand: 3, accessory: 3.5, headdress: 2, hair: 3, earring: 4 };
+const ROLE_PHASE = { head: 0, arm: 1.2, forearm: 1.6, hand: 2.0, accessory: 2.0, headdress: 0.3, hair: 0.8, earring: 2.4 };
+
+function hashPhase(key) {
+  let h = 0;
+  for (const c of key) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return ((h % 628) / 100);
+}
+
+/** Braccio alzato (saluto): il pivot (spalla) sta nella metà bassa dell'immagine del braccio. */
+export function isRaisedArm(part) {
+  return (part.role === "arm" || part.role === "forearm") && Number.isFinite(Number(part.pivotFy)) && part.pivotFy !== null && Number(part.pivotFy) >= 0.5;
+}
+
+/** Numero intero di cicli nel loop per una parte con periodo "naturale" base/speed. */
+function cyclesIn(baseSeconds, speed) {
+  const period = baseSeconds / (speed && speed > 0 ? speed : 1);
+  return Math.max(1, Math.round(LOOP_SECONDS / period));
+}
+
+function sampled(fn) {
+  const n = Math.round(LOOP_SECONDS * SAMPLE_FPS);
+  const out = [];
+  for (let k = 0; k <= n; k++) {
+    const t = k / SAMPLE_FPS;
+    out.push({ time: +t.toFixed(4), ...fn(t) });
+  }
+  return out;
+}
+
 /**
- * Combina i track di più parti in un'unica timeline "ambient" (bones + slots colore).
- * @param {Array<{partKey: string, animationType: string, speed: number}>} parts
+ * Traccia v2 di una parte (stesso formato delle tracce storiche: rotate con "angle",
+ * convertito in "value" solo all'export da spineFormat.toSpine41).
+ */
+export function buildLoopTrack(part) {
+  const { partKey, animationType, speed, role } = part;
+  const phase = role && ROLE_PHASE[role] !== undefined ? ROLE_PHASE[role] : hashPhase(partKey);
+  const w = (2 * Math.PI) / LOOP_SECONDS;
+  if (animationType === "sway" || animationType === "wind") {
+    let amp = role && ROLE_SWAY[role] !== undefined ? ROLE_SWAY[role] : 3;
+    let n = animationType === "wind" ? 1 : cyclesIn(4, speed);
+    if (animationType === "wind") amp = amp / 2;
+    if (animationType === "sway" && isRaisedArm(part)) {
+      amp = 9;
+      n = Math.max(2, n);
+    }
+    return { bones: { [partKey]: { rotate: sampled((t) => ({ angle: +(amp * Math.sin(n * w * t + phase)).toFixed(3) })) } } };
+  }
+  if (animationType === "bounce") {
+    const n = cyclesIn(1.1, speed);
+    return {
+      bones: { [partKey]: { translate: sampled((t) => ({ x: 0, y: +(5 * (1 - Math.cos(n * w * t + 0))).toFixed(3) })) } }
+    };
+  }
+  if (animationType === "blink") {
+    // lampeggio breve ripetuto un numero intero di volte nel ciclo
+    const n = cyclesIn(2.6, speed);
+    const d = LOOP_SECONDS / n;
+    const scale = [], rgba = [];
+    for (let c = 0; c < n; c++) {
+      const t0 = c * d;
+      for (const [f, sy, col] of [[0, 1, "ffffffff"], [0.85, 1, "ffffffff"], [0.89, 0.1, "ffffff33"], [0.93, 1, "ffffffff"]]) {
+        scale.push({ time: +(t0 + f * d).toFixed(4), x: 1, y: sy });
+        rgba.push({ time: +(t0 + f * d).toFixed(4), color: col });
+      }
+    }
+    scale.push({ time: LOOP_SECONDS, x: 1, y: 1 });
+    rgba.push({ time: LOOP_SECONDS, color: "ffffffff" });
+    return { bones: { [partKey]: { scale } }, slots: { [partKey]: { rgba } } };
+  }
+  return { bones: {} }; // static, physics (simulata nell'anteprima)
+}
+
+/**
+ * Combina le parti in un'unica timeline "ambient" con ciclo comune (vedi regole sopra).
+ * @param {Array<{partKey: string, animationType: string, speed: number, role?: string, pivotFy?: number}>} parts
  */
 export function buildAmbientCharacterAnimation(parts) {
   const bones = {};
   const slots = {};
-  for (const { partKey, animationType, speed } of parts) {
-    const track = buildPartTrack(animationType, partKey, speed);
+  let animated = false;
+  for (const part of parts) {
+    if (!TEMPLATES[part.animationType]) buildPartTrack(part.animationType, part.partKey, part.speed); // stesso errore di prima
+    const track = buildLoopTrack(part);
     if (track.bones) Object.assign(bones, track.bones);
     if (track.slots) Object.assign(slots, track.slots);
+    if (Object.keys(track.bones || {}).length) animated = true;
   }
+  // chiave finta sulla radice: la timeline dura sempre LOOP_SECONDS anche se nessuna parte si muove
+  if (!animated) bones.root = { rotate: [{ time: 0, angle: 0 }, { time: LOOP_SECONDS, angle: 0 }] };
   return { ambient: { bones, ...(Object.keys(slots).length ? { slots } : {}) } };
 }

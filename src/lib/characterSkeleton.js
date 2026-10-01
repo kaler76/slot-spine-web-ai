@@ -82,7 +82,7 @@ export function buildCharacterSkeleton({ parts }) {
 
   const skins = [{ name: "default", attachments }];
   const animations = buildAmbientCharacterAnimation(
-    sorted.map((p) => ({ partKey: p.partKey, animationType: p.animationType, speed: p.speed }))
+    sorted.map((p) => ({ partKey: p.partKey, animationType: p.animationType, speed: p.speed, role: p.role || null, pivotFy: p.pivotFy ?? null }))
   );
 
   return { skeleton, bones, slots, skins, animations };

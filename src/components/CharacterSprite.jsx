@@ -106,6 +106,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
         segments: p.segments || 1,
         pivotFx: p.pivot_fx,
         pivotFy: p.pivot_fy,
+        role: p.role || null,
         url: p.image_url
       };
     }
@@ -157,7 +158,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
   const animationsObj = useMemo(
     () =>
       buildAmbientCharacterAnimation(
-        orderedKeys.map((k) => ({ partKey: k, animationType: partsMap[k].animationType, speed: partsMap[k].speed }))
+        orderedKeys.map((k) => ({ partKey: k, animationType: partsMap[k].animationType, speed: partsMap[k].speed, role: partsMap[k].role, pivotFy: partsMap[k].pivotFy }))
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [orderedKeysJoined]
