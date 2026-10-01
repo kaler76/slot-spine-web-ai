@@ -1,0 +1,19 @@
+{
+  "name": "sym11",
+  "approved": "2026-10-01",
+  "note": "Riferimento approvato dall'utente: v2 di Sym11 (rig manuale). Pivot attesi = scelte manuali della v2, in pixel dell'immagine.",
+  "tolerancePx": 10,
+  "parts": [
+    { "partKey": "parte_14", "parentKey": "root",    "width": 287, "height": 429, "offsetX": -4,   "offsetY": 166, "zIndex": 0,  "anchorX": "center", "anchorY": "center" },
+    { "partKey": "parte_12", "parentKey": "root",    "width": 323, "height": 493, "offsetX": 0,    "offsetY": 0,   "zIndex": 10, "anchorX": "center", "anchorY": "center" },
+    { "partKey": "parte_10", "parentKey": "root",    "width": 242, "height": 334, "offsetX": -233, "offsetY": 168, "zIndex": 20, "anchorX": "left",   "anchorY": "top" },
+    { "partKey": "parte_1",  "parentKey": "root",    "width": 178, "height": 218, "offsetX": 13,   "offsetY": 272, "zIndex": 30, "anchorX": "center", "anchorY": "center" },
+    { "partKey": "parte_17", "parentKey": "root",    "width": 42,  "height": 88,  "offsetX": -51,  "offsetY": 259, "zIndex": 40, "anchorX": "center", "anchorY": "top" },
+    { "partKey": "parte_13", "parentKey": "parte_1", "width": 322, "height": 283, "offsetX": -15,  "offsetY": 92,  "zIndex": 50, "anchorX": "center", "anchorY": "center" }
+  ],
+  "expected": {
+    "roles":   { "parte_12": "torso", "parte_1": "head", "parte_14": "hair", "parte_10": "arm", "parte_17": "earring", "parte_13": "headdress" },
+    "parents": { "parte_14": "parte_1", "parte_17": "parte_1", "parte_13": "parte_1", "parte_10": "root", "parte_1": "root", "parte_12": "root" },
+    "pivotsPx": { "parte_10": [128, 50], "parte_1": [76, 200] }
+  }
+}
