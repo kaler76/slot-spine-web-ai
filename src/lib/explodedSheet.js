@@ -313,18 +313,57 @@ function covers(p, pt, r = 12) {
  */
 export function labelPieces(pieces, landmarks) {
   const P = (i) => landmarks?.[i];
-  const taken = new Set();
-  const pick = (name, pts) => {
-    const cand = pieces.filter((p) => !taken.has(p) && pts.some((pt) => covers(p, pt)));
-    if (!cand.length) return;
-    const p = cand.sort((a, b) => b.area - a.area)[0];
-    p.name = name;
-    taken.add(p);
-  };
-  pick("testa", [P(LM.nose)]);
-  pick("busto", [P(LM.hipSx), P(LM.hipDx)]);
-  pick("braccio_sx", [P(LM.elbowSx)]);
-  pick("braccio_dx", [P(LM.elbowDx)]);
+  // Ogni ruolo ha un punto OBBLIGATORIO (naso, un'anca, il gomito: polso e spalla possono cadere
+  // su un oggetto tenuto in mano) e un gruppo di punti per il punteggio = quota coperta.
+  // Assegnazione globale dal punteggio più alto: un braccio alzato davanti al viso copre il naso
+  // ma copre molto meglio i punti del braccio, quindi resta braccio (caso trovato dai test
+  // sintetici: con la vecchia regola "il più grande che copre il naso" diventava testa).
+  const ROLES = [
+    { name: "testa", must: [LM.nose], pts: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] },
+    { name: "busto", must: [LM.hipSx, LM.hipDx], pts: [LM.hipSx, LM.hipDx, LM.shoulderSx, LM.shoulderDx] },
+    { name: "braccio_sx", must: [LM.elbowSx], pts: [LM.shoulderSx, LM.elbowSx, LM.wristSx, LM.pinkySx, LM.indexSx, LM.thumbSx], limb: [LM.shoulderSx, LM.elbowSx, LM.wristSx] },
+    { name: "braccio_dx", must: [LM.elbowDx], pts: [LM.shoulderDx, LM.elbowDx, LM.wristDx, LM.pinkyDx, LM.indexDx, LM.thumbDx], limb: [LM.shoulderDx, LM.elbowDx, LM.wristDx] }
+  ];
+  // punteggio = completezza (quota dei punti del ruolo coperti) × specificità (quota dei punti
+  // coperti dal pezzo che appartengono al ruolo): il busto copre anche gomiti e polsi delle
+  // braccia abbassate lungo il corpo, ma non è "specifico" di un braccio.
+  const all = [...new Set(ROLES.flatMap((r) => r.pts))].filter((i) => P(i));
+  const cand = [];
+  for (const p of pieces) {
+    const coveredAll = new Set(all.filter((i) => covers(p, P(i))));
+    for (const r of ROLES) {
+      if (!r.must.some((i) => covers(p, P(i)))) continue;
+      const pts = r.pts.filter((i) => P(i));
+      const hit = pts.filter((i) => coveredAll.has(i)).length;
+      const recall = hit / Math.max(1, pts.length);
+      const precision = hit / Math.max(1, coveredAll.size);
+      // braccia: il pezzo deve contenere il percorso spalla -> gomito -> polso, non solo
+      // i dintorni della mano (un oggetto impugnato copre polso e gomito, non la spalla)
+      let along = 1;
+      if (r.limb) {
+        const [a, b, c] = r.limb.map(P);
+        if (a && b && c) {
+          let n = 0, ok = 0;
+          for (const [u, v] of [[a, b], [b, c]])
+            for (let t = 0; t <= 1.0001; t += 0.1, n++) if (covers(p, { x: u.x + (v.x - u.x) * t, y: u.y + (v.y - u.y) * t }, 4)) ok++;
+          along = ok / n;
+        }
+      }
+      // a parità: il pezzo il cui centro è più vicino al centro dei punti del ruolo
+      const cx = pts.reduce((a, i) => a + P(i).x, 0) / Math.max(1, pts.length);
+      const cy = pts.reduce((a, i) => a + P(i).y, 0) / Math.max(1, pts.length);
+      const dist = Math.hypot(p.x + p.width / 2 - cx, p.y + p.height / 2 - cy);
+      cand.push({ p, r, score: recall * precision * along, hit, dist });
+    }
+  }
+  cand.sort((a, b) => b.score - a.score || b.hit - a.hit || a.dist - b.dist);
+  const taken = new Set(), done = new Set();
+  for (const c of cand) {
+    if (taken.has(c.p) || done.has(c.r.name)) continue;
+    c.p.name = c.r.name;
+    taken.add(c.p);
+    done.add(c.r.name);
+  }
   let k = 0;
   const rest = pieces.filter((p) => !taken.has(p));
   for (const p of rest) p.name = rest.length > 1 ? `oggetto_${++k}` : "oggetto";
