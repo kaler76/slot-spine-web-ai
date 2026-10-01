@@ -178,6 +178,29 @@ export async function updateCharacterPartMetadata(
   return data;
 }
 
+/**
+ * Registro delle correzioni (tabella spine_rig_corrections, solo inserimento/lettura):
+ * annota quando l'utente cambia un valore proposto dalle regole rig automatiche.
+ * Non deve mai bloccare il salvataggio: gli errori vengono solo segnalati in console.
+ */
+export async function logRigCorrection({ characterId, partKey, field, proposed, corrected, rulesVersion, context }) {
+  try {
+    const { error } = await supabase.from("spine_rig_corrections").insert({
+      character_id: characterId,
+      part_key: partKey,
+      field,
+      proposed: proposed ?? null,
+      corrected: corrected ?? null,
+      rules_version: rulesVersion ?? null,
+      context: context ?? null
+    });
+    if (error) throw error;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[logRigCorrection] non registrata:", err.message || err);
+  }
+}
+
 export async function deleteCharacterPart(partId) {
   const { error } = await supabase.from(PARTS_TABLE).delete().eq("id", partId);
   if (error) throw error;

@@ -15,10 +15,11 @@ import {
   deleteCharacterPart,
   updateCharacterPartMetadata,
   saveCharacterExport,
-  renameCharacter
+  renameCharacter,
+  logRigCorrection
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
-import { PART_ROLES, ROLE_LABELS, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
+import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -179,6 +180,10 @@ export default function CharacterPage() {
   const [editingPartId, setEditingPartId] = useState(null);
   const [editValues, setEditValues] = useState({});
   const [applyingRig, setApplyingRig] = useState(false);
+  // Ultima proposta delle regole rig per parte ({role, parentKey, pivot}): serve a
+  // capire, quando l'utente salva una modifica, se sta correggendo una proposta
+  // automatica (-> registro correzioni). Persistita in sessionStorage per pagina.
+  const rigProposalRef = useRef(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // --- Rinomina character ---
@@ -389,6 +394,69 @@ export default function CharacterPage() {
     setEditingPartId(null);
   }
 
+  function rigStorageKey(kind) {
+    return `rig:${kind}:${character?.id}`;
+  }
+
+  function readSession(key, fallback) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      return raw ? JSON.parse(raw) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function writeSession(key, value) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* storage non disponibile: il registro funziona comunque per questa pagina */
+    }
+  }
+
+  function getRigProposal() {
+    if (rigProposalRef.current?.id !== character?.id) {
+      rigProposalRef.current = { id: character?.id, data: readSession(rigStorageKey("proposal"), {}) };
+    }
+    return rigProposalRef.current.data;
+  }
+
+  /** Registra una correzione una sola volta per (parte, campo, valore corretto). */
+  async function recordCorrection(partKey, field, proposed, corrected, context) {
+    const loggedKey = rigStorageKey("logged");
+    const logged = readSession(loggedKey, {});
+    const id = `${partKey}|${field}|${JSON.stringify(corrected)}`;
+    if (logged[id]) return;
+    logged[id] = true;
+    writeSession(loggedKey, logged);
+    await logRigCorrection({
+      characterId: character.id,
+      partKey,
+      field,
+      proposed,
+      corrected,
+      rulesVersion: RULES_VERSION,
+      context
+    });
+  }
+
+  const pivotOf = (fx, fy) => (fx != null && fy != null ? [Number(fx), Number(fy)] : null);
+  const samePivot = (a, b) => (!a && !b) || (a && b && Math.abs(a[0] - b[0]) < 0.001 && Math.abs(a[1] - b[1]) < 0.001);
+
+  /** Confronta la parte salvata con l'ultima proposta delle regole e registra le differenze. */
+  async function logEditAgainstProposal(partKey, values) {
+    const proposal = getRigProposal()[partKey];
+    if (!proposal) return;
+    const context = { width: Number(values.width), height: Number(values.height) };
+    const role = values.role || null;
+    if (role !== proposal.role) await recordCorrection(partKey, "role", proposal.role, role, context);
+    if ((values.parentKey || "root") !== proposal.parentKey)
+      await recordCorrection(partKey, "parent_key", proposal.parentKey, values.parentKey || "root", context);
+    const pivot = pivotOf(values.pivotFx, values.pivotFy);
+    if (!samePivot(pivot, proposal.pivot)) await recordCorrection(partKey, "pivot", proposal.pivot, pivot, context);
+  }
+
   async function saveEditingPart(partId, partKey) {
     setSavingEdit(true);
     setStatus(`⏳ Aggiornamento "${partKey}"...`);
@@ -410,6 +478,7 @@ export default function CharacterPage() {
         pivotFx: editValues.pivotFx ?? null,
         pivotFy: editValues.pivotFy ?? null
       });
+      await logEditAgainstProposal(partKey, editValues);
       setStatus(`✅ "${partKey}" aggiornata.`);
       setEditingPartId(null);
       await refresh();
@@ -455,7 +524,24 @@ export default function CharacterPage() {
           masks[p.part_key] = await loadPartMask(p.image_url);
         }
       }
-      const plan = planRig(parts, roles, masks).filter((c) => c.changes.length);
+      // Ruoli impostati a mano diversi da quelli che le regole avrebbero proposto = correzioni
+      const pureRoles = guessRoles(parts.map((p) => ({ ...p, role: null })));
+      for (const p of parts) {
+        if (p.role && pureRoles[p.partKey] !== p.role) {
+          await recordCorrection(p.partKey, "role", pureRoles[p.partKey] || null, p.role, {
+            width: p.width,
+            height: p.height,
+            proposedRoles: pureRoles
+          });
+        }
+      }
+      const fullPlan = planRig(parts, roles, masks);
+      const proposal = Object.fromEntries(
+        fullPlan.map((c) => [c.partKey, { role: c.role, parentKey: c.parentKey, pivot: pivotOf(c.pivotFx, c.pivotFy) }])
+      );
+      rigProposalRef.current = { id: character.id, data: proposal };
+      writeSession(rigStorageKey("proposal"), proposal);
+      const plan = fullPlan.filter((c) => c.changes.length);
       if (!plan.length) {
         setStatus("✅ Regole rig: nessuna modifica necessaria.");
         return;

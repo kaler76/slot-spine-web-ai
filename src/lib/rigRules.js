@@ -10,6 +10,9 @@
 
 import { anchorToFraction } from "./characterSkeleton.js";
 
+/** Versione delle regole: va incrementata a ogni modifica di euristiche/soglie (finisce nel registro correzioni). */
+export const RULES_VERSION = "2026-10-01.1";
+
 export const PART_ROLES = ["torso", "head", "arm", "forearm", "hand", "hair", "earring", "headdress", "accessory", "other"];
 
 export const ROLE_LABELS = {
