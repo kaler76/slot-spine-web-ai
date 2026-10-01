@@ -553,7 +553,9 @@ export default function CharacterPage() {
     parentKey: expandedPartsMap[k].parentKey,
     rotation: expandedPartsMap[k].rotation || 0,
     animationType: expandedPartsMap[k].animationType,
-    speed: expandedPartsMap[k].speed
+    speed: expandedPartsMap[k].speed,
+    offsetX: expandedPartsMap[k].offsetX || 0,
+    offsetY: expandedPartsMap[k].offsetY || 0
   }));
 
   const { duration: previewDuration } = useCharacterAnimationLoop({
@@ -612,43 +614,27 @@ export default function CharacterPage() {
   const parentOptions = ["root", ...character.parts.map((p) => p.part_key)];
   const { stageScale, stageCenterX, stageCenterY, boundsW, boundsH } = stageLayout;
 
-  // Genitore "effettivo" di una parte nella mappa espansa (già completamente
-  // risolto da expandSegmentedParts: sempre "root" o una chiave esistente).
-  function effectiveParentOf(key) {
-    return expandedPartsMap[key]?.parentKey || "root";
-  }
-
-  const rootPartKeys = expandedOrderedKeys.filter((k) => effectiveParentOf(k) === "root");
   const editingPartKeyForDrag = character.parts.find((p) => p.id === editingPartId)?.part_key || null;
 
   /**
-   * Renderizza una parte E, annidate al suo interno, tutte le sue parti figlie
-   * (o segmenti sintetici, per le parti con "Fisica" a più segmenti — vedi
-   * expandSegmentedParts): così il transform (rotazione/scala) animato sul
-   * contenitore della parte si trasmette automaticamente ai figli tramite la
-   * normale composizione CSS, esattamente come la gerarchia dei bone in Spine.
+   * Renderizza una parte come elemento "piatto" (fratello di tutte le altre,
+   * ordinato per zIndex come gli slot di Spine). Posizione, rotazione e scala
+   * nel mondo — compresa la catena dei genitori — sono applicate come matrix()
+   * da useCharacterAnimationLoop: un figlio può quindi stare dietro a parti
+   * davanti al suo genitore (es. capelli figli della testa, dietro al busto).
    */
-  function renderPartTree(key, isRoot) {
+  function renderPart(key) {
     const p = expandedPartsMap[key];
     if (!p) return null;
     // Per un segmento di catena l'ancoraggio verticale è sempre "alto" (pende
     // dal segmento sopra), imposto già da expandSegmentedParts sul valore di p.
     const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
 
-    // Per le parti alla radice la posizione è calcolata rispetto al centro dello
-    // stage; per le parti annidate è relativa al genitore diretto (che è già
-    // posizionato correttamente grazie all'annidamento DOM).
-    const boneLeft = isRoot ? stageCenterX + (p.offsetX || 0) : p.offsetX || 0;
-    const boneTop = isRoot ? stageCenterY - (p.offsetY || 0) : -(p.offsetY || 0);
 
     const isNewPartDraggable = workingBlob && key === (sanitizeKey(partName) || "__new__");
     const isEditingPartDraggable = editingPartId && key === editingPartKeyForDrag;
     const isDraggable = isNewPartDraggable || isEditingPartDraggable;
     const dragMode = isEditingPartDraggable ? "editing" : "new";
-
-    const childKeys = expandedOrderedKeys
-      .filter((k) => k !== key && effectiveParentOf(k) === key)
-      .sort((a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex);
 
     return (
       <div
@@ -656,12 +642,12 @@ export default function CharacterPage() {
         ref={partRefsMap.current[key]}
         style={{
           position: "absolute",
-          left: boneLeft,
-          top: boneTop,
+          left: stageCenterX,
+          top: stageCenterY,
           width: 0,
           height: 0,
           zIndex: p.zIndex,
-          transform: p.rotation ? `rotate(${-p.rotation}deg)` : undefined
+          transformOrigin: "0 0"
         }}
       >
         {p.sliced ? (
@@ -694,7 +680,6 @@ export default function CharacterPage() {
             draggable={false}
           />
         )}
-        {childKeys.map((childKey) => renderPartTree(childKey, false))}
       </div>
     );
   }
@@ -1049,7 +1034,7 @@ export default function CharacterPage() {
               className="character-stage-inner"
               style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
             >
-              {rootPartKeys.map((key) => renderPartTree(key, true))}
+              {expandedOrderedKeys.map((key) => renderPart(key))}
             </div>
           </div>
           {workingBlob && (

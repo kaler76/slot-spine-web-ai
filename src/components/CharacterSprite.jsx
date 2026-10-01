@@ -173,21 +173,17 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
     parentKey: effectiveParentOf(k),
     rotation: expandedPartsMap[k].rotation || 0,
     animationType: expandedPartsMap[k].animationType,
-    speed: expandedPartsMap[k].speed
+    speed: expandedPartsMap[k].speed,
+    offsetX: expandedPartsMap[k].offsetX || 0,
+    offsetY: expandedPartsMap[k].offsetY || 0
   }));
 
   useCharacterAnimationLoop({ parts: animationParts, layerRefs: partRefsMap.current, animationsObj, playing });
 
-  const rootKeys = expandedOrderedKeys.filter((k) => effectiveParentOf(k) === "root");
-
-  function renderPartTree(key, isRoot) {
+  /** Parte renderizzata "piatta" (vedi CharacterPage.renderPart): la trasformazione mondo arriva come matrix() da useCharacterAnimationLoop. */
+  function renderPart(key) {
     const p = expandedPartsMap[key];
     const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
-    const boneLeft = isRoot ? stageLayout.centerX + (p.offsetX || 0) : p.offsetX || 0;
-    const boneTop = isRoot ? stageLayout.centerY - (p.offsetY || 0) : -(p.offsetY || 0);
-    const childKeys = expandedOrderedKeys
-      .filter((k) => k !== key && effectiveParentOf(k) === key)
-      .sort((a, b) => expandedPartsMap[a].zIndex - expandedPartsMap[b].zIndex);
 
     return (
       <div
@@ -195,12 +191,12 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
         ref={partRefsMap.current[key]}
         style={{
           position: "absolute",
-          left: boneLeft,
-          top: boneTop,
+          left: stageLayout.centerX,
+          top: stageLayout.centerY,
           width: 0,
           height: 0,
           zIndex: p.zIndex,
-          transform: p.rotation ? `rotate(${-p.rotation}deg)` : undefined
+          transformOrigin: "0 0"
         }}
       >
         {p.sliced ? (
@@ -227,7 +223,6 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
             draggable={false}
           />
         )}
-        {childKeys.map((childKey) => renderPartTree(childKey, false))}
       </div>
     );
   }
@@ -237,7 +232,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
   return (
     <div style={{ width: boxWidth, height: boxHeight, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ width: stageLayout.boundsW, height: stageLayout.boundsH, transform: `scale(${stageLayout.scale})`, position: "relative" }}>
-        {rootKeys.map((key) => renderPartTree(key, true))}
+        {expandedOrderedKeys.map((key) => renderPart(key))}
       </div>
     </div>
   );
