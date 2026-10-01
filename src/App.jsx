@@ -9,6 +9,7 @@ import BackgroundPage from "./pages/BackgroundPage.jsx";
 import ReelsPage from "./pages/ReelsPage.jsx";
 import ImportAztecPage from "./pages/ImportAztecPage.jsx";
 import ProjectPage from "./pages/ProjectPage.jsx";
+import RecognizePage from "./pages/RecognizePage.jsx";
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
       <Route path="/reels" element={<ReelsPage />} />
       <Route path="/import-aztec" element={<ImportAztecPage />} />
       <Route path="/project" element={<ProjectPage />} />
+      <Route path="/recognize" element={<RecognizePage />} />
     </Routes>
   );
 }

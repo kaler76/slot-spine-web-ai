@@ -1,0 +1,100 @@
+{
+ "approved": "2026-10-01",
+ "note": "Riconoscimento approvato dall'utente (terza prova, vista Parti proposte). Tolleranze: quota pixel ±1.5 punti percentuali, baricentro ±2% della diagonale, articolazioni ±2%.",
+ "parts": {
+  "cappello": {
+   "share": 4.38,
+   "centroid": [
+    326,
+    125
+   ]
+  },
+  "testa": {
+   "share": 7.06,
+   "centroid": [
+    362,
+    239
+   ]
+  },
+  "oggetto_in_mano": {
+   "share": 11.13,
+   "centroid": [
+    1048,
+    461
+   ]
+  },
+  "busto": {
+   "share": 57.36,
+   "centroid": [
+    385,
+    842
+   ]
+  },
+  "braccio_dx": {
+   "share": 4.54,
+   "centroid": [
+    191,
+    505
+   ]
+  },
+  "braccio_sx": {
+   "share": 4.04,
+   "centroid": [
+    525,
+    529
+   ]
+  },
+  "avambraccio_sx": {
+   "share": 4.84,
+   "centroid": [
+    640,
+    634
+   ]
+  },
+  "avambraccio_dx": {
+   "share": 6.65,
+   "centroid": [
+    218,
+    703
+   ]
+  }
+ },
+ "joints": {
+  "base_collo": [
+   378,
+   363
+  ],
+  "spalla_sx": [
+   502,
+   421
+  ],
+  "gomito_sx": [
+   548,
+   661
+  ],
+  "polso_sx": [
+   695,
+   630
+  ],
+  "spalla_dx": [
+   254,
+   420
+  ],
+  "gomito_dx": [
+   91,
+   630
+  ],
+  "polso_dx": [
+   272,
+   747
+  ],
+  "mano_sx": [
+   717,
+   606
+  ],
+  "mano_dx": [
+   311,
+   733
+  ]
+ }
+}

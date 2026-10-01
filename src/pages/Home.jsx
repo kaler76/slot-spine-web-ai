@@ -114,6 +114,14 @@ export default function Home() {
             </div>
           )}
         </Link>
+        <Link to="/recognize" className="card">
+          <div className="card-icon">🔍</div>
+          <div className="card-title">Riconosci parti</div>
+          <span className="status-badge">Prova</span>
+          <div className="card-desc">
+            Da un'immagine intera: articolazioni (posa) e parti proposte in automatico. Solo analisi.
+          </div>
+        </Link>
         <Link to="/reels" className="card">
           <div className="card-icon">🎰</div>
           <div className="card-title">Rulli animati</div>

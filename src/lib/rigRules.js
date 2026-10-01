@@ -11,7 +11,7 @@
 import { anchorToFraction } from "./characterSkeleton.js";
 
 /** Versione delle regole: va incrementata a ogni modifica di euristiche/soglie (finisce nel registro correzioni). */
-export const RULES_VERSION = "2026-10-01.1";
+export const RULES_VERSION = "2026-10-01.2";
 
 export const PART_ROLES = ["torso", "head", "arm", "forearm", "hand", "hair", "earring", "headdress", "accessory", "other"];
 
@@ -133,7 +133,14 @@ export function guessRoles(parts) {
   const keyOf = (role) => Object.keys(roles).find((k) => roles[k] === role);
 
   if (!keyOf("torso")) {
-    const t = [...free()].sort((a, b) => boxes[b.partKey].area - boxes[a.partKey].area)[0];
+    // Busto = tra le parti grandi (>= 50% della più grande) quella che arriva più in basso
+    // (bordo inferiore, la vita). Non semplicemente la più grande: un copricapo di piume
+    // può superarlo in area; né il centro più basso: un braccio lungo può scendere quasi
+    // quanto il busto (entrambi casi di Sym5).
+    const maxArea = Math.max(...free().map((p) => boxes[p.partKey].area));
+    const t = free()
+      .filter((p) => boxes[p.partKey].area >= 0.5 * maxArea)
+      .sort((a, b) => boxes[a.partKey].minY - boxes[b.partKey].minY)[0];
     if (t) roles[t.partKey] = "torso";
   }
   const torsoKey = keyOf("torso");
@@ -161,7 +168,8 @@ export function guessRoles(parts) {
     if (H) {
       const ov = overlapArea(b, H) / Math.max(1, Math.min(b.area, H.area));
       const nearHead = b.cx > H.minX - 0.25 * H.w && b.cx < H.maxX + 0.25 * H.w && b.cy > H.minY - 0.25 * H.h && b.cy < H.maxY;
-      if (b.area < 0.15 * H.area && nearHead) {
+      // Pendenti/orecchini: piccoli rispetto alla testa e vicini a essa (Sym11 ~0.1, Sym5 ~0.37 dell'area testa)
+      if (b.area < 0.45 * H.area && nearHead) {
         roles[p.partKey] = "earring";
         continue;
       }
