@@ -632,6 +632,8 @@ export default function CharacterPage() {
             anchorY: editValues.anchorY || "center",
             pivotFx: editValues.pivotFx,
             pivotFy: editValues.pivotFy,
+            // il ruolo serve a loop v2 (ampiezze, saluto), mesh automatiche e verifica dell'export
+            role: editValues.role || null,
             url: p.image_url
           }
         : {
@@ -649,6 +651,7 @@ export default function CharacterPage() {
             anchorY: p.anchor_y || "center",
             pivotFx: p.pivot_fx,
             pivotFy: p.pivot_fy,
+            role: p.role || null,
             url: p.image_url
           };
     }
