@@ -18,6 +18,7 @@ import {
   renameCharacter
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
+import { PART_ROLES, ROLE_LABELS, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -122,6 +123,8 @@ function expandSegmentedParts(partsMap) {
         offsetX: i === 0 ? p.offsetX : 0,
         offsetY: i === 0 ? p.offsetY : -bandHeight,
         anchorY: "top",
+        pivotFx: null,
+        pivotFy: null,
         width: p.width,
         height: bandHeight,
         fullHeight: p.height,
@@ -175,6 +178,7 @@ export default function CharacterPage() {
   // --- Editing inline parti esistenti ---
   const [editingPartId, setEditingPartId] = useState(null);
   const [editValues, setEditValues] = useState({});
+  const [applyingRig, setApplyingRig] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // --- Rinomina character ---
@@ -374,7 +378,10 @@ export default function CharacterPage() {
       animationType: p.animation_type || "static",
       speed: p.speed ?? 1,
       anchorX: p.anchor_x || "center",
-      anchorY: p.anchor_y || "center"
+      anchorY: p.anchor_y || "center",
+      role: p.role || "",
+      pivotFx: p.pivot_fx ?? null,
+      pivotFy: p.pivot_fy ?? null
     });
   }
 
@@ -398,7 +405,10 @@ export default function CharacterPage() {
         animationType: editValues.animationType,
         speed: Number(editValues.speed) || 1,
         anchorX: editValues.anchorX,
-        anchorY: editValues.anchorY
+        anchorY: editValues.anchorY,
+        role: editValues.role || null,
+        pivotFx: editValues.pivotFx ?? null,
+        pivotFy: editValues.pivotFy ?? null
       });
       setStatus(`✅ "${partKey}" aggiornata.`);
       setEditingPartId(null);
@@ -407,6 +417,80 @@ export default function CharacterPage() {
       setStatus(`❌ Errore aggiornamento: ${err.message}`);
     } finally {
       setSavingEdit(false);
+    }
+  }
+
+  /**
+   * Regole rig (vedi lib/rigRules.js): propone i ruoli mancanti, calcola i pivot
+   * anatomici dai pixel (spalla, base del collo, attacco degli orecchini) e aggancia
+   * capelli/orecchini/copricapo alla testa, ricalcolando gli offset in modo che la
+   * posa a riposo resti identica. Chiede conferma mostrando le modifiche.
+   */
+  async function handleApplyRigRules() {
+    if (!character?.parts?.length) return;
+    setApplyingRig(true);
+    setStatus("⏳ Analisi delle parti per le regole rig...");
+    try {
+      const parts = character.parts.map((p) => ({
+        id: p.id,
+        partKey: p.part_key,
+        parentKey: p.parent_key || "root",
+        width: p.width,
+        height: p.height,
+        offsetX: Number(p.offset_x) || 0,
+        offsetY: Number(p.offset_y) || 0,
+        rotation: Number(p.rotation) || 0,
+        zIndex: p.z_index ?? 0,
+        anchorX: p.anchor_x || "center",
+        anchorY: p.anchor_y || "center",
+        pivotFx: p.pivot_fx ?? null,
+        pivotFy: p.pivot_fy ?? null,
+        segments: p.segments ?? 1,
+        role: p.role || null
+      }));
+      const roles = guessRoles(parts);
+      const masks = {};
+      for (const p of character.parts) {
+        if (["head", "arm", "forearm", "hand", "earring"].includes(roles[p.part_key])) {
+          masks[p.part_key] = await loadPartMask(p.image_url);
+        }
+      }
+      const plan = planRig(parts, roles, masks).filter((c) => c.changes.length);
+      if (!plan.length) {
+        setStatus("✅ Regole rig: nessuna modifica necessaria.");
+        return;
+      }
+      const summary = plan.map((c) => `• ${c.partKey}: ${c.changes.join("; ")}`).join("\n");
+      if (!window.confirm(`Applicare queste modifiche al rig?\n\n${summary}`)) {
+        setStatus("Regole rig annullate.");
+        return;
+      }
+      for (const c of plan) {
+        const p = character.parts.find((pp) => pp.part_key === c.partKey);
+        await updateCharacterPartMetadata(p.id, {
+          width: p.width,
+          height: p.height,
+          offsetX: c.offsetX,
+          offsetY: c.offsetY,
+          zIndex: p.z_index ?? 0,
+          parentKey: c.parentKey,
+          animationType: p.animation_type || "static",
+          speed: p.speed ?? 1,
+          anchorX: p.anchor_x || "center",
+          anchorY: p.anchor_y || "center",
+          rotation: c.rotation,
+          segments: p.segments ?? 1,
+          role: c.role,
+          pivotFx: c.pivotFx,
+          pivotFy: c.pivotFy
+        });
+      }
+      setStatus(`✅ Regole rig applicate a ${plan.length} parti. Ricorda "Genera export" per aggiornare il pacchetto Spine.`);
+      await refresh();
+    } catch (err) {
+      setStatus(`❌ Errore regole rig: ${err.message}`);
+    } finally {
+      setApplyingRig(false);
     }
   }
 
@@ -430,6 +514,8 @@ export default function CharacterPage() {
             speed: Number(editValues.speed) || 1,
             anchorX: editValues.anchorX || "center",
             anchorY: editValues.anchorY || "center",
+            pivotFx: editValues.pivotFx,
+            pivotFy: editValues.pivotFy,
             url: p.image_url
           }
         : {
@@ -445,6 +531,8 @@ export default function CharacterPage() {
             speed: p.speed ?? 1,
             anchorX: p.anchor_x || "center",
             anchorY: p.anchor_y || "center",
+            pivotFx: p.pivot_fx,
+            pivotFy: p.pivot_fy,
             url: p.image_url
           };
     }
@@ -518,7 +606,7 @@ export default function CharacterPage() {
     for (const key of expandedOrderedKeys) {
       const p = expandedPartsMap[key];
       const abs = resolveAbsoluteTransform(key, expandedPartsMap);
-      const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
+      const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY, p.pivotFx, p.pivotFy);
       const corners = rotatedCorners({ ...abs, width: p.width, height: p.height, fracX, fracY });
       for (const c of corners) {
         minX = Math.min(minX, c.x);
@@ -628,7 +716,7 @@ export default function CharacterPage() {
     if (!p) return null;
     // Per un segmento di catena l'ancoraggio verticale è sempre "alto" (pende
     // dal segmento sopra), imposto già da expandSegmentedParts sul valore di p.
-    const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
+    const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY, p.pivotFx, p.pivotFy);
 
 
     const isNewPartDraggable = workingBlob && key === (sanitizeKey(partName) || "__new__");
@@ -716,6 +804,15 @@ export default function CharacterPage() {
       {character.parts.length > 0 && (
         <>
           <h2 className="section-title">📋 Dettagli tecnici</h2>
+          <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className="btn secondary" disabled={applyingRig} onClick={handleApplyRigRules}>
+              🦴 Applica regole rig
+            </button>
+            <span className="hint" style={{ margin: 0 }}>
+              Pivot alla spalla e alla base del collo, capelli/orecchini/copricapo figli della testa. La posa a riposo non cambia.
+              I ruoli mancanti vengono proposti in automatico: controllali nella colonna Parte.
+            </span>
+          </div>
           <div className="hint">Clicca su una riga per modificare genitore, dimensioni, offset, z-index, ancoraggio o animazione.</div>
           {editingPartId && (
             <div className="hint" style={{ color: "#9fc4ff" }}>
@@ -740,7 +837,19 @@ export default function CharacterPage() {
               if (isEditing) {
                 return (
                   <div className="tech-details-row tech-details-row-char tech-details-row-editing" key={p.id}>
-                    <span>{p.part_key}</span>
+                    <span className="tech-edit-pair" style={{ flexDirection: "column", alignItems: "flex-start" }}>
+                      {p.part_key}
+                      <select
+                        value={editValues.role || ""}
+                        title="Ruolo della parte: usato da 'Applica regole rig' per pivot e genitore"
+                        onChange={(e) => setEditValues((v) => ({ ...v, role: e.target.value }))}
+                      >
+                        <option value="">— ruolo —</option>
+                        {PART_ROLES.map((r) => (
+                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                        ))}
+                      </select>
+                    </span>
                     <select
                       value={editValues.parentKey}
                       onChange={(e) => setEditValues((v) => ({ ...v, parentKey: e.target.value }))}
@@ -765,12 +874,12 @@ export default function CharacterPage() {
                       onChange={(e) => setEditValues((v) => ({ ...v, rotation: e.target.value }))}
                     />
                     <span className="tech-edit-pair">
-                      <select value={editValues.anchorX} onChange={(e) => setEditValues((v) => ({ ...v, anchorX: e.target.value }))}>
+                      <select value={editValues.anchorX} onChange={(e) => setEditValues((v) => ({ ...v, anchorX: e.target.value, pivotFx: null, pivotFy: null }))}>
                         <option value="left">⬅️</option>
                         <option value="center">◯</option>
                         <option value="right">➡️</option>
                       </select>
-                      <select value={editValues.anchorY} onChange={(e) => setEditValues((v) => ({ ...v, anchorY: e.target.value }))}>
+                      <select value={editValues.anchorY} onChange={(e) => setEditValues((v) => ({ ...v, anchorY: e.target.value, pivotFx: null, pivotFy: null }))}>
                         <option value="top">⬆️</option>
                         <option value="center">◯</option>
                         <option value="bottom">⬇️</option>
@@ -806,15 +915,26 @@ export default function CharacterPage() {
                   onClick={() => startEditingPart(p)}
                   title="Clicca per modificare"
                 >
-                  <span>{p.part_key}</span>
+                  <span>
+                    {p.part_key}
+                    {p.role && <div className="hint" style={{ margin: 0 }}>{ROLE_LABELS[p.role] || p.role}</div>}
+                  </span>
                   <span>{p.parent_key === "root" ? "— (radice)" : p.parent_key}</span>
                   <span>{p.width}×{p.height}px</span>
                   <span>{p.offset_x}, {p.offset_y}</span>
                   <span>{p.z_index}</span>
                   <span>{p.rotation || 0}°</span>
                   <span>
-                    {{ left: "⬅️", center: "◯", right: "➡️" }[p.anchor_x || "center"]}
-                    {{ top: "⬆️", center: "◯", bottom: "⬇️" }[p.anchor_y || "center"]}
+                    {p.pivot_fx != null && p.pivot_fy != null ? (
+                      <span title="Pivot preciso calcolato dalle regole rig (frazione dell'immagine)">
+                        🎯 {Math.round(p.pivot_fx * p.width)},{Math.round(p.pivot_fy * p.height)}
+                      </span>
+                    ) : (
+                      <>
+                        {{ left: "⬅️", center: "◯", right: "➡️" }[p.anchor_x || "center"]}
+                        {{ top: "⬆️", center: "◯", bottom: "⬇️" }[p.anchor_y || "center"]}
+                      </>
+                    )}
                   </span>
                   <span>{ANIM_LABELS[p.animation_type]}</span>
                   <span>{p.segments && p.segments > 1 ? `${p.segments}×` : "—"}</span>

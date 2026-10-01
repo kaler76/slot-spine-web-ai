@@ -66,6 +66,8 @@ function expandSegmentedParts(partsMap) {
         offsetX: i === 0 ? p.offsetX : 0,
         offsetY: i === 0 ? p.offsetY : -bandHeight,
         anchorY: "top",
+        pivotFx: null,
+        pivotFy: null,
         width: p.width,
         height: bandHeight,
         fullHeight: p.height,
@@ -102,6 +104,8 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
         anchorY: p.anchor_y || "center",
         rotation: p.rotation || 0,
         segments: p.segments || 1,
+        pivotFx: p.pivot_fx,
+        pivotFy: p.pivot_fy,
         url: p.image_url
       };
     }
@@ -134,7 +138,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
     for (const key of expandedOrderedKeys) {
       const p = expandedPartsMap[key];
       const abs = resolveAbsoluteTransform(key, expandedPartsMap);
-      const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
+      const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY, p.pivotFx, p.pivotFy);
       const corners = rotatedCorners({ ...abs, width: p.width, height: p.height, fracX, fracY });
       for (const c of corners) {
         minX = Math.min(minX, c.x);
@@ -183,7 +187,7 @@ export default function CharacterSprite({ character, boxWidth, boxHeight, playin
   /** Parte renderizzata "piatta" (vedi CharacterPage.renderPart): la trasformazione mondo arriva come matrix() da useCharacterAnimationLoop. */
   function renderPart(key) {
     const p = expandedPartsMap[key];
-    const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY);
+    const { fracX, fracY } = anchorToFraction(p.anchorX, p.anchorY, p.pivotFx, p.pivotFy);
 
     return (
       <div

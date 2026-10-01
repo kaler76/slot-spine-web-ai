@@ -4,8 +4,13 @@ import { buildAmbientCharacterAnimation } from "./characterAnimationTemplates.js
  * Converte un punto di ancoraggio (left/center/right, top/center/bottom) nella
  * frazione 0..1 corrispondente all'interno del riquadro dell'immagine.
  * 0 = bordo sinistro/superiore, 0.5 = centro, 1 = bordo destro/inferiore.
+ * Se è presente un pivot numerico (pivotFx/pivotFy, 0..1, es. il centro della
+ * spalla calcolato da rigRules) ha la precedenza sui 9 ancoraggi fissi.
  */
-export function anchorToFraction(anchorX, anchorY) {
+export function anchorToFraction(anchorX, anchorY, pivotFx, pivotFy) {
+  if (Number.isFinite(Number(pivotFx)) && Number.isFinite(Number(pivotFy)) && pivotFx !== null && pivotFy !== null && pivotFx !== "" && pivotFy !== "") {
+    return { fracX: Number(pivotFx), fracY: Number(pivotFy) };
+  }
   const fracX = anchorX === "left" ? 0 : anchorX === "right" ? 1 : 0.5;
   const fracY = anchorY === "top" ? 0 : anchorY === "bottom" ? 1 : 0.5;
   return { fracX, fracY };
@@ -18,7 +23,7 @@ export function anchorToFraction(anchorX, anchorY) {
  * le animazioni (es. un orecchino che dondola dall'alto come un pendolo).
  *
  * @param {Object} params
- * @param {Array<{partKey, parentKey, width, height, offsetX, offsetY, rotation, zIndex, animationType, speed, anchorX, anchorY}>} params.parts
+ * @param {Array<{partKey, parentKey, width, height, offsetX, offsetY, rotation, zIndex, animationType, speed, anchorX, anchorY, pivotFx, pivotFy}>} params.parts
  * @returns {Object} skeleton JSON pronto per l'export
  */
 export function buildCharacterSkeleton({ parts }) {
@@ -59,7 +64,7 @@ export function buildCharacterSkeleton({ parts }) {
     // di default (centro) l'immagine è centrata sul bone, come prima. Con un
     // ancoraggio diverso (es. "alto"), l'immagine viene disegnata spostata in
     // modo che il bone coincida col bordo scelto invece che col centro.
-    const { fracX, fracY } = anchorToFraction(part.anchorX, part.anchorY);
+    const { fracX, fracY } = anchorToFraction(part.anchorX, part.anchorY, part.pivotFx, part.pivotFy);
     const attachX = part.width * (0.5 - fracX);
     const attachY = part.height * (fracY - 0.5);
 

@@ -98,7 +98,10 @@ export async function saveCharacterPart({
   anchorX,
   anchorY,
   rotation,
-  segments
+  segments,
+  role,
+  pivotFx,
+  pivotFy
 }) {
   const path = `${characterId}/${partKey}.png`;
 
@@ -128,7 +131,10 @@ export async function saveCharacterPart({
         anchor_x: anchorX || "center",
         anchor_y: anchorY || "center",
         rotation: rotation ?? 0,
-        segments: segments ?? 1
+        segments: segments ?? 1,
+        role: role ?? null,
+        pivot_fx: pivotFx ?? null,
+        pivot_fy: pivotFy ?? null
       },
       { onConflict: "character_id,part_key" }
     )
@@ -141,8 +147,13 @@ export async function saveCharacterPart({
 /** Aggiorna solo i metadati di una parte già salvata, senza ricaricare l'immagine. */
 export async function updateCharacterPartMetadata(
   partId,
-  { width, height, offsetX, offsetY, zIndex, parentKey, animationType, speed, anchorX, anchorY, rotation, segments }
+  { width, height, offsetX, offsetY, zIndex, parentKey, animationType, speed, anchorX, anchorY, rotation, segments, role, pivotFx, pivotFy }
 ) {
+  // role/pivot: undefined = non toccare (supabase-js omette le chiavi undefined), null = azzera
+  const extra = {};
+  if (role !== undefined) extra.role = role;
+  if (pivotFx !== undefined) extra.pivot_fx = pivotFx;
+  if (pivotFy !== undefined) extra.pivot_fy = pivotFy;
   const { data, error } = await supabase
     .from(PARTS_TABLE)
     .update({
@@ -157,7 +168,8 @@ export async function updateCharacterPartMetadata(
       anchor_x: anchorX,
       anchor_y: anchorY,
       rotation: rotation ?? 0,
-      segments: segments ?? 1
+      segments: segments ?? 1,
+      ...extra
     })
     .eq("id", partId)
     .select()
