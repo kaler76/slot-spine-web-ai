@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
 import { recognizeParts, refineObjectWithMask, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
+import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
@@ -141,25 +142,41 @@ export default function RecognizePage() {
       if (objectSegmenter && rec.objectSeeds.length) {
         setStatus("⏳ Rifinisco l'oggetto tenuto in mano...");
         for (const seed of rec.objectSeeds) {
-          const res = objectSegmenter.segment(c, { keypoint: { x: seed.x / W, y: seed.y / H } });
+          // Ritaglio attorno all'oggetto (riquadro allargato): con l'immagine intera il modello
+          // tende a selezionare tutto il personaggio, sul ritaglio vede soprattutto l'oggetto.
+          const bw = seed.box.maxX - seed.box.minX + 1;
+          const bh = seed.box.maxY - seed.box.minY + 1;
+          const cx0 = Math.max(0, Math.floor(seed.box.minX - 0.6 * bw));
+          const cy0 = Math.max(0, Math.floor(seed.box.minY - 0.6 * bh));
+          const cx1 = Math.min(W, Math.ceil(seed.box.maxX + 0.6 * bw));
+          const cy1 = Math.min(H, Math.ceil(seed.box.maxY + 0.6 * bh));
+          const cw = cx1 - cx0, ch = cy1 - cy0;
+          const crop = document.createElement("canvas");
+          crop.width = cw;
+          crop.height = ch;
+          crop.getContext("2d").drawImage(c, cx0, cy0, cw, ch, 0, 0, cw, ch);
+          const res = objectSegmenter.segment(crop, { keypoint: { x: (seed.x - cx0) / cw, y: (seed.y - cy0) / ch } });
           const m = res.confidenceMasks?.[0];
           if (!m) continue;
-          let probs = m.getAsFloat32Array();
-          if (m.width !== W || m.height !== H) {
-            const out = new Float32Array(W * H);
-            for (let y = 0; y < H; y++)
-              for (let x = 0; x < W; x++)
-                out[y * W + x] = probs[Math.floor((y * m.height) / H) * m.width + Math.floor((x * m.width) / W)];
-            probs = out;
-          } else {
-            probs = Float32Array.from(probs);
-          }
+          const mp = m.getAsFloat32Array();
+          const probs = new Float32Array(W * H);
+          for (let y = 0; y < ch; y++)
+            for (let x = 0; x < cw; x++)
+              probs[(cy0 + y) * W + (cx0 + x)] = mp[Math.floor((y * m.height) / ch) * m.width + Math.floor((x * m.width) / cw)];
           res.close?.();
-          const { stats } = refineObjectWithMask({ parts: rec.parts, width: W, height: H, mask: probs, handDisks: rec.handDisks });
+          const { stats, rejected } = refineObjectWithMask({
+            parts: rec.parts,
+            width: W,
+            height: H,
+            mask: probs,
+            handDisks: rec.handDisks,
+            seed
+          });
           rec.stats = stats;
+          if (rejected) rec.warnings.push("Rifinitura dell'oggetto scartata: il segmentatore a punto ha selezionato troppo (probabilmente tutto il personaggio).");
         }
       }
-      sourceRef.current = { img, W, H };
+      sourceRef.current = { img, W, H, rgba };
       setResult({ W, H, landmarks, categories, hasAlpha, ...rec, fileName: file.name });
       setStatus(`✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}.`);
     } catch (err) {
@@ -311,6 +328,14 @@ export default function RecognizePage() {
           <div className="hint">
             Pixel per parte: {Object.entries(result.stats).map(([k, v]) => `${k} ${v}`).join(" · ")}
           </div>
+          {sourceRef.current && (
+            <ExplodedSheetImport
+              original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba, img: sourceRef.current.img }}
+              landmarks={result.landmarks}
+              joints={result.joints}
+              fileName={result.fileName}
+            />
+          )}
         </>
       )}
     </div>

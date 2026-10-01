@@ -1,0 +1,36 @@
+{
+  "note": "Tavola esplosa del folletto fornita dall utente (2026-10-01), originale e tavola a scala 0.5",
+  "maxDiffShare": 0.12,
+  "pieces": [
+    {
+      "name": "braccio_sx",
+      "parent": "busto",
+      "x": 320,
+      "y": 98
+    },
+    {
+      "name": "busto",
+      "parent": null,
+      "x": 179,
+      "y": 177
+    },
+    {
+      "name": "testa",
+      "parent": "busto",
+      "x": 188,
+      "y": 16
+    },
+    {
+      "name": "oggetto",
+      "parent": "braccio_dx",
+      "x": 183,
+      "y": 207
+    },
+    {
+      "name": "braccio_dx",
+      "parent": "busto",
+      "x": 146,
+      "y": 193
+    }
+  ]
+}

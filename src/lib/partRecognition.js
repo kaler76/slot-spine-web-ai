@@ -250,9 +250,13 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
       const objectPix = comp.filter((i) => !handProper(i));
       if (objectPix.length >= minArea && objectPix.length <= maxArea) {
         for (const i of objectPix) parts[i] = PART.oggetto_in_mano;
-        let sx = 0, sy = 0;
-        for (const i of objectPix) { sx += i % W; sy += Math.floor(i / W); }
-        objectSeeds.push({ x: sx / objectPix.length, y: sy / objectPix.length, side: a.side });
+        let sx = 0, sy = 0, minX = W, maxX = 0, minY = H, maxY = 0;
+        for (const i of objectPix) {
+          const x = i % W, y = Math.floor(i / W);
+          sx += x; sy += y;
+          if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+        }
+        objectSeeds.push({ x: sx / objectPix.length, y: sy / objectPix.length, side: a.side, box: { minX, maxX, minY, maxY }, area: objectPix.length });
         // Il modello può classificare parti dell'oggetto come "vestiti" (bordo, apertura, monete):
         // crescita per colore dai pixel dell'oggetto, entro una distanza limitata.
         if (rgba) {
@@ -337,19 +341,28 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
  * @param {Uint8Array} parts - etichette (modificate sul posto)
  * @param {Float32Array|Uint8Array} mask - confidenza per pixel 0..1 (o 0..255), stessa dimensione dell'immagine
  */
-export function refineObjectWithMask({ parts, width: W, height: H, mask, handDisks = [], threshold = 0.5 }) {
+export function refineObjectWithMask({ parts, width: W, height: H, mask, handDisks = [], threshold = 0.5, seed }) {
   const scale = mask instanceof Float32Array ? 1 : 255;
-  let changed = 0;
+  // Il segmentatore a punto a volte restituisce l'intero personaggio invece del solo oggetto:
+  // si accettano solo pixel vicini all'oggetto già trovato (riquadro allargato del 50%) e si
+  // scarta tutta la rifinitura se aggiungerebbe più del doppio dell'area di partenza.
+  const box = seed?.box;
+  const padX = box ? 0.5 * (box.maxX - box.minX + 1) : Infinity;
+  const padY = box ? 0.5 * (box.maxY - box.minY + 1) : Infinity;
+  const add = [];
   for (let i = 0; i < W * H; i++) {
     if (!parts[i] || mask[i] / scale < threshold) continue;
     if (parts[i] === PART.testa || parts[i] === PART.cappello || parts[i] === PART.oggetto_in_mano) continue;
     const x = i % W, y = (i - x) / W;
+    if (box && (x < box.minX - padX || x > box.maxX + padX || y < box.minY - padY || y > box.maxY + padY)) continue;
     if (handDisks.some((h) => Math.hypot(x - h.x, y - h.y) <= h.r)) continue;
-    parts[i] = PART.oggetto_in_mano;
-    changed++;
+    add.push(i);
   }
+  const rejected = seed?.area ? add.length > 2 * seed.area : false;
+  if (!rejected) for (const i of add) parts[i] = PART.oggetto_in_mano;
+  const changed = rejected ? 0 : add.length;
   const counts = new Array(PARTS.length).fill(0);
   for (let i = 0; i < W * H; i++) if (parts[i]) counts[parts[i]]++;
   const stats = Object.fromEntries(PARTS.map((p, i) => [p, counts[i]]).filter(([p, n]) => p !== "—" && n > 0));
-  return { changed, stats };
+  return { changed, stats, rejected };
 }
