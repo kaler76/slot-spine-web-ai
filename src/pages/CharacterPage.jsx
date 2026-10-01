@@ -21,6 +21,8 @@ import {
 import { downloadCharacterPackage } from "../lib/exportZip.js";
 import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
 import { addTorsoBreathMesh, addHeadMesh, isRigidMaterial, metalShare } from "../lib/torsoMesh.js";
+import { verifyExportSkeleton } from "../lib/exportCheck.js";
+import { toSpine41 } from "../lib/spineFormat.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -817,8 +819,18 @@ export default function CharacterPage() {
         }
         if (done.length) note = ` Mesh: ${done.join(", ")} — aprire con Spine Professional.${note}`;
       }
+      // verifica del file che arriverà in Spine (non delle intenzioni): se ci sono errori non si salva
+      const check = verifyExportSkeleton(
+        toSpine41(skeletonJson),
+        orderedPartKeys.map((k) => ({ partKey: k, role: previewPartsMap[k].role || null }))
+      );
+      const sum = `Verifica: ${check.summary.bones} ossa, ${check.summary.regions} immagini rigide, ${check.summary.meshes} mesh${check.summary.meshNames.length ? ` (${check.summary.meshNames.join(", ")})` : ""}, loop ${check.summary.duration}s.`;
+      if (!check.ok) {
+        setStatus(`❌ Export NON salvato: ${check.errors.join(" ")} ${sum}`);
+        return;
+      }
       await saveCharacterExport({ characterId: character.id, skeletonJson, atlasText });
-      setStatus(`✅ Export generato e salvato.${note}`);
+      setStatus(`✅ Export generato e salvato.${note} ${sum}${check.warnings.length ? ` ⚠️ ${check.warnings.join(" ")}` : ""}`);
       await refresh();
     } catch (err) {
       setStatus(`❌ Errore export: ${err.message}`);
