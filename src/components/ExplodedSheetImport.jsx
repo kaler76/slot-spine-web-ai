@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
 import { importExplodedSheet } from "../lib/explodedSheet.js";
 import { composePieces } from "../lib/partExtraction.js";
+import { preserveSharedGrip } from "../lib/sharedGrip.js";
 import { piecesToCharacterParts } from "../lib/characterFromPieces.js";
 import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.js";
 
@@ -39,7 +40,7 @@ const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, "image/png"))
  * Import di una tavola esplosa: pezzi separati su sfondo a tinta unita -> pezzi RGBA rimessi
  * al loro posto sull'originale, con nome, ordine di disegno, genitore e pivot.
  */
-export default function ExplodedSheetImport({ original, landmarks, joints, fileName }) {
+export default function ExplodedSheetImport({ original, landmarks, joints, fileName, heldObjects = [] }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -56,7 +57,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     if (!name) return;
     setBusy(true);
     try {
-      const { parts } = piecesToCharacterParts(res.pieces);
+      const generated = piecesToCharacterParts(res.pieces);
+      const parts = preserveSharedGrip(generated.parts, heldObjects);
       setStatus("⏳ Creo il character...");
       const character = await createCharacter(name);
       for (const [k, part] of parts.entries()) {

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
 import { recognizeParts, refineObjectWithMask, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
+import { resolvePose } from "../lib/poseRecovery.js";
+import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
@@ -119,9 +121,14 @@ export default function RecognizePage() {
       const alpha = hasAlpha ? Uint8Array.from({ length: W * H }, (_, i) => rgba[i * 4 + 3]) : undefined;
 
       setStatus("⏳ Riconosco posa e categorie...");
-      const poseRes = pose.detect(c);
-      if (!poseRes.landmarks?.length) throw new Error("Nessuna posa riconosciuta nell'immagine.");
-      const landmarks = poseRes.landmarks[0].map((p) => ({ x: p.x * W, y: p.y * H, visibility: p.visibility ?? 1 }));
+      const recovered = await resolvePose({
+        detect: () => pose.detect(c), width: W, height: H,
+        recover: async () => {
+          setStatus("⏳ Preparazione del personaggio...");
+          return recoverPose(c);
+        }
+      });
+      const { landmarks } = recovered;
 
       const segRes = segmenter.segment(c);
       const mask = segRes.categoryMask;
@@ -177,7 +184,7 @@ export default function RecognizePage() {
         }
       }
       sourceRef.current = { img, W, H, rgba };
-      setResult({ W, H, landmarks, categories, hasAlpha, ...rec, fileName: file.name });
+      setResult({ W, H, landmarks, categories, hasAlpha, ...rec, poseSource: recovered.source, heldObjects: recovered.heldObjects, fileName: file.name });
       setStatus(`✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}.`);
     } catch (err) {
       setStatus(`❌ ${err.message || err}`);
@@ -241,6 +248,8 @@ export default function RecognizePage() {
     if (!result) return;
     const report = {
       file: result.fileName,
+      poseSource: result.poseSource,
+      heldObjects: result.heldObjects,
       size: [result.W, result.H],
       primoPianoDaTrasparenza: result.hasAlpha,
       landmarks: result.landmarks.map((p) => [+p.x.toFixed(2), +p.y.toFixed(2), +(p.visibility ?? 1).toFixed(3)]),
@@ -287,8 +296,7 @@ export default function RecognizePage() {
       <h1>🔍 Riconosci parti (prova)</h1>
       <div className="hint">
         Carica UN'immagine del personaggio intero (anche con lo sfondo). L'app riconosce da sola articolazioni (posa) e
-        categorie di pixel (capelli, viso, pelle, vestiti, accessori) e propone le parti per il rig. Solo analisi: non
-        salva nulla. Con "Scarica risultato" ottieni un JSON + l'immagine da condividere per la verifica.
+        categorie di pixel (capelli, viso, pelle, vestiti, accessori) e propone le parti per il rig. Analisi locale con recupero automatico sul server quando necessario; in quel caso l’immagine viene inviata al servizio di analisi. Non salva risultati nel database. Con "Scarica risultato" ottieni un JSON + l'immagine da condividere per la verifica.
       </div>
       <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <input type="file" accept="image/*" disabled={busy} onChange={handleFile} />
@@ -334,6 +342,7 @@ export default function RecognizePage() {
               landmarks={result.landmarks}
               joints={result.joints}
               fileName={result.fileName}
+              heldObjects={result.heldObjects}
             />
           )}
         </>
