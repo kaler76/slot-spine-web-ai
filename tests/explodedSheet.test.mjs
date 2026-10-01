@@ -28,8 +28,10 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
 
   test(`${name}: fedeltà della tavola (${r.fidelityError})`, () => {
     assert.equal(r.faithful, expected.faithful ?? true);
+    assert.equal(r.usable, expected.usable ?? expected.faithful ?? true);
   });
-  if (expected.faithful === false) continue; // tavola da scartare: niente altri controlli
+  // tavola da scartare (posa cambiata): niente altri controlli
+  if ((expected.usable ?? expected.faithful ?? true) === false) continue;
 
   test(`${name}: pezzi e ordine di disegno`, () => {
     assert.deepEqual(r.pieces.map((p) => p.name), expected.pieces.map((p) => p.name));

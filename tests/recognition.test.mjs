@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
-import { recognizeParts, PARTS } from "../src/lib/partRecognition.js";
+import { recognizeParts, foregroundFromUniformBorder, PARTS } from "../src/lib/partRecognition.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "recognition");
 
@@ -29,7 +29,11 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
   const lm = JSON.parse(fs.readFileSync(path.join(dir, "landmarks.json"), "utf8"));
   const landmarks = lm.landmarks.map(([x, y, v]) => ({ x, y, visibility: v }));
   const expected = JSON.parse(fs.readFileSync(path.join(dir, "expected.json"), "utf8"));
-  const r = recognizeParts({ width: W, height: H, landmarks, categories, alpha, rgba: img.data });
+  // come nell'app: trasparenza del PNG se c'è, altrimenti sfondo uniforme (es. nero) + segmentatore
+  let hasAlpha = false;
+  for (let i = 0; i < W * H; i++) if (alpha[i] < 250) { hasAlpha = true; break; }
+  const fgAlpha = hasAlpha ? alpha : foregroundFromUniformBorder({ width: W, height: H, rgba: img.data, categories }) || undefined;
+  const r = recognizeParts({ width: W, height: H, landmarks, categories, alpha: fgAlpha, rgba: img.data });
   const diag = Math.hypot(W, H);
 
   const acc = {};

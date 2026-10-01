@@ -61,7 +61,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   /** Crea un character (Supabase) con un osso per pezzo e apre la sua pagina per animarlo. */
   async function createCharacterFromPieces() {
     if (!res) return;
-    if (!res.faithful && !window.confirm("La tavola NON è fedele all'originale: creare comunque il character?")) return;
+    if (!res.usable && !window.confirm("La tavola NON è fedele all'originale (posa o forme cambiate): creare comunque il character?")) return;
     const base = (fileName || "personaggio").replace(/\.[^.]+$/, "");
     const name = window.prompt("Nome del nuovo character:", base);
     if (!name) return;
@@ -105,7 +105,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       setStatus(
         out.faithful
           ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto${out.scale !== 1 ? ` (scala ${out.scale.toFixed(2)})` : ""}. Tavola fedele (errore ${out.fidelityError}).`
-          : `⚠️ ${out.pieces.length} pezzi separati, ma la tavola NON è fedele all'originale (errore ${out.fidelityError}): ricomposizione approssimata.`
+          : out.usable
+            ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto. Tavola leggermente ridisegnata (errore ${out.fidelityError}): ok per il character, non per il dataset.`
+            : `⚠️ ${out.pieces.length} pezzi separati, ma la tavola NON è fedele all'originale (errore ${out.fidelityError}): posa o forme cambiate, rigenerala.`
       );
     } catch (err) {
       setStatus(`❌ ${err.message || err}`);
@@ -169,6 +171,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       size: [original.width, original.height],
       scale: res.scale,
       fedele: res.faithful,
+      utilizzabile: res.usable,
       erroreFedelta: res.fidelityError,
       note: "x,y = angolo in alto a sinistra del pezzo nell'immagine originale; pivot in coordinate dell'immagine originale; order = ordine di disegno (0 = dietro).",
       pieces: res.pieces.map((p) => ({

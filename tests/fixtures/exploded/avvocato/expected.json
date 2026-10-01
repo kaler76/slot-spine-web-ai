@@ -1,0 +1,32 @@
+{
+  "note": "Avvocato: tavola verde (sfondo scelto sul personaggio), 4 pezzi, leggermente ridisegnata (errore ~62): utilizzabile per il character, non per il dataset. Approvato dall'utente 2026-10-02. Scala 0.5. Pixel diversi ~44% per il ridisegno di luci e dettagli: tolleranza 50%.",
+  "faithful": false,
+  "usable": true,
+  "maxDiffShare": 0.5,
+  "pieces": [
+    {
+      "name": "braccio_sx",
+      "parent": "busto",
+      "x": 336,
+      "y": 230
+    },
+    {
+      "name": "braccio_dx",
+      "parent": "busto",
+      "x": 38,
+      "y": 227
+    },
+    {
+      "name": "busto",
+      "parent": null,
+      "x": 88,
+      "y": 198
+    },
+    {
+      "name": "testa",
+      "parent": "busto",
+      "x": 151,
+      "y": 20
+    }
+  ]
+}

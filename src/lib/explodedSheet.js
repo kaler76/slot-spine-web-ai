@@ -77,6 +77,13 @@ export function checkSheet(sheet, original) {
 
 /** Errore medio massimo perché una tavola sia considerata fedele (pixel dell'originale conservati). */
 export const FIDELITY_MAX = 50;
+/**
+ * Oltre FIDELITY_MAX ma entro USABLE_MAX: tavola leggermente ridisegnata (luci, dettagli, scala)
+ * ma con la stessa posa: va bene per creare il character, non per il dataset (avvocato: 62).
+ * Oltre USABLE_MAX la posa è cambiata (braccia distese, sacchetto diverso): folletto
+ * ridisegnato 83, cavaliere 100.
+ */
+export const USABLE_MAX = 75;
 
 const N8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
 
@@ -458,9 +465,14 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   const totA = pieces.reduce((a, p) => a + p.area, 0) || 1;
   const fidelityError = +(pieces.reduce((a, p) => a + p.matchError * p.area, 0) / totA).toFixed(1);
   const faithful = fidelityError <= FIDELITY_MAX;
-  if (!faithful)
+  const usable = fidelityError <= USABLE_MAX;
+  if (!usable)
     warnings.unshift(
-      `Tavola NON fedele all'originale (errore medio ${fidelityError}, limite ${FIDELITY_MAX}): il modello ha ridisegnato il personaggio. Ricomposizione approssimata, da non usare per il dataset.`
+      `Tavola NON fedele all'originale (errore medio ${fidelityError}, limite ${USABLE_MAX}): il modello ha cambiato la posa o le forme. Ricomposizione sbagliata: rigenera la tavola.`
     );
-  return { pieces, scale, front, bg, warnings, fidelityError, faithful };
+  else if (!faithful)
+    warnings.unshift(
+      `Tavola leggermente ridisegnata (errore medio ${fidelityError}, fedele fino a ${FIDELITY_MAX}): posa uguale, va bene per il character ma non per il dataset di addestramento.`
+    );
+  return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable };
 }

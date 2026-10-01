@@ -349,10 +349,16 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
         }
       }
   }
+  const floodPix = [];
   while (queue.length) {
     const i = queue.pop();
-    parts[i] = PART.oggetto_in_mano;
+    floodPix.push(i);
     const x = i % W, y = (i - x) / W;
+    // pelle attaccata alla mano (dita aperte oltre il raggio della mano) = mano, non oggetto
+    if (categories[i] === SEG.bodySkin) {
+      const near = arms.filter((a) => a.vis >= 0.3).sort((a, b) => Math.hypot(x - a.hand.x, y - a.hand.y) - Math.hypot(x - b.hand.x, y - b.hand.y))[0];
+      parts[i] = near ? PART[`avambraccio_${near.side}`] : PART.oggetto_in_mano;
+    } else parts[i] = PART.oggetto_in_mano;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
       const nx = x + dx, ny = y + dy;
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
@@ -361,6 +367,34 @@ export function recognizeParts({ width: W, height: H, landmarks, categories, alp
         outside[j] = 2;
         queue.push(j);
       }
+    }
+  }
+  // frammenti minuscoli di "oggetto" attaccati alla mano (contorni delle dita) = mano
+  {
+    const nearestForearm = (x, y) => {
+      const near = arms.filter((a) => a.vis >= 0.3).sort((a, b) => Math.hypot(x - a.hand.x, y - a.hand.y) - Math.hypot(x - b.hand.x, y - b.hand.y))[0];
+      return near ? PART[`avambraccio_${near.side}`] : PART.busto;
+    };
+    const inFlood = new Uint8Array(W * H);
+    for (const i of floodPix) if (parts[i] === PART.oggetto_in_mano) inFlood[i] = 1;
+    const minObj = 0.01 * shoulderW * shoulderW;
+    for (const s0 of floodPix) {
+      if (inFlood[s0] !== 1) continue;
+      const comp = [s0];
+      inFlood[s0] = 2;
+      for (let k = 0; k < comp.length; k++) {
+        const i = comp[k], x = i % W, y = (i - x) / W;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          const j = ny * W + nx;
+          if (inFlood[j] === 1) {
+            inFlood[j] = 2;
+            comp.push(j);
+          }
+        }
+      }
+      if (comp.length < minObj) for (const i of comp) parts[i] = nearestForearm(i % W, Math.floor(i / W));
     }
   }
   for (let i = 0; i < W * H; i++) if (fg[i]) counts[parts[i]]++;

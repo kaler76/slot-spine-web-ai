@@ -1,0 +1,86 @@
+{
+ "approved": "2026-10-02",
+ "note": "Avvocato (caricatura, completo blu, braccia aperte 'boh'): posa MediaPipe, sfondo nero uniforme (primo piano dal colore del bordo). Approvato dall'utente come caso di riferimento ('sappiamo cosa vogliamo'). Scala 0.5.",
+ "parts": {
+  "busto": {
+   "share": 57.4,
+   "centroid": [
+    257,
+    478
+   ]
+  },
+  "testa": {
+   "share": 21.33,
+   "centroid": [
+    248,
+    132
+   ]
+  },
+  "braccio_dx": {
+   "share": 2.75,
+   "centroid": [
+    157,
+    284
+   ]
+  },
+  "braccio_sx": {
+   "share": 2.97,
+   "centroid": [
+    354,
+    285
+   ]
+  },
+  "avambraccio_dx": {
+   "share": 7.83,
+   "centroid": [
+    110,
+    400
+   ]
+  },
+  "avambraccio_sx": {
+   "share": 7.71,
+   "centroid": [
+    401,
+    401
+   ]
+  }
+ },
+ "joints": {
+  "base_collo": [
+   255,
+   234
+  ],
+  "spalla_sx": [
+   348,
+   251
+  ],
+  "gomito_sx": [
+   369,
+   352
+  ],
+  "polso_sx": [
+   406,
+   424
+  ],
+  "spalla_dx": [
+   161,
+   248
+  ],
+  "gomito_dx": [
+   142,
+   350
+  ],
+  "polso_dx": [
+   108,
+   423
+  ],
+  "mano_sx": [
+   422,
+   436
+  ],
+  "mano_dx": [
+   92,
+   433
+  ]
+ }
+}
