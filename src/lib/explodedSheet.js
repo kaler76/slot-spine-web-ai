@@ -474,7 +474,11 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   if (Math.abs(scale - 1) > 0.01) warnings.push(`Tavola in scala diversa dall'originale: fattore ${scale.toFixed(2)}.`);
   pieces = pieces.map((p) => {
     const sp = scalePiece(p, scale);
-    const pos = alignPiece(sp, original, 1);
+    // pezzi PICCOLI (occhi, sopracciglia, bocca, ciocche): a passo 8 la ricerca grossolana salta
+    // la posizione giusta e trova un falso minimo altrove (caso reale: folletto con viso, occhi
+    // finiti sul busto). Sotto il 12% del lato dell'originale si cerca a passo 2 con più campioni.
+    const small = Math.max(sp.width, sp.height) < 0.12 * Math.max(original.width, original.height);
+    const pos = alignPiece(sp, original, 1, small ? { coarse: 2, nFew: 1000 } : undefined);
     if (pos.err > 80) warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: posizione incerta (errore ${pos.err.toFixed(0)}).`);
     return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
   });
@@ -501,6 +505,13 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     }
   }
   const front = orderPieces(pieces, original);
+  // occhi, sopracciglia, bocca SEMPRE davanti alla testa (sotto c'è la palpebra/pelle ridipinta,
+  // diversa dall'originale: il confronto dei pixel lo direbbe giusto, ma non deve dipendere da lui)
+  const head = pieces.find((p) => p.name === "testa");
+  if (head)
+    for (const p of pieces)
+      if (/^(occhio|sopracciglio|bocca)(_|$)/.test(p.name) && p.order < head.order) p.order = head.order + 0.5;
+  [...pieces].sort((a, b) => a.order - b.order).forEach((p, i) => (p.order = i));
   for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks, pieces));
   pieces.sort((a, b) => a.order - b.order);
   // Fedeltà della tavola: errore medio pesato sull'area. Una tavola che RIDISEGNA il personaggio

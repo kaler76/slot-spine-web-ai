@@ -215,7 +215,10 @@ export function buildLoopTrack(part) {
     const scale = [], rgba = [];
     for (let c = 0; c < n; c++) {
       const t0 = c * d;
-      for (const [f, sy, col] of [[0, 1, "ffffffff"], [0.85, 1, "ffffffff"], [0.89, 0.1, "ffffff33"], [0.93, 1, "ffffffff"]]) {
+      // occhio: trasparenza PIENA a occhio chiuso, così si vede la palpebra dipinta sulla testa
+      // (folletto con viso, approvato 2 ott: "palpebre fantastico"); luci e dettagli: 20%
+      const shut = role === "eye" ? "ffffff00" : "ffffff33";
+      for (const [f, sy, col] of [[0, 1, "ffffffff"], [0.85, 1, "ffffffff"], [0.89, 0.1, shut], [0.93, 1, "ffffffff"]]) {
         scale.push({ time: +(t0 + f * d).toFixed(4), x: 1, y: sy });
         rgba.push({ time: +(t0 + f * d).toFixed(4), color: col });
       }

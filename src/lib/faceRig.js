@@ -15,7 +15,7 @@
 // Puro: nessun DOM.
 
 export const FACE_LM = { eyeSx: 2, eyeDx: 5, earSx: 7, earDx: 8, mouthSx: 9, mouthDx: 10, nose: 0 };
-export const FACE_RULES = { eyeMax: 0.35, browAbove: 0.5, browMax: 0.35, mouthMax: 0.5, maxSize: 1.2, hairOut: 0.6 };
+export const FACE_RULES = { eyeMax: 0.35, browAbove: 0.5, browMax: 0.35, mouthMax: 0.5, maxSize: 1.2, mouthSize: 1.8, hairOut: 0.6 };
 export const FACE_PREFIXES = ["occhio", "sopracciglio", "bocca", "ciocca", "dettaglio_viso"];
 export const isFaceName = (name) => FACE_PREFIXES.some((k) => name === k || name?.startsWith(`${k}_`));
 
@@ -72,18 +72,20 @@ export function labelFacePieces(rest, landmarks, head) {
   const cand = rest.filter(
     (p) => overlaps(p, head, 0.1 * fr.u) && Math.max(p.width, p.height) < FACE_RULES.maxSize * fr.u * 2 && !limbs.some((pt) => covers(p, pt))
   );
+  // [nome, punto, distanza massima, lato massimo] — la bocca sorridente è larga (folletto: 1.15 u
+  // più il margine del ritaglio): fino a 1.8 u
   const targets = [
-    ["occhio_sx", fr.eyeSx, FACE_RULES.eyeMax],
-    ["occhio_dx", fr.eyeDx, FACE_RULES.eyeMax],
-    ["sopracciglio_sx", fr.browSx, FACE_RULES.browMax],
-    ["sopracciglio_dx", fr.browDx, FACE_RULES.browMax],
-    ["bocca", fr.mouth, FACE_RULES.mouthMax]
+    ["occhio_sx", fr.eyeSx, FACE_RULES.eyeMax, FACE_RULES.maxSize],
+    ["occhio_dx", fr.eyeDx, FACE_RULES.eyeMax, FACE_RULES.maxSize],
+    ["sopracciglio_sx", fr.browSx, FACE_RULES.browMax, FACE_RULES.maxSize],
+    ["sopracciglio_dx", fr.browDx, FACE_RULES.browMax, FACE_RULES.maxSize],
+    ["bocca", fr.mouth, FACE_RULES.mouthMax, FACE_RULES.mouthSize]
   ];
   const pairs = [];
   for (const p of cand) {
-    if (Math.max(p.width, p.height) > FACE_RULES.maxSize * fr.u) continue; // parti del viso: piccole
     const c = centerOf(p);
-    for (const [name, pt, max] of targets) {
+    for (const [name, pt, max, size] of targets) {
+      if (Math.max(p.width, p.height) > size * fr.u) continue; // parti del viso: piccole
       const d = dist(c, pt) / fr.u;
       if (d <= max) pairs.push({ p, name, d });
     }

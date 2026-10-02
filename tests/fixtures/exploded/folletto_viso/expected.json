@@ -1,0 +1,80 @@
+{
+  "note": "Folletto con VISO separato (12 pezzi: occhi, sopracciglia, bocca, ciocche). Tavola composta dai ritagli della base approvata + palpebre chiuse ritoccate (lavoro Codex, approvato dall utente 2026-10-02). Posizioni verificate entro 5 px dalle coordinate esplicite di placements.json (differenza = margine di ritaglio).",
+  "faithful": true,
+  "usable": true,
+  "maxDiffShare": 0.13,
+  "pieces": [
+    {
+      "name": "braccio_sx",
+      "parent": "busto",
+      "x": 320,
+      "y": 98
+    },
+    {
+      "name": "ciocca_dx",
+      "parent": "testa",
+      "x": 211,
+      "y": 159
+    },
+    {
+      "name": "ciocca_sx",
+      "parent": "testa",
+      "x": 330,
+      "y": 155
+    },
+    {
+      "name": "busto",
+      "parent": null,
+      "x": 179,
+      "y": 177
+    },
+    {
+      "name": "testa",
+      "parent": "busto",
+      "x": 188,
+      "y": 16
+    },
+    {
+      "name": "oggetto",
+      "parent": "braccio_dx",
+      "x": 183,
+      "y": 207
+    },
+    {
+      "name": "sopracciglio_sx",
+      "parent": "testa",
+      "x": 301,
+      "y": 112
+    },
+    {
+      "name": "sopracciglio_dx",
+      "parent": "testa",
+      "x": 248,
+      "y": 114
+    },
+    {
+      "name": "occhio_dx",
+      "parent": "testa",
+      "x": 255,
+      "y": 130
+    },
+    {
+      "name": "occhio_sx",
+      "parent": "testa",
+      "x": 301,
+      "y": 129
+    },
+    {
+      "name": "bocca",
+      "parent": "testa",
+      "x": 263,
+      "y": 162
+    },
+    {
+      "name": "braccio_dx",
+      "parent": "busto",
+      "x": 146,
+      "y": 193
+    }
+  ]
+}
