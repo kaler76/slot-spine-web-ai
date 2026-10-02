@@ -77,8 +77,8 @@ test("tavola: sfondo nero (non chroma) rifiutato", () => {
 test(`tavola: più di ${MAX_PIECES} pezzi = troppo frammentata`, () => {
   const W = 400, H = 400, rgba = new Uint8ClampedArray(W * H * 4);
   for (let i = 0; i < W * H; i++) rgba.set([0, 24, 255, 255], i * 4);
-  for (let k = 0; k < 16; k++) {
-    const x0 = 20 + (k % 4) * 95, y0 = 20 + Math.floor(k / 4) * 95;
+  for (let k = 0; k < MAX_PIECES + 4; k++) {
+    const x0 = 10 + (k % 5) * 78, y0 = 10 + Math.floor(k / 5) * 78;
     for (let y = y0; y < y0 + 50; y++) for (let x = x0; x < x0 + 50; x++) rgba.set([200, 150, 60, 255], (y * W + x) * 4);
   }
   assert.throws(() => importExplodedSheet({ sheet: { width: W, height: H, rgba }, original: { width: W, height: H, rgba: new Uint8ClampedArray(W * H * 4) } }), /frammentata/);

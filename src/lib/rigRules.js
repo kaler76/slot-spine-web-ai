@@ -13,7 +13,7 @@ import { anchorToFraction } from "./characterSkeleton.js";
 /** Versione delle regole: va incrementata a ogni modifica di euristiche/soglie (finisce nel registro correzioni). */
 export const RULES_VERSION = "2026-10-01.2";
 
-export const PART_ROLES = ["torso", "head", "arm", "forearm", "hand", "hair", "earring", "headdress", "accessory", "other"];
+export const PART_ROLES = ["torso", "head", "arm", "forearm", "hand", "hair", "earring", "headdress", "accessory", "other", "eye", "eyebrow", "mouth"];
 
 export const ROLE_LABELS = {
   torso: "Busto",
@@ -25,11 +25,14 @@ export const ROLE_LABELS = {
   earring: "Orecchino/pendente",
   headdress: "Copricapo",
   accessory: "Accessorio",
-  other: "Altro"
+  other: "Altro",
+  eye: "Occhio",
+  eyebrow: "Sopracciglio",
+  mouth: "Bocca"
 };
 
 /** Ruoli che seguono la testa (diventano suoi figli). */
-const HEAD_FOLLOWERS = new Set(["hair", "earring", "headdress"]);
+const HEAD_FOLLOWERS = new Set(["hair", "earring", "headdress", "eye", "eyebrow", "mouth"]);
 
 const ALPHA_MIN = 128;
 

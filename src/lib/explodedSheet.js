@@ -13,6 +13,7 @@
 // Tutto puro e testabile: nessun DOM.
 
 import { LM } from "./partRecognition.js";
+import { labelFacePieces, isFaceName, facePivot } from "./faceRig.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -50,7 +51,7 @@ export function chooseChromaColor(original) {
 }
 
 /** Pezzi massimi in una tavola esplosa: oltre, il modello ha frammentato il personaggio. */
-export const MAX_PIECES = 12;
+export const MAX_PIECES = 16; // corpo (4-6) + viso (occhi, sopracciglia, bocca, ciocche)
 
 /**
  * Controlli PRIMA di elaborare la tavola, con un messaggio chiaro invece di decine di pezzi
@@ -364,8 +365,11 @@ export function labelPieces(pieces, landmarks) {
     taken.add(c.p);
     done.add(c.r.name);
   }
+  // pezzi del viso (occhi, sopracciglia, bocca, ciocche) attaccati alla testa: faceRig.js
+  let rest = pieces.filter((p) => !taken.has(p));
+  const face = labelFacePieces(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"));
+  rest = rest.filter((p) => !face.has(p));
   let k = 0;
-  const rest = pieces.filter((p) => !taken.has(p));
   for (const p of rest) p.name = rest.length > 1 ? `oggetto_${++k}` : "oggetto";
 }
 
@@ -418,7 +422,7 @@ export function orderPieces(pieces, orig) {
 }
 
 /** Genitore e pivot per il rig (stesse convenzioni di partExtraction.js). */
-function rigInfo(p, joints, landmarks) {
+function rigInfo(p, joints, landmarks, pieces = []) {
   const L = (i) => landmarks?.[i];
   const mid = (a, b) => (a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } : null);
   const bottom = { x: p.x + p.width / 2, y: p.y + p.height };
@@ -427,6 +431,7 @@ function rigInfo(p, joints, landmarks) {
   else if (p.name === "testa") { parent = "busto"; pivot = joints?.base_collo || mid(L(LM.shoulderSx), L(LM.shoulderDx)); }
   else if (p.name === "braccio_sx") { parent = "busto"; pivot = L(LM.shoulderSx); }
   else if (p.name === "braccio_dx") { parent = "busto"; pivot = L(LM.shoulderDx); }
+  else if (isFaceName(p.name)) { parent = "testa"; pivot = facePivot(p, pieces.find((q) => q.name === "testa")); }
   else {
     // oggetto: lo tiene la mano più vicina al suo centro
     const c = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
@@ -457,11 +462,11 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
         `Il colore dello sfondo della tavola (rgb ${bg.join(",")}) è presente nel personaggio (${Math.round(share * 100)}% dei pixel): quelle zone possono sparire allo scontorno. Rigenera la tavola con lo sfondo consigliato da "Copia prompt".`
       );
   }
-  const { lab, comps } = splitComponents(alpha, sheet.width, sheet.height, minArea ?? Math.round(0.0004 * sheet.width * sheet.height));
+  const { lab, comps } = splitComponents(alpha, sheet.width, sheet.height, minArea ?? Math.round(0.00015 * sheet.width * sheet.height));
   if (!comps.length) throw new Error("Nessun pezzo trovato: lo sfondo della tavola deve essere a tinta unita.");
   if (comps.length > MAX_PIECES)
     throw new Error(
-      `Tavola troppo frammentata: ${comps.length} pezzi (massimo ${MAX_PIECES}). Il modello ha diviso il personaggio in troppe parti (es. ogni piastra dell'armatura): rigenera la tavola chiedendo al massimo 6-8 pezzi grandi.`
+      `Tavola troppo frammentata: ${comps.length} pezzi (massimo ${MAX_PIECES}). Il modello ha diviso il personaggio in troppe parti (es. ogni piastra dell'armatura): rigenera la tavola chiedendo al massimo 6-8 pezzi grandi (più occhi, sopracciglia, bocca e ciocche se usi il prompt con viso).`
     );
   let pieces = comps.map((c) => ({ area: c.area, ...cutPiece(sheet, alpha, lab, c, bg) }));
   const biggest = pieces.reduce((a, b) => (b.area > a.area ? b : a));
@@ -496,7 +501,7 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     }
   }
   const front = orderPieces(pieces, original);
-  for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks));
+  for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks, pieces));
   pieces.sort((a, b) => a.order - b.order);
   // Fedeltà della tavola: errore medio pesato sull'area. Una tavola che RIDISEGNA il personaggio
   // (proporzioni, dettagli, posa diversi) non si ricompone sull'originale e non va usata come

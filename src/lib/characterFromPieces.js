@@ -3,6 +3,8 @@
 // osso nel pivot, offset relativo al genitore in coordinate Spine (y verso l'alto),
 // ordine di disegno, ruolo e animazione di partenza. Puro e testabile: nessun DOM.
 
+import { faceDefaults } from "./faceRig.js";
+
 /** Ruolo (rigRules.PART_ROLES) e animazione di partenza per nome del pezzo. */
 const DEFAULTS = {
   busto: { role: "torso", animationType: "static", speed: 1 },
@@ -11,18 +13,20 @@ const DEFAULTS = {
   braccio_dx: { role: "arm", animationType: "sway", speed: 0.8 },
   oggetto: { role: "accessory", animationType: "sway", speed: 0.7 }
 };
-const defaultsFor = (name) => DEFAULTS[name] || (name.startsWith("oggetto") ? DEFAULTS.oggetto : { role: "other", animationType: "static", speed: 1 });
+const defaultsFor = (name) =>
+  DEFAULTS[name] || faceDefaults(name) || (name.startsWith("oggetto") ? DEFAULTS.oggetto : { role: "other", animationType: "static", speed: 1 });
 
 /**
  * @param {Array} pieces - pezzi di importExplodedSheet (x,y,width,height,pivot,parent,order nel sistema dell'immagine)
  * @returns {{ parts: Array, origin: {x,y} }} parti pronte per saveCharacterPart (senza imageBlob)
  */
 export function piecesToCharacterParts(pieces) {
-  // il pivot deve stare dentro l'immagine del pezzo (vincolo pivot 0..1 su character_parts):
-  // se cade fuori (es. mano accanto a un oggetto) l'osso si sposta sul bordo più vicino
+  // il pivot può stare fuori dall'immagine del pezzo (es. oggetto tenuto in mano: osso sulla
+  // mano) entro il vincolo pivot -1..2 di character_parts; oltre si porta al limite
+  const lim = (v, a, size) => Math.min(a + 2 * size, Math.max(a - size, v));
   pieces = pieces.map((p) => ({
     ...p,
-    pivot: { x: Math.min(p.x + p.width, Math.max(p.x, p.pivot.x)), y: Math.min(p.y + p.height, Math.max(p.y, p.pivot.y)) }
+    pivot: { x: lim(p.pivot.x, p.x, p.width), y: lim(p.pivot.y, p.y, p.height) }
   }));
   const byName = Object.fromEntries(pieces.map((p) => [p.name, p]));
   const rootPiece = pieces.find((p) => !p.parent) || pieces[0];

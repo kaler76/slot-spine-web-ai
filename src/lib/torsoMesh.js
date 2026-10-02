@@ -136,6 +136,41 @@ export const HEAD_MESH_RULES = {
   chinLag: 1.0
 };
 
+const FACE_ROLES = new Set(["eye", "eyebrow", "mouth"]);
+
+/**
+ * Con occhi/sopracciglia/bocca separati le fasce che ondeggiano (cima e mento) devono stare
+ * FUORI dal viso: altrimenti la pelle sotto gli occhi scivola via dagli occhi (regola trovata
+ * sui sintetici col viso). Cima sopra il bordo alto del pezzo più alto del viso, mento sotto il
+ * bordo basso della bocca (margine 0.03); con il viso troppo in alto la cima non ha pesi.
+ */
+function faceSafeRules(json, parts, key, skin, rules) {
+  const h = skin.height;
+  const frac = (y) => (skin.y + h / 2 - y) / h; // y locale -> frazione dall'alto
+  let topF = Infinity, botF = -Infinity;
+  for (const p of parts) {
+    if (!FACE_ROLES.has(p.role)) continue;
+    const b = json.bones.find((x) => x.name === p.partKey && x.parent === key);
+    const att = json.skins[0].attachments?.[p.partKey]?.[p.partKey];
+    if (!b || !att) continue;
+    topF = Math.min(topF, frac((b.y || 0) + (att.y || 0) + att.height / 2));
+    botF = Math.max(botF, frac((b.y || 0) + (att.y || 0) - att.height / 2));
+  }
+  if (!isFinite(topF)) return rules;
+  const r = { ...rules };
+  if (r.topTo > topF - 0.03) {
+    r.topTo = topF - 0.03;
+    r.topFrom = Math.min(r.topFrom, r.topTo - 0.1);
+    r.topBone = r.topFrom + (r.topTo - r.topFrom) * 0.67;
+  }
+  if (r.chinFrom < botF + 0.03) {
+    r.chinFrom = botF + 0.03;
+    r.chinTo = Math.max(r.chinTo, r.chinFrom + 0.1);
+    r.chinBone = r.chinFrom + (r.chinTo - r.chinFrom) * 0.2;
+  }
+  return r;
+}
+
 /**
  * Testa come MESH PESATA: tre fasce verticali legate a tre ossa
  *   "<testa>_cima" (cappello/capelli), l'osso della testa (viso), "<testa>_mento" (barba/mento).
@@ -153,15 +188,18 @@ export function addHeadMesh(skeletonJson, parts, rules = HEAD_MESH_RULES) {
   if (boneIdx < 0 || !skin || skin.type !== "region") return { json, applied: false, reason: "testa non trovata nello skeleton" };
   const h = skin.height;
   const yAt = (f) => skin.y + h / 2 - f * h; // frazione dall'alto -> y locale (su)
+  rules = faceSafeRules(json, parts, key, skin, rules);
   const top = { x: skin.x, y: +yAt(rules.topBone).toFixed(2) };
   const chin = { x: skin.x, y: +yAt(rules.chinBone).toFixed(2) };
   const topName = `${key}_cima`, chinName = `${key}_mento`;
   json.bones.splice(boneIdx + 1, 0, { name: topName, parent: key, x: top.x, y: top.y, rotation: 0 }, { name: chinName, parent: key, x: chin.x, y: chin.y, rotation: 0 });
   const topIdx = boneIdx + 1, chinIdx = boneIdx + 2;
 
-  // parti agganciate alla testa sopra la base del cappello (es. cappello separato) -> cima
+  // parti agganciate alla testa sopra la base del cappello (es. cappello separato) -> cima;
+  // mai i pezzi del viso (occhi, sopracciglia, bocca): restano sull'osso rigido del viso
+  const faceKeys = new Set(parts.filter((p) => FACE_ROLES.has(p.role)).map((p) => p.partKey));
   for (const b of json.bones) {
-    if (b.parent === key && b.name !== topName && b.name !== chinName && (b.y || 0) >= top.y) {
+    if (b.parent === key && b.name !== topName && b.name !== chinName && !faceKeys.has(b.name) && (b.y || 0) >= top.y) {
       b.parent = topName;
       b.x = +((b.x || 0) - top.x).toFixed(2);
       b.y = +((b.y || 0) - top.y).toFixed(2);

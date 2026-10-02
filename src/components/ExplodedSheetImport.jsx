@@ -13,15 +13,25 @@ import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.
  * Prompt per la tavola esplosa. Lo sfondo è scelto sul personaggio (chooseChromaColor): il colore
  * meno presente nel disegno, così nessuna parte (es. un tabarro blu) sparisce allo scontorno.
  */
-export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }) {
+export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, { face = false } = {}) {
   return `Using the attached character image, create an EXPLODED VIEW sheet of the same character for 2D skeletal animation (Spine).
 - Same character, same art style, same scale and same proportions as the original. Do not redesign anything.
 - Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and EVERY HELD OBJECT as its own piece (a sword or staff is ONE piece). Do NOT split armor, clothing or accessories into small plates or fragments.
 - Do NOT change the pose: every piece keeps EXACTLY the same angle and shape it has in the original (bent or crossed arms stay bent or crossed, a raised arm stays raised). Only move pieces apart, never rotate, straighten or re-pose them.
 - Keep every piece as close as possible to its original position, just moved apart so that no piece touches or overlaps another (clear gap between pieces).
 - Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding an object.
-- Background: flat solid pure ${chroma.name} ${chroma.hex}, no gradient, no shadows, no glow, no particles, no text. The character must not contain this background color.`;
+- Background: flat solid pure ${chroma.name} ${chroma.hex}, no gradient, no shadows, no glow, no particles, no text. The character must not contain this background color.${face ? FACE_PROMPT : ""}`;
 }
+
+/**
+ * Aggiunta per la tavola CON IL VISO separato (faceRig.js): occhi, sopracciglia, bocca e ciocche
+ * laterali come pezzi a sé; sulla testa, sotto gli occhi, palpebre CHIUSE dipinte (il battito
+ * schiaccia l'occhio aperto e scopre la palpebra: senza, si vede un buco — mutazione nei test).
+ */
+const FACE_PROMPT = `
+- FACE PARTS as separate small pieces, placed just outside the head with a clear gap, same size and same shape as in the original: LEFT EYE, RIGHT EYE (each eye open, with its upper lash line), LEFT EYEBROW, RIGHT EYEBROW, MOUTH, and each side HAIR LOCK that hangs beside the face (if any). Do not draw the face parts twice.
+- On the HEAD piece, where the eyes were, paint CLOSED EYELIDS (skin with a curved lash line); where the eyebrows and the mouth were, paint plain skin. The head piece must have no holes.
+- At most 16 pieces in total.`;
 export const EXPLODED_PROMPT = buildExplodedPrompt();
 
 function loadImage(file) {
@@ -213,6 +223,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         posa e decide chi sta davanti. Per generarla: allega l'immagine originale a Gemini/ChatGPT con questo prompt{" "}
         <button type="button" className="btn secondary" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined))}>
           📋 Copia prompt
+        </button>{" "}
+        <button type="button" className="btn secondary" title="Occhi, sopracciglia, bocca e ciocche come pezzi separati (battito degli occhi, capelli al vento)" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined, { face: true }))}>
+          📋 Copia prompt con viso
         </button>
         {chroma && (
           <span style={{ marginLeft: 8 }}>

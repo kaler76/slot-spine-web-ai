@@ -4,7 +4,7 @@
 // Ogni personaggio porta con sé la "verità": nomi dei pezzi, genitori, pivot, posa (33 punti
 // MediaPipe), così un test confronta il risultato delle regole con la risposta esatta.
 // Le sagome sono maschere semplici (capsule, cerchi, rettangoli) nel formato dei pezzi di
-// explodedSheet.js (rgba con alpha). Pensato per crescere: occhi, bocca, capelli, mesh.
+// explodedSheet.js (rgba con alpha). Con { face: true } anche occhi, sopracciglia, bocca e ciocche.
 // Puro e deterministico (seme): nessun DOM.
 
 /** Generatore pseudo-casuale con seme (mulberry32): stessi numeri a ogni esecuzione. */
@@ -45,7 +45,8 @@ function pieceFromShape(inside, box) {
 /**
  * Un personaggio sintetico frontale.
  * @param {number} seed
- * @param {Object} [opt] - forza alcune scelte: { raised: 'sx'|'dx'|'both'|'none', object: 'sx'|'dx'|null }
+ * @param {Object} [opt] - forza alcune scelte: { raised: 'sx'|'dx'|'both'|'none', object: 'sx'|'dx'|null,
+ *   face: true (occhi, sopracciglia, bocca, ciocche), eyeHoles: true (mutazione: niente pelle sotto gli occhi) }
  * @returns {{ width, height, landmarks, pieces, truth }}
  */
 export function makeSyntheticCharacter(seed, opt = {}) {
@@ -137,6 +138,49 @@ export function makeSyntheticCharacter(seed, opt = {}) {
     const ow = hug ? 34 : 22, oh = hug ? 40 : 28;
     const box = { minX: c.x - ow, maxX: c.x + ow, minY: c.y - oh, maxY: c.y + oh };
     pieces.push({ truth: "oggetto", parent: `braccio_${objectSide}`, pivot: a.w, ...pieceFromShape((x, y) => x >= box.minX && x <= box.maxX && y >= box.minY && y <= box.maxY, box) });
+  }
+  // VISO (opt.face): occhi, sopracciglia, bocca, ciocche, figli della testa e davanti a lei.
+  // Numeri casuali estratti DOPO tutto il resto: con face=false i casi restano identici.
+  const face = {};
+  if (opt.face) {
+    const eyeRx = hr * between(0.13, 0.18), eyeRy = hr * between(0.08, 0.12);
+    const ell = (c, rx, ry) => (x, y) => ((x - c.x) / rx) ** 2 + ((y - c.y) / ry) ** 2 <= 1;
+    const ellBox = (c, rx, ry) => ({ minX: c.x - rx, maxX: c.x + rx, minY: c.y - ry, maxY: c.y + ry });
+    const capsule = (a, b, r) => [(x, y) => segDist(x, y, a, b) <= r, { minX: Math.min(a.x, b.x) - r, maxX: Math.max(a.x, b.x) + r, minY: Math.min(a.y, b.y) - r, maxY: Math.max(a.y, b.y) + r }];
+    for (const side of ["sx", "dx"]) {
+      const c = side === "sx" ? L[2] : L[5];
+      face[`occhio_${side}`] = { c: { x: c.x, y: c.y }, rx: eyeRx, ry: eyeRy };
+      pieces.push({ truth: `occhio_${side}`, parent: "testa", pivot: { x: c.x, y: c.y }, ...pieceFromShape(ell(c, eyeRx, eyeRy), ellBox(c, eyeRx, eyeRy)) });
+    }
+    if (R() < 0.8)
+      for (const side of ["sx", "dx"]) {
+        const e = side === "sx" ? L[2] : L[5];
+        const c = { x: e.x, y: e.y - hr * 0.3 };
+        const half = hr * between(0.12, 0.18), tilt = (side === "sx" ? -1 : 1) * hr * between(-0.04, 0.04);
+        const [inside, box] = capsule({ x: c.x - half, y: c.y + tilt }, { x: c.x + half, y: c.y - tilt }, hr * 0.035);
+        pieces.push({ truth: `sopracciglio_${side}`, parent: "testa", pivot: c, ...pieceFromShape(inside, box) });
+      }
+    const m = { x: (L[9].x + L[10].x) / 2, y: (L[9].y + L[10].y) / 2 };
+    const mrx = hr * between(0.15, 0.25), mry = hr * between(0.05, 0.09);
+    pieces.push({ truth: "bocca", parent: "testa", pivot: m, ...pieceFromShape(ell(m, mrx, mry), ellBox(m, mrx, mry)) });
+    const locks = Math.floor(R() * 3); // 0, 1 o 2 ciocche ai lati
+    const lockSides = locks === 2 ? ["sx", "dx"] : locks === 1 ? [R() < 0.5 ? "sx" : "dx"] : [];
+    for (const side of lockSides) {
+      const out = side === "sx" ? 1 : -1;
+      const a0 = { x: head.x + out * hr * 0.9, y: head.y - hr * 0.35 };
+      const a1 = { x: head.x + out * hr * between(1.0, 1.1), y: head.y + hr * between(0.4, 0.6) };
+      const [inside, box] = capsule(a0, a1, hr * 0.13);
+      pieces.push({ truth: `ciocca_${side}`, parent: "testa", pivot: a0, ...pieceFromShape(inside, box) });
+    }
+    if (opt.eyeHoles) {
+      // MUTAZIONE: testa senza pelle sotto gli occhi (la tavola non ha ridisegnato le palpebre)
+      const t = pieces.find((p) => p.truth === "testa");
+      for (const k of ["occhio_sx", "occhio_dx"]) {
+        const { c, rx, ry } = face[k];
+        for (let y = 0; y < t.height; y++)
+          for (let x = 0; x < t.width; x++) if (((x + t.x - c.x) / rx) ** 2 + ((y + t.y - c.y) / ry) ** 2 <= 1) t.rgba[(y * t.width + x) * 4 + 3] = 0;
+      }
+    }
   }
   pieces.forEach((p, i) => (p.order = i));
   return {
