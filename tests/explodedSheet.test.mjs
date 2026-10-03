@@ -22,9 +22,12 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
   if (!fs.existsSync(path.join(dir, "expected.json"))) continue;
   const original = read(path.join(dir, "original.png"));
   const sheet = read(path.join(dir, "sheet.png"));
-  const landmarks = JSON.parse(fs.readFileSync(path.join(dir, "landmarks.json"), "utf8")).landmarks.map(([x, y, v]) => ({ x, y, visibility: v }));
+  const J = JSON.parse(fs.readFileSync(path.join(dir, "landmarks.json"), "utf8"));
+  const landmarks = J.landmarks.map(([x, y, v]) => ({ x, y, visibility: v }));
+  // articolazioni (base collo, mani) come le passa l'app, se il caso le ha
+  const joints = J.joints && Object.fromEntries(Object.entries(J.joints).map(([k, [x, y]]) => [k, { x, y }]));
   const expected = JSON.parse(fs.readFileSync(path.join(dir, "expected.json"), "utf8"));
-  const r = importExplodedSheet({ sheet, original, landmarks });
+  const r = importExplodedSheet({ sheet, original, landmarks, joints });
 
   test(`${name}: fedeltà della tavola (${r.fidelityError})`, () => {
     assert.equal(r.faithful, expected.faithful ?? true);

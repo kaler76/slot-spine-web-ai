@@ -1,0 +1,80 @@
+{
+  "note": "Jessica (3 ott 2026): tavola ridisegnata (viso truccato, braccia e capelli rifatti) approvata dall'utente come risultato atteso. Posa stimata a mano.",
+  "faithful": false,
+  "usable": true,
+  "maxDiffShare": 0.03,
+  "pieces": [
+    {
+      "name": "capelli_dietro",
+      "parent": "testa",
+      "x": 345,
+      "y": 27
+    },
+    {
+      "name": "ciocca_dx",
+      "parent": "testa",
+      "x": 309,
+      "y": 207
+    },
+    {
+      "name": "testa",
+      "parent": "busto",
+      "x": 356,
+      "y": 8
+    },
+    {
+      "name": "occhio_sx",
+      "parent": "testa",
+      "x": 505,
+      "y": 107
+    },
+    {
+      "name": "occhio_dx",
+      "parent": "testa",
+      "x": 445,
+      "y": 121
+    },
+    {
+      "name": "sopracciglio_sx",
+      "parent": "testa",
+      "x": 504,
+      "y": 81
+    },
+    {
+      "name": "sopracciglio_dx",
+      "parent": "testa",
+      "x": 444,
+      "y": 94
+    },
+    {
+      "name": "ciocca_sx",
+      "parent": "testa",
+      "x": 627,
+      "y": 237
+    },
+    {
+      "name": "bocca",
+      "parent": "testa",
+      "x": 476,
+      "y": 168
+    },
+    {
+      "name": "braccio_dx",
+      "parent": "busto",
+      "x": 149,
+      "y": 134
+    },
+    {
+      "name": "busto",
+      "parent": null,
+      "x": 155,
+      "y": 313
+    },
+    {
+      "name": "braccio_sx",
+      "parent": "busto",
+      "x": 531,
+      "y": 285
+    }
+  ]
+}

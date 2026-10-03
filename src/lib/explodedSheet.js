@@ -335,6 +335,179 @@ function placeAtTarget(piece, original, pt, r, maxErr = 72) {
   return best && isFinite(best.pos.err) && best.pos.err <= maxErr ? best : null;
 }
 
+// ---------------------------------------------------------------------------------------------
+// ALLINEAMENTO PER CLASSI DI COLORE (Jessica): con una tavola RIDISEGNATA il confronto pixel per
+// pixel fallisce (pieghe, riflessi, riccioli diversi), ma le grandi zone di colore restano: guanti
+// viola, pelle, abito rosso, capelli arancio. Originale e pezzo ridotti a poche classi di colore
+// (k-means sull'originale); si cerca dove le classi coincidono.
+
+/** Classi di colore dell'originale: centri k-means e classe di ogni pixel (255 = sfondo). */
+export function colorClasses(original, k = 10) {
+  const { width: W, height: H, rgba } = original;
+  const bg = borderColor(original);
+  const fg = (i) => rgba[i * 4 + 3] >= 128 && Math.hypot(rgba[i * 4] - bg[0], rgba[i * 4 + 1] - bg[1], rgba[i * 4 + 2] - bg[2]) >= 40;
+  const sample = [];
+  const step = Math.max(1, Math.floor((W * H) / 40000));
+  for (let i = 0; i < W * H; i += step) if (fg(i)) sample.push([rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]]);
+  const centers = [sample[0]];
+  while (centers.length < k && centers.length < sample.length) {
+    let best = null, bd = -1;
+    for (let j = 0; j < sample.length; j += 7) {
+      const d = Math.min(...centers.map((c) => (c[0] - sample[j][0]) ** 2 + (c[1] - sample[j][1]) ** 2 + (c[2] - sample[j][2]) ** 2));
+      if (d > bd) { bd = d; best = sample[j]; }
+    }
+    centers.push([...best]);
+  }
+  for (let it = 0; it < 8; it++) {
+    const acc = centers.map(() => [0, 0, 0, 0]);
+    for (const p of sample) {
+      const c = nearestClass(centers, p[0], p[1], p[2]);
+      acc[c][0] += p[0]; acc[c][1] += p[1]; acc[c][2] += p[2]; acc[c][3]++;
+    }
+    acc.forEach((a, c) => { if (a[3]) centers[c] = [a[0] / a[3], a[1] / a[3], a[2] / a[3]]; });
+  }
+  const cls = new Uint8Array(W * H).fill(255);
+  for (let i = 0; i < W * H; i++) if (fg(i)) cls[i] = nearestClass(centers, rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]);
+  return { centers, cls, W, H };
+}
+function nearestClass(centers, r, g, b) {
+  let best = 0, bd = Infinity;
+  for (let c = 0; c < centers.length; c++) {
+    const d = (centers[c][0] - r) ** 2 + (centers[c][1] - g) ** 2 + (centers[c][2] - b) ** 2;
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+/**
+ * Posizione del pezzo (già in scala dell'originale) dove le sue classi di colore coincidono di
+ * più con quelle dell'originale. err = quota di campioni con classe diversa (o fuori sagoma) × 120.
+ * classErrAt(x, y) = stesso errore in una posizione data (per confrontarla).
+ */
+export function alignPieceByClass(piece, classes, { coarse = 6 } = {}) {
+  const { W, H, cls, centers } = classes;
+  const all = [];
+  for (let y = 0; y < piece.height; y++)
+    for (let x = 0; x < piece.width; x++) {
+      const i = (y * piece.width + x) * 4;
+      if (piece.rgba[i + 3] < 240) continue;
+      all.push([x, y, nearestClass(centers, piece.rgba[i], piece.rgba[i + 1], piece.rgba[i + 2])]);
+    }
+  const pick = (n) => (all.length <= n ? all : Array.from({ length: n }, (_, k) => all[Math.floor((k * all.length) / n)]));
+  const err = (tx, ty, smp) => {
+    let bad = 0;
+    for (const [x, y, c] of smp) {
+      const gx = tx + x, gy = ty + y;
+      if (gx < 0 || gy < 0 || gx >= W || gy >= H || cls[gy * W + gx] !== c) bad++;
+    }
+    return (bad / Math.max(1, smp.length)) * 120;
+  };
+  const few = pick(250), mid = pick(1500), many = pick(5000);
+  let best = { x: 0, y: 0, err: Infinity };
+  for (let ty = -Math.round(piece.height / 2); ty <= H - piece.height / 2; ty += coarse)
+    for (let tx = -Math.round(piece.width / 2); tx <= W - piece.width / 2; tx += coarse) {
+      const e = err(tx, ty, few);
+      if (e < best.err) best = { x: tx, y: ty, err: e };
+    }
+  for (const [range, step, smp] of [[coarse, 2, mid], [2, 1, many]]) {
+    let b = { ...best, err: Infinity };
+    for (let ty = best.y - range; ty <= best.y + range; ty += step)
+      for (let tx = best.x - range; tx <= best.x + range; tx += step) {
+        const e = err(tx, ty, smp);
+        if (e < b.err) b = { x: tx, y: ty, err: e };
+      }
+    best = b;
+  }
+  best.classErrAt = (x, y) => err(x, y, many);
+  return best;
+}
+/** Allineamento per classi: pezzi grandi con errore colori oltre CLASS_ALIGN_FROM, accettato se migliora di CLASS_ALIGN_MARGIN. */
+export const CLASS_ALIGN_FROM = 75;
+export const CLASS_ALIGN_MARGIN = 4;
+
+/** Viso dalla sola disposizione: scarto massimo (unità del viso) ed errore convenzionale dei tratti. */
+export const FACE_GEOMETRY_RMS_MAX = 0.35;
+const FACE_GEOMETRY_ERR = 50;
+/** Errore colori oltre il quale un pezzo grande (non posizionato per classi) è "incerto". */
+export const RESIDUAL_FROM = 80;
+export const RESIDUAL_HERE_MAX = 0; // nessun pixel visibile spiegato dove sta (Zeus, lembo: 1%: resta)
+export const RESIDUAL_GAIN_MIN = 0.15;
+
+/**
+ * Pezzi grandi incerti (errore > RESIDUAL_FROM, non posizionati per classi): si cercano dove
+ * coprono di più la parte del personaggio NON coperta dagli altri pezzi, con penalità per i pixel
+ * che cadono sullo sfondo. Le parti nascoste del pezzo (sotto gli altri) non pesano.
+ * Accettato solo se migliora il punteggio rispetto alla posizione trovata per colore.
+ */
+function fillResidual(pieces, original, warnings, ds = 3) {
+  const { width: W, height: H, rgba } = original;
+  const side = Math.max(W, H);
+  // il pezzo più grande (il corpo) non si sposta mai: è il riferimento della copertura
+  const biggest = pieces.reduce((a, b) => (b.area > a.area ? b : a));
+  const uncertain = pieces.filter((p) => p !== biggest && !p.classAligned && p.matchError > RESIDUAL_FROM && Math.max(p.width, p.height) >= 0.12 * side);
+  if (!uncertain.length) return;
+  const bg = borderColor(original);
+  const dw = Math.ceil(W / ds), dh = Math.ceil(H / ds);
+  // 1 = personaggio non coperto, 0 = coperto da altri pezzi, -1 = sfondo
+  const grid = new Int8Array(dw * dh).fill(-1);
+  for (let y = 0; y < dh; y++)
+    for (let x = 0; x < dw; x++) {
+      const i = Math.min(H - 1, y * ds) * W + Math.min(W - 1, x * ds);
+      const isFg = rgba[i * 4 + 3] >= 128 && Math.hypot(rgba[i * 4] - bg[0], rgba[i * 4 + 1] - bg[1], rgba[i * 4 + 2] - bg[2]) >= 40;
+      if (isFg) grid[y * dw + x] = 1;
+    }
+  for (const q of pieces) {
+    if (uncertain.includes(q)) continue;
+    for (let y = 0; y < q.height; y += ds)
+      for (let x = 0; x < q.width; x += ds) {
+        if (q.rgba[(y * q.width + x) * 4 + 3] < 128) continue;
+        const gx = Math.floor((q.x + x) / ds), gy = Math.floor((q.y + y) / ds);
+        if (gx >= 0 && gy >= 0 && gx < dw && gy < dh && grid[gy * dw + gx] === 1) grid[gy * dw + gx] = 0;
+      }
+  }
+  for (const p of uncertain) {
+    const pts = [];
+    for (let y = 0; y < p.height; y += ds) for (let x = 0; x < p.width; x += ds) if (p.rgba[(y * p.width + x) * 4 + 3] >= 128) pts.push([Math.floor(x / ds), Math.floor(y / ds)]);
+    const score = (ox, oy) => {
+      let s = 0;
+      for (const [x, y] of pts) {
+        const gx = ox + x, gy = oy + y;
+        const v = gx < 0 || gy < 0 || gx >= dw || gy >= dh ? -1 : grid[gy * dw + gx];
+        s += v === 1 ? 1 : v === -1 ? -1 : 0;
+      }
+      return s;
+    };
+    const pw = Math.ceil(p.width / ds), ph = Math.ceil(p.height / ds);
+    let best = { s: -Infinity };
+    for (let oy = -Math.floor(ph / 2); oy <= dh - ph / 2; oy += 2)
+      for (let ox = -Math.floor(pw / 2); ox <= dw - pw / 2; ox += 2) {
+        const v = score(ox, oy);
+        if (v > best.s) best = { s: v, ox, oy };
+      }
+    for (let oy = best.oy - 2; oy <= best.oy + 2; oy++)
+      for (let ox = best.ox - 2; ox <= best.ox + 2; ox++) {
+        const v = score(ox, oy);
+        if (v > best.s) best = { s: v, ox, oy };
+      }
+    const here = score(Math.round(p.x / ds), Math.round(p.y / ds));
+    // si sposta SOLO un pezzo che dove sta non spiega nulla di visibile (quasi tutto su pezzi già
+    // coperti o sullo sfondo) e che altrove riempie davvero un vuoto (Zeus: lembo davanti al
+    // braccio, già giusto, non si tocca: lì non c'è vuoto da riempire)
+    // ...e i cui colori non c'entrano con ciò che copre (classi di colore diverse: capelli
+    // arancio sull'abito rosso). Il lembo di Zeus copre stoffa viola e oro come la sua: resta.
+    if (process.env.DBG) console.log("RES", p.sheetX, p.sheetY, "n", pts.length, "here", here, "best", best.s);
+    if (here <= RESIDUAL_HERE_MAX * pts.length && best.s >= RESIDUAL_GAIN_MIN * pts.length) {
+      warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: in gran parte nascosto, messo dove riempie il vuoto lasciato dagli altri pezzi.`);
+      Object.assign(p, { x: best.ox * ds, y: best.oy * ds, residualPlaced: true });
+      // aggiorna il vuoto per il pezzo incerto successivo
+      for (const [x, y] of pts) {
+        const gx = best.ox + x, gy = best.oy + y;
+        if (gx >= 0 && gy >= 0 && gx < dw && gy < dh && grid[gy * dw + gx] === 1) grid[gy * dw + gx] = 0;
+      }
+    }
+  }
+}
+
 /** Pezzo scalato (nearest) per lavorare tutto in coordinate dell'originale. */
 function scalePiece(p, s) {
   if (Math.abs(s - 1) < 1e-6) return p;
@@ -538,6 +711,26 @@ export function shoulderCoverSide(p, pieces, landmarks) {
   // vicino alla spalla: entro la diagonale del pezzo
   return best && best.d <= Math.hypot(p.width, p.height) ? best.side : null;
 }
+/**
+ * CIOCCA LUNGA: pezzo non in mano che parte sopra le spalle, tocca il riquadro della testa e scende
+ * ai lati del viso (Jessica). Lato = del personaggio (sx = a destra per chi guarda).
+ * @returns {"sx"|"dx"|null}
+ */
+export function longLockSide(p, pieces, landmarks) {
+  const head = pieces.find((q) => q.name === "testa");
+  const sh = [LM.shoulderSx, LM.shoulderDx].map((i) => landmarks?.[i]).filter(Boolean);
+  if (!head || sh.length < 2) return null;
+  const shY = (sh[0].y + sh[1].y) / 2;
+  const m = 0.1 * head.width; // margine: la ciocca può stare appena fuori dal riquadro della testa
+  const touches = p.x < head.x + head.width + m && head.x - m < p.x + p.width && p.y < head.y + head.height + m && head.y - m < p.y + p.height;
+  if (!touches || p.y > shY) return null;
+  const nose = landmarks[LM.nose] || { x: head.x + head.width / 2 };
+  const cx = p.x + p.width / 2;
+  // dalla parte del viso: oltre un quarto della larghezza della testa dal naso
+  if (Math.abs(cx - nose.x) < 0.25 * head.width) return null;
+  return cx > nose.x ? "sx" : "dx";
+}
+
 const overlapCenter = (p, q) => overlapStats(p, q).c || { x: p.x + p.width / 2, y: p.y + p.height / 2 };
 
 /** Genitore e pivot per il rig (stesse convenzioni di partExtraction.js). */
@@ -610,7 +803,23 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     const r = placeAtTarget(scalePiece(p, scale), original, t.pt, 0.8 * fr.u);
     return r ? { ...r, err: r.pos.err + 10 * Math.abs(Math.log(r.s)) } : null;
   };
-  const faceGroup = fr ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
+  let faceGroup = fr ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
+  // VISO RIDISEGNATO (Jessica: occhi truccati, labbra più grandi): nessun tratto combacia per
+  // colore. Si usa solo la DISPOSIZIONE dei tratti nella tavola (sopracciglia sopra gli occhi,
+  // bocca sotto...): ogni tratto va sul suo punto della posa, in scala con il gruppo. I pixel
+  // visibili vengono poi presi dall'originale (transplantOriginal).
+  if (fr && faceGroup.size < 3) {
+    const geo = planFaceGroup(pieces, landmarks, scale, null);
+    if (geo.size >= 3 && geo.rmsU <= FACE_GEOMETRY_RMS_MAX) {
+      for (const [p, t] of geo) {
+        const sp = scalePiece(p, geo.k);
+        t.placed = { piece: sp, s: geo.k / scale, pos: { x: Math.round(t.pt.x - sp.width / 2), y: Math.round(t.pt.y - sp.height / 2), err: FACE_GEOMETRY_ERR } };
+      }
+      faceGroup = geo;
+      warnings.push(`Viso ridisegnato: occhi, sopracciglia e bocca posizionati dalla disposizione nella tavola (scarto ${geo.rmsU.toFixed(2)} u).`);
+    }
+  }
+  let classes = null; // classi di colore dell'originale, calcolate solo se servono
   pieces = pieces.map((p) => {
     const sp = scalePiece(p, scale);
     const target = faceGroup.get(p);
@@ -634,6 +843,17 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
         return { ...r.piece, x: r.pos.x, y: r.pos.y, matchError: +r.pos.err.toFixed(1), rescaled: +r.s.toFixed(2) };
       }
     }
+    // pezzo GRANDE ridisegnato: si cerca anche per classi di colore e si sceglie quella posizione
+    // se lì le classi coincidono nettamente meglio (Jessica: braccia finite sull'abito)
+    if (!small && pos.err > CLASS_ALIGN_FROM) {
+      classes ||= colorClasses(original);
+      const a = alignPieceByClass(sp, classes);
+      const here = a.classErrAt(pos.x, pos.y);
+      if (a.err < here - CLASS_ALIGN_MARGIN) {
+        warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: ridisegnato, posizionato per zone di colore (classi diverse ${here.toFixed(0)} → ${a.err.toFixed(0)}).`);
+        return { ...sp, x: a.x, y: a.y, matchError: +pos.err.toFixed(1), classAligned: true };
+      }
+    }
     if (pos.err > 80) warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: posizione incerta (errore ${pos.err.toFixed(0)}).`);
     return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
   });
@@ -653,6 +873,9 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
   });
   for (const p of pieces) delete p.sheetPiece;
+  // PEZZI NASCOSTI (capelli dietro, Jessica): un pezzo grande che non combacia da nessuna parte
+  // perché in gran parte coperto dagli altri va dove RIEMPIE IL VUOTO lasciato dagli altri pezzi
+  fillResidual(pieces, original, warnings);
   labelPieces(pieces, landmarks);
   // mano + oggetto lungo in un solo pezzo (handObject.js): nome mano_oggetto_<lato>, pivot al polso
   const handObjects = applyHandObjects(pieces, landmarks, joints);
@@ -682,7 +905,12 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
       } else {
         // non è tenuto in mano: copertura della spalla, oppure accessorio del pezzo su cui poggia
         const side = shoulderCoverSide(p, pieces, landmarks);
-        if (side) {
+        const lock = side ? null : longLockSide(p, pieces, landmarks);
+        if (lock) {
+          // CIOCCA LUNGA (Jessica): capelli che scendono ai lati del viso, attaccati alla testa
+          p.name = pieces.some((q) => q.name === `ciocca_${lock}`) ? `ciocca_${lock}_2` : `ciocca_${lock}`;
+          warnings.push(`${p.name}: ciocca lunga ai lati del viso, figlia della testa (controlla).`);
+        } else if (side) {
           p.name = `copertura_spalla_${side}`;
           p.attachTo = "busto";
           p.coverShoulder = side;

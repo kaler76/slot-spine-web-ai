@@ -97,7 +97,7 @@ export function planFaceGroup(pieces, landmarks, scale = 1, placeCost = null) {
     if (!(k > 0.2 && k < 5)) return;
     const fit = idx.reduce((a, [i, t]) => a + Math.max(0, cost[i][t].err - 30) / 40, 0);
     const score = fit + rms / fr.u + FACE_GROUP_UNASSIGNED * (group.length - idx.length);
-    if (!best || score < best.score) best = { score, map: [...assign] };
+    if (!best || score < best.score) best = { score, map: [...assign], k, rms };
   };
   const rec = (i) => {
     if (i === group.length) return evaluate();
@@ -115,6 +115,8 @@ export function planFaceGroup(pieces, landmarks, scale = 1, placeCost = null) {
   rec(0);
   if (!best) return out;
   best.map.forEach((t, i) => t >= 0 && out.set(group[i], { ...targets[t], placed: cost[i][t] }));
+  out.k = best.k; // scala tavola -> originale del gruppo del viso
+  out.rmsU = best.rms / fr.u; // scarto della disposizione, in unità del viso
   return out;
 }
 /** Penalità per un pezzo del gruppo del viso lasciato senza punto (ciocca, dettaglio). */
