@@ -18,7 +18,7 @@ export const FACE_LM = { eyeSx: 2, eyeDx: 5, earSx: 7, earDx: 8, mouthSx: 9, mou
 // baffi (Zeus, tavola corretta dall'utente 3 ott): due metà ai lati della bocca, attaccate sotto il
 // naso; centro a ~0.6 u dal centro della bocca, verso il lato, poco sotto
 export const FACE_RULES = { eyeMax: 0.35, browAbove: 0.5, browMax: 0.35, mouthMax: 0.5, maxSize: 1.2, mouthSize: 1.8, hairOut: 0.6, mustacheSide: 0.6, mustacheDown: 0.15, mustacheMax: 0.45, mustacheSize: 1.8, belowMouthMax: 1.0 };
-export const FACE_PREFIXES = ["occhio", "sopracciglio", "bocca", "baffo", "ciocca", "capelli_dietro", "dettaglio_viso"];
+export const FACE_PREFIXES = ["occhio", "sopracciglio", "bocca", "baffo", "ciocca", "ciuffo", "capelli_dietro", "dettaglio_viso"];
 export const isFaceName = (name) => FACE_PREFIXES.some((k) => name === k || name?.startsWith(`${k}_`));
 
 const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -175,7 +175,7 @@ export function labelBackHair(rest, landmarks, head) {
  * sulla testa (attaccatura).
  */
 export function facePivot(p, head) {
-  if (!/^(ciocca|baffo|capelli_dietro)/.test(p.name)) return centerOf(p);
+  if (!/^(ciocca|ciuffo|baffo|capelli_dietro)/.test(p.name)) return centerOf(p);
   for (let y = p.y; y < p.y + p.height; y++) {
     let sx = 0, n = 0;
     for (let x = p.x; x < p.x + p.width; x++)
@@ -194,6 +194,8 @@ export function faceDefaults(name) {
   if (name.startsWith("sopracciglio")) return { role: "eyebrow", animationType: "static", speed: 1 };
   if (name.startsWith("bocca")) return { role: "mouth", animationType: "static", speed: 1 };
   if (name.startsWith("ciocca")) return { role: "hair", animationType: "wind", speed: 1 };
+  // ciuffo davanti all'occhio (P7.3): movimento leggero dalla radice
+  if (name.startsWith("ciuffo")) return { role: "hair", animationType: "wind", speed: 0.6 };
   if (name.startsWith("capelli_dietro")) return { role: "hair", animationType: "wind", speed: 0.8 };
   if (name.startsWith("baffo")) return { role: "hair", animationType: "wind", speed: 0.7 };
   if (name.startsWith("dettaglio_viso")) return { role: "other", animationType: "static", speed: 1 };

@@ -36,3 +36,37 @@ test("testa-busto: ciocche figlie della testa, non del braccio", () => {
 test("testa-busto: pixel della tavola, non dell'originale", () => {
   for (const p of r.pieces) assert.equal(p.ownPixels, undefined, `${p.name}: ritagliato dall'originale`);
 });
+
+// CIUFFO (P7.3): capelli che coprono l'occhio -> "ciuffo" se pezzo in più; se è una ciocca si riusa
+import { applyRoles } from "../src/lib/explodedSheet.js";
+import { TESTA_BUSTO_ROLES } from "../src/lib/separationProfiles.js";
+const box = (name, x, y, w, h) => ({ name, x, y, width: w, height: h, area: w * h, rgba: new Uint8ClampedArray(w * h * 4).fill(255) });
+const lm = () => {
+  const L = Array.from({ length: 33 }, () => ({ x: 100, y: 100 }));
+  L[0] = { x: 100, y: 80 };
+  L[11] = { x: 140, y: 150 };
+  L[12] = { x: 60, y: 150 };
+  return L;
+};
+
+test("testa-busto: pezzo in più sopra l'occhio = ciuffo, figlio della testa, davanti all'occhio", () => {
+  const ps = [box("testa", 50, 20, 100, 120), box("occhio_dx", 70, 60, 20, 10), box("oggetto_1", 65, 30, 20, 40)];
+  const w = [];
+  applyRoles(ps, TESTA_BUSTO_ROLES, lm(), w);
+  assert.equal(ps[2].name, "ciuffo");
+  assert.equal(ps[2].overEye, true);
+});
+
+test("testa-busto: ciocca già separata sopra l'occhio = riusata (nessun ciuffo doppio)", () => {
+  const ps = [box("testa", 50, 20, 100, 120), box("occhio_dx", 70, 60, 20, 10), box("ciocca_dx", 65, 30, 20, 40)];
+  applyRoles(ps, TESTA_BUSTO_ROLES, lm(), []);
+  assert.equal(ps[2].name, "ciocca_dx");
+  assert.equal(ps[2].overEye, true);
+  assert.ok(!ps.some((p) => p.name === "ciuffo"));
+});
+
+test("testa-busto: ciocca lontana dall'occhio resta ciocca normale", () => {
+  const ps = [box("testa", 50, 20, 100, 120), box("occhio_dx", 70, 60, 20, 10), box("ciocca_sx", 140, 60, 15, 60)];
+  applyRoles(ps, TESTA_BUSTO_ROLES, lm(), []);
+  assert.equal(ps[2].overEye, undefined);
+});

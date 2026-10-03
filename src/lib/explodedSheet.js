@@ -738,8 +738,18 @@ export function longLockSide(p, pieces, landmarks) {
  * - oggetto/accessorio vicino alla testa -> ciocca del suo lato (mai figlio del braccio).
  * I nomi del braccio restano braccio_dx / braccio_sx (alzato/abbassato è la loro posa).
  */
-function applyRoles(pieces, roles, landmarks, warnings) {
+export function applyRoles(pieces, roles, landmarks, warnings) {
   const names = new Set(roles.map((r) => r.name).concat(["braccio_dx", "braccio_sx"]));
+  // CIUFFO (P7.3): capelli che coprono un occhio. Pezzo in più -> "ciuffo"; se è già una ciocca
+  // si riusa quella (nessun duplicato). In entrambi i casi va DAVANTI all'occhio.
+  const eyes = pieces.filter((q) => /^occhio_(dx|sx)$/.test(q.name));
+  const eyePx = (e) => {
+    let n = 0;
+    for (let y = 0; y < e.height; y += 2) for (let x = 0; x < e.width; x += 2) if (e.rgba[(y * e.width + x) * 4 + 3] >= 128) n++;
+    return n;
+  };
+  const coversEye = (p) => eyes.some((e) => overlapStats(e, p, 2).n >= EYE_COVER_MIN * eyePx(e));
+  const canHaveRole = roles.some((r) => r.name === "ciuffo");
   const nose = landmarks?.[LM.nose];
   const head = pieces.find((q) => q.name === "testa");
   const cx = (p) => p.x + p.width / 2;
@@ -750,8 +760,19 @@ function applyRoles(pieces, roles, landmarks, warnings) {
     mids[0].name = "bocca";
   }
   for (const p of pieces) {
-    if (names.has(p.name) || isFaceName(p.name) && /^(occhio|sopracciglio|bocca|ciocca)/.test(p.name)) continue;
+    if (/^ciocca/.test(p.name) && canHaveRole && coversEye(p)) {
+      p.overEye = true;
+      warnings.push(`${p.name}: passa sopra l'occhio, usata come ciuffo (davanti all'occhio, nessun pezzo doppio).`);
+    }
+    if (names.has(p.name) || isFaceName(p.name) && /^(occhio|sopracciglio|bocca|ciocca|ciuffo)/.test(p.name)) continue;
     const old = p.name;
+    if (canHaveRole && !/^(testa|busto|braccio)/.test(old) && coversEye(p) && !pieces.some((q) => q.name === "ciuffo")) {
+      p.name = "ciuffo";
+      p.overEye = true;
+      delete p.attachTo;
+      warnings.push(`${old} -> ciuffo: capelli davanti all'occhio, figlio della testa con pivot alla radice.`);
+      continue;
+    }
     const side = longLockSide(p, pieces, landmarks) || (nose && (cx(p) > nose.x ? "sx" : "dx"));
     if (side && !/^(testa|busto|braccio)/.test(old)) {
       p.name = pieces.some((q) => q.name === `ciocca_${side}`) ? `ciocca_${side}_2` : `ciocca_${side}`;
@@ -764,6 +785,8 @@ function applyRoles(pieces, roles, landmarks, warnings) {
   if (missing.length || arms < 2)
     warnings.push(`Profilo Testa-busto: ruoli mancanti ${[...missing, ...(arms < 2 ? [`braccia (${arms}/2)`] : [])].join(", ")}. Controlla la tavola (12 pezzi).`);
 }
+
+const EYE_COVER_MIN = 0.15; // quota dell'occhio coperta perché il pezzo sia "davanti all'occhio"
 
 const overlapCenter = (p, q) => overlapStats(p, q).c || { x: p.x + p.width / 2, y: p.y + p.height / 2 };
 
@@ -974,6 +997,12 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
       if (/^(occhio|sopracciglio|bocca|baffo)(_|$)/.test(p.name) && p.order < head.order) p.order = head.order + 0.5;
       // capelli posteriori sempre DIETRO testa e busto (pendono dietro le spalle)
       else if (/^capelli_dietro/.test(p.name)) p.order = -1;
+  // CIUFFO (P7.3): davanti a viso, occhi e sopracciglia
+  for (const p of pieces)
+    if (p.overEye) {
+      const face = pieces.filter((q) => q.name === "testa" || /^(occhio|sopracciglio)(_|$)/.test(q.name));
+      p.order = Math.max(p.order, ...face.map((q) => q.order)) + 0.75;
+    }
   // copertura della spalla sempre davanti a busto e braccio
   for (const p of pieces)
     if (p.coverShoulder) {
