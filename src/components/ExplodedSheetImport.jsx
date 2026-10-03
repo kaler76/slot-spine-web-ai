@@ -75,6 +75,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [view, setView] = useState("compare");
   // parti della mappa (posizione e nome dei pezzi della tavola): restano finché si cambia personaggio
   const [partComps, setPartComps] = useState(null);
+  const [mapUrls, setMapUrls] = useState([]); // ultime mappe di Gemini (corpo, viso): per controllarle
   useEffect(() => setPartComps(null), [original?.img]); // nuovo personaggio: nuova mappa
   const canvasRef = useRef(null);
   const navigate = useNavigate();
@@ -119,6 +120,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   async function handlePartMap(fileFromDisk, { silent = false } = {}) {
     setBusy(true);
     if (!silent) setRes(null);
+    setMapUrls([]);
     try {
       const imageToRgba = (img) => {
         const c = document.createElement("canvas");
@@ -144,6 +146,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
           im.onerror = ko;
           im.src = `data:image/png;base64,${data.imageBase64}`; // anche se è JPEG, il browser lo legge
         });
+        setMapUrls((u) => [...u.slice(-1), img.src]);
         return imageToRgba(img);
       };
       const oc = document.createElement("canvas");
@@ -366,6 +369,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
           🎨 Pezzi dalla mappa delle parti
         </button>
         {partComps && <span className="hint" style={{ margin: 0, color: "#3c3" }}>🎨 mappa pronta: ora carica la tavola, i pezzi verranno messi al loro posto con la mappa</span>}
+        {mapUrls.map((u, i) => (
+          <a key={i} className="btn secondary" href={u} download={i === mapUrls.length - 1 && mapUrls.length > 1 ? "partmap_viso.png" : "partmap.png"}>⬇️ Mappa {mapUrls.length > 1 ? (i ? "viso" : "corpo") : ""}</a>
+        ))}
         <label className="btn secondary" style={{ cursor: "pointer" }} title="Carica una mappa delle parti già generata (partmap.png)">
           📂 Carica mappa
           <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={(e) => e.target.files?.[0] && handlePartMap(e.target.files[0])} />

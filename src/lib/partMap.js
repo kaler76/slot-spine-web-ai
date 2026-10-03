@@ -70,6 +70,9 @@ const PAIRED = new Set(["occhio", "sopracciglio", "ciocca", "baffo"]);
 
 const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
+/** Quota minima dei pixel del personaggio con un colore della palette (mappa valida). */
+export const MAP_MIN_PALETTE = 0.75;
+
 /** Etichetta di ogni pixel della mappa: indice in PART_COLORS, -1 sfondo, -2 incerto. */
 export function quantizeMap({ width: W, height: H, rgba }, { maxDist = 70, bgMax = 60 } = {}) {
   const lab = new Int8Array(W * H);
@@ -82,6 +85,15 @@ export function quantizeMap({ width: W, height: H, rgba }, { maxDist = 70, bgMax
       if (d < bd) { bd = d; best = k; }
     });
     lab[i] = best;
+  }
+  // CONTROLLO: se Gemini non ha ricolorato (ha restituito il personaggio con i suoi colori) quasi
+  // nessun pixel è vicino alla palette: meglio fermarsi che produrre decine di pezzi sbagliati
+  let fgM = 0, ok = 0;
+  for (let i = 0; i < W * H; i++) if (lab[i] !== -1) { fgM++; if (lab[i] >= 0) ok++; }
+  if (fgM && ok / fgM < MAP_MIN_PALETTE) {
+    const e = new Error(`La mappa di Gemini non è a tinte piatte (solo ${Math.round((ok / fgM) * 100)}% dei pixel ha un colore della palette): ha ridisegnato il personaggio invece di ricolorarlo. Riprova a generarla.`);
+    e.code = "partmap_not_flat";
+    throw e;
   }
   // APERTURA: la mappa arriva in JPEG e i bordi fra due colori creano colori intermedi (blu+giallo
   // = grigio "bocca", verde+nero = verde scuro "ciocca", rosso+verde = marrone "baffo"): linee
@@ -255,7 +267,13 @@ export function headCrop({ map, original, fg, margin = 0.25 }) {
 
 /** Sovrascrive i tratti del viso con la mappa del viso (più dettagliata) dentro il ritaglio. */
 function mergeFaceMap(lab, W, H, faceMap, crop, warnings) {
-  const fLab = quantizeMap(faceMap);
+  let fLab;
+  try {
+    fLab = quantizeMap(faceMap);
+  } catch (e) {
+    warnings.push(`Mappa del viso non valida (${e.message.slice(0, 80)}…): occhi e bocca presi dalla mappa intera.`);
+    return;
+  }
   // sagoma di confronto: testa + capelli nel ritaglio
   const cm = new Uint8Array(crop.w * crop.h);
   for (let y = 0; y < crop.h; y++)
