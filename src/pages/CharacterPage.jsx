@@ -222,6 +222,25 @@ export default function CharacterPage() {
   const dragStartRef = useRef(null);
 
   const [playing, setPlaying] = useState(false);
+  // ZOOM dell'anteprima: "fit" = adatta allo spazio disponibile (finestra o schermo intero),
+  // altrimenti fattore fisso (1 = 100%). Ricordato per il browser.
+  const [stageZoom, setStageZoom] = useState(() => {
+    try {
+      const v = localStorage.getItem("spine.stageZoom");
+      return v && v !== "fit" && isFinite(+v) ? +v : "fit";
+    } catch {
+      return "fit";
+    }
+  });
+  const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
+  const stageWrapRef = useRef(null);
+  useEffect(() => {
+    try {
+      localStorage.setItem("spine.stageZoom", String(stageZoom));
+    } catch {
+      /* preferenza non salvata */
+    }
+  }, [stageZoom]);
   const [savingExport, setSavingExport] = useState(false);
   // busto come mesh pesata con respiro: solo export, richiede Spine Professional
   const [meshTorso, setMeshTorso] = useState(() => {
@@ -802,6 +821,21 @@ export default function CharacterPage() {
     (a, b) => previewPartsMap[a].zIndex - previewPartsMap[b].zIndex
   );
   const hasAnyPart = orderedPartKeys.length > 0;
+  useEffect(() => {
+    // larghezza = quella del riquadro dell'anteprima (la pagina può essere più stretta della finestra)
+    const onResize = () => setViewport({ w: stageWrapRef.current?.clientWidth || window.innerWidth, h: window.innerHeight });
+    onResize();
+    const ro = typeof ResizeObserver !== "undefined" && stageWrapRef.current ? new ResizeObserver(onResize) : null;
+    if (ro) ro.observe(stageWrapRef.current);
+    window.addEventListener("resize", onResize);
+    document.addEventListener("fullscreenchange", onResize);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", onResize);
+      document.removeEventListener("fullscreenchange", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasAnyPart]);
 
   // Parti con animazione "Fisica" e più di 1 segmento vengono sostituite da una
   // catena di sotto-bone sintetici (vedi expandSegmentedParts) — bounding box,
@@ -838,12 +872,15 @@ export default function CharacterPage() {
     }
     const boundsW = Math.max(maxX - minX, 100);
     const boundsH = Math.max(maxY - minY, 100);
-    const STAGE_BOX_W = 640;
-    const STAGE_BOX_H = 420;
-    const stageScale = Math.min(STAGE_BOX_W / boundsW, STAGE_BOX_H / boundsH, 1);
-    return { stageScale, stageCenterX: -minX, stageCenterY: maxY, boundsW, boundsH };
+    // spazio disponibile: larghezza della pagina e altezza della finestra (meno la barra dei comandi)
+    const full = typeof document !== "undefined" && !!document.fullscreenElement;
+    const boxW = Math.max(320, viewport.w - (full ? 32 : 4));
+    const boxH = Math.max(320, viewport.h - (full ? 80 : 160));
+    const fitScale = Math.min(boxW / boundsW, boxH / boundsH, 4);
+    const stageScale = stageZoom === "fit" ? fitScale : stageZoom;
+    return { stageScale, fitScale, stageCenterX: -minX, stageCenterY: maxY, boundsW, boundsH };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasAnyPart, expandedPartsMap, expandedOrderedKeys.join(",")]);
+  }, [hasAnyPart, expandedPartsMap, expandedOrderedKeys.join(","), stageZoom, viewport.w, viewport.h]);
 
   const skeletonData = useMemo(() => {
     if (!hasAnyPart) return null;
@@ -1473,15 +1510,50 @@ export default function CharacterPage() {
             Le parti annidate (es. occhi/bocca/capelli con genitore "testa") seguono visivamente il movimento del
             genitore, oltre alla propria animazione — come nel vero Spine.
           </div>
+          <div className="stage-zoom-bar">
+            <button type="button" className={`btn secondary${stageZoom === "fit" ? " active" : ""}`} onClick={() => setStageZoom("fit")} title="Adatta allo spazio disponibile">
+              ⤢ Adatta
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setStageZoom(Math.max(0.1, +(stageScale / 1.25).toFixed(3)))} title="Riduci">
+              −
+            </button>
+            <span className="stage-zoom-value">{Math.round(stageScale * 100)}%</span>
+            <button type="button" className="btn secondary" onClick={() => setStageZoom(Math.min(8, +(stageScale * 1.25).toFixed(3)))} title="Ingrandisci">
+              +
+            </button>
+            <button type="button" className="btn secondary" onClick={() => setStageZoom(1)} title="Dimensione reale (1 pixel = 1 pixel)">
+              100%
+            </button>
+            <button
+              type="button"
+              className="btn secondary"
+              onClick={() => (document.fullscreenElement ? document.exitFullscreen() : stageWrapRef.current?.requestFullscreen?.())}
+              title="Anteprima a schermo intero (Esc per uscire)"
+            >
+              ⛶ Schermo intero
+            </button>
+            <span className="hint">Ctrl + rotellina sull'anteprima per lo zoom</span>
+          </div>
           <div
-            className="character-stage-outer"
-            style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
+            ref={stageWrapRef}
+            className="character-stage-scroll"
+            onWheel={(e) => {
+              if (!e.ctrlKey) return;
+              e.preventDefault();
+              const f = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+              setStageZoom(Math.min(8, Math.max(0.1, +(stageScale * f).toFixed(3))));
+            }}
           >
             <div
-              className="character-stage-inner"
-              style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
+              className="character-stage-outer"
+              style={{ width: Math.round(boundsW * stageScale), height: Math.round(boundsH * stageScale) }}
             >
-              {expandedOrderedKeys.map((key) => renderPart(key))}
+              <div
+                className="character-stage-inner"
+                style={{ width: boundsW, height: boundsH, transform: `scale(${stageScale})` }}
+              >
+                {expandedOrderedKeys.map((key) => renderPart(key))}
+              </div>
             </div>
           </div>
           {workingBlob && (
