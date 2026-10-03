@@ -495,7 +495,6 @@ function fillResidual(pieces, original, warnings, ds = 3) {
     // braccio, già giusto, non si tocca: lì non c'è vuoto da riempire)
     // ...e i cui colori non c'entrano con ciò che copre (classi di colore diverse: capelli
     // arancio sull'abito rosso). Il lembo di Zeus copre stoffa viola e oro come la sua: resta.
-    if (process.env.DBG) console.log("RES", p.sheetX, p.sheetY, "n", pts.length, "here", here, "best", best.s);
     if (here <= RESIDUAL_HERE_MAX * pts.length && best.s >= RESIDUAL_GAIN_MIN * pts.length) {
       warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: in gran parte nascosto, messo dove riempie il vuoto lasciato dagli altri pezzi.`);
       Object.assign(p, { x: best.ox * ds, y: best.oy * ds, residualPlaced: true });
