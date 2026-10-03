@@ -27,6 +27,25 @@ export const PART_COLORS = [
   { part: "braccio_sx", rgb: [255, 255, 0] },
   { part: "oggetto", rgb: [255, 128, 0] }
 ];
+/** Prompt per la mappa delle parti (stessi colori di PART_COLORS). */
+export const PARTMAP_PROMPT = `Using the attached character image, produce a PART MAP of it for 2D skeletal animation.
+- Output the SAME character in EXACTLY the same pose, position, size and silhouette as the attached image. Do not move, resize, crop, rotate or redraw anything. Keep the character centered exactly as in the input, same proportions.
+- Fill every pixel of the character with ONE flat solid color depending on which part it belongs to. No outlines, no shading, no gradients, no texture, no anti-aliasing glow, no text, no labels.
+- Background: pure black #000000.
+Part colors (left/right are the CHARACTER's anatomical sides: the character's RIGHT arm is on the viewer's LEFT):
+- HEAD: face skin, ears, neck, front hair framing the face, hat/crown/helmet = pure red #FF0000
+- BACK HAIR (hair falling behind the head, neck and shoulders) = purple #8000FF
+- SIDE HAIR LOCKS hanging in front, beside the face = dark green #008000
+- EYES (each eye, iris and white) = cyan #00FFFF
+- EYEBROWS = magenta #FF00FF
+- MOUTH / LIPS = gray #808080
+- MUSTACHE (if any) = brown #804000
+- TORSO: chest, shoulders, collarbones, belly, hips, legs, feet and all clothing on them = pure green #00FF00
+- CHARACTER'S RIGHT ARM (upper arm, forearm, hand, glove, bracelet) = pure blue #0000FF
+- CHARACTER'S LEFT ARM (upper arm, forearm, hand, glove, bracelet) = pure yellow #FFFF00
+- HELD OBJECTS (staff, sword, cigarette holder, bag, lightning bolt…) and smoke/particles = orange #FF8000
+- Anything else (jewelry, earrings, belt ornaments) = the color of the part it is attached to.`;
+
 /** Ordine di disegno per parte (0 = dietro). */
 const ORDER = { capelli_dietro: 0, busto: 1, braccio_sx: 2, braccio_dx: 2, testa: 3, ciocca: 4, baffo: 5, bocca: 5, occhio: 5, sopracciglio: 5, oggetto: 6 };
 /** Genitore preferito per parte (se si toccano); altrimenti la parte con più bordo in comune. */
