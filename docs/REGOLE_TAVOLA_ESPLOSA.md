@@ -207,7 +207,7 @@ I test dei personaggi approvati restano invariati; Jessica entra come **caso di 
 
 Le correzioni preservano posa, proporzioni e pixel originali visibili. La sola ricomposizione a riposo **non basta**: si verificano anche sovrapposizioni e movimento.
 
-Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del profilo: pezzi della tavola così come sono, 12 ruoli ✅ (passo 2) · P7 nel prompt ✅ · ciuffo nell'importatore · controlli di naso, continuità e raccordi in movimento (passo 3) · Jessica caso di riferimento (passo 4).
+Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del profilo: pezzi della tavola così come sono, 12 ruoli ✅ (passo 2) · P7 nel prompt ✅ · ciuffo nell'importatore ✅ · controlli di naso, continuità e raccordi in movimento ✅ (`testaBustoCheck.js`, solo avvisi; passo 3) · Jessica caso di riferimento (passo 4).
 
 ## Casi di prova
 

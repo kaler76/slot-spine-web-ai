@@ -70,3 +70,28 @@ test("testa-busto: ciocca lontana dall'occhio resta ciocca normale", () => {
   applyRoles(ps, TESTA_BUSTO_ROLES, lm(), []);
   assert.equal(ps[2].overEye, undefined);
 });
+
+// CONTROLLI P7 sulla tavola di Jessica (riferimento grafico, NON approvata): i difetti visti
+// dall'utente (naso appiattito, linee alle spalle) devono essere segnalati
+test("testa-busto: controlli P7 segnalano naso appiattito e scalini ai raccordi di Jessica", () => {
+  const c = r.profileChecks.join("\n");
+  assert.match(c, /Naso appiattito/);
+  assert.match(c, /Raccordo .*testa/);
+});
+
+// i controlli non segnalano nulla su pezzi ritagliati dall'originale stesso (continui per costruzione)
+import { noseCheck, seamCheck, motionCheck } from "../src/lib/testaBustoCheck.js";
+test("testa-busto: nessun avviso su testa/busto ritagliati dall'originale con sovrapposizione", () => {
+  const W = 60, H = 80, rgba = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = (y * W + x) * 4; rgba[i] = 200 + ((x * 7 + y * 3) % 40); rgba[i + 1] = 150; rgba[i + 2] = 120; rgba[i + 3] = 255; }
+  const original = { width: W, height: H, rgba };
+  const cut = (name, y0, y1, order, extra) => {
+    const h = y1 - y0, px = new Uint8ClampedArray(W * h * 4);
+    px.set(rgba.subarray(y0 * W * 4, y1 * W * 4));
+    return { name, x: 0, y: y0, width: W, height: h, rgba: px, area: W * h, order, ...extra };
+  };
+  const pieces = [cut("testa", 0, 50, 0, { parent: "busto", pivot: { x: 30, y: 40 } }), cut("busto", 35, 80, 1, { parent: null })];
+  assert.deepEqual(noseCheck(pieces, original, { x: 30, y: 20 }), []);
+  assert.deepEqual(seamCheck(pieces, original), []);
+  assert.deepEqual(motionCheck(pieces, original), []);
+});

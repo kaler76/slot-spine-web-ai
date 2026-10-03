@@ -19,6 +19,7 @@ import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.
 import { finishAttachments } from "./attachmentFinishing.js";
 import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
 import { PROFILES, DEFAULT_PROFILE } from "./separationProfiles.js";
+import { noseCheck, seamCheck, motionCheck } from "./testaBustoCheck.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -1075,7 +1076,13 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   // l'originale segnalerebbe ogni pezzo (sono ridisegnati per scelta), quindi non si mostra
   if (usable && !fromOriginal && !faithful) warnings.push("Tavola ridisegnata: controllo dei colori pezzo per pezzo non applicato (si usano i pezzi della tavola).");
   else if (usable) warnings.push(...pc.warnings, ...checkHandObjects(pieces, landmarks, joints));
-  return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable, assembly, piecesOk: pc.ok, pieceChecks: pc.checks,
+  // controlli del profilo TESTA-BUSTO (P7): naso integro, continuità dei raccordi, buchi in movimento
+  let profileChecks = [];
+  if (prof.roles && original) {
+    profileChecks = [...noseCheck(pieces, original, landmarks?.[LM.nose]), ...seamCheck(pieces, original), ...motionCheck(pieces, original)];
+    warnings.push(...profileChecks);
+  }
+  return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable, assembly, piecesOk: pc.ok, pieceChecks: pc.checks, profileChecks,
     handObjects: handObjects.map((h) => ({ name: h.piece.name, side: h.side })),
     finishing: { version: finishing.version, rules: structuredClone(attachmentRules), changes: finishing.changes } };
 }
