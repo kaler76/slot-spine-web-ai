@@ -2,10 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
 import { importExplodedSheet, chooseChromaColor } from "../lib/explodedSheet.js";
-import { piecesFromPartMap, headCrop, mapComponents, PARTMAP_PROMPT, FACE_PARTMAP_PROMPT } from "../lib/partMap.js";
-import { foregroundMask } from "../lib/sheetAssembly.js";
-import { checkPieces } from "../lib/pieceCheck.js";
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { composePieces } from "../lib/partExtraction.js";
 import { preserveSharedGrip } from "../lib/sharedGrip.js";
 import { piecesToCharacterParts } from "../lib/characterFromPieces.js";
@@ -23,7 +19,6 @@ export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, {
 - Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/crown, front hair and beard), BACK HAIR (if any), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and every other held object as its own piece. EXCEPTION — a hand gripping a LONG object (staff, spear, sword, lightning bolt): that hand and the whole object are ONE single piece, cut from the arm at the wrist. Do NOT split armor, clothing or accessories into small plates or fragments.
 - Do NOT change the pose: every piece keeps EXACTLY the same angle and shape it has in the original (bent or crossed arms stay bent or crossed, a raised arm stays raised). Only move pieces apart, never rotate, straighten or re-pose them.
 - Keep every piece as close as possible to its original position, just moved apart so that no piece touches or overlaps another (clear gap between pieces).
-- The HEAD piece includes the neck and the BARE skin of shoulders, collarbones and chest above the clothing (one bust-like piece, like a statue bust); the TORSO piece is the clothing with the legs. The arm pieces start at the shoulder, with the shoulder top painted where the head piece covered it.
 - Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding a small separate object.
 - Internal shoulder cut surfaces must continue the skin or clothing shading, without a new black outline across the joint. Preserve the character's existing exterior outlines.
 - BACK HAIR: hair that falls BEHIND the head (back of the head, behind the neck or shoulders) is ALWAYS its own separate piece, never fused with the head or the torso. Extend it a little where the head hid it, so it can sway behind the head. The head piece keeps only the hair in front of the face, the crown/wreath and the beard, with a clean outline.
@@ -73,10 +68,6 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
   const [view, setView] = useState("compare");
-  // parti della mappa (posizione e nome dei pezzi della tavola): restano finché si cambia personaggio
-  const [partComps, setPartComps] = useState(null);
-  const [mapUrls, setMapUrls] = useState([]); // ultime mappe di Gemini (corpo, viso): per controllarle
-  useEffect(() => setPartComps(null), [original?.img]); // nuovo personaggio: nuova mappa
   const canvasRef = useRef(null);
   const navigate = useNavigate();
   // sfondo della tavola scelto sul personaggio (colore assente dal disegno)
@@ -111,115 +102,13 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     }
   }
 
-  /**
-   * MAPPA DELLE PARTI (partMap.js): Gemini ricolora l'originale con un colore per parte, l'app
-   * ritaglia i pezzi dall'originale seguendo la mappa. Niente tavola ridisegnata da rimettere al
-   * suo posto, niente posa necessaria per i nomi.
-   */
-  /** silent: usata dall'import della tavola, restituisce solo le parti della mappa. */
-  async function handlePartMap(fileFromDisk, { silent = false } = {}) {
-    setBusy(true);
-    if (!silent) setRes(null);
-    setMapUrls([]);
-    try {
-      const imageToRgba = (img) => {
-        const c = document.createElement("canvas");
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        const ctx = c.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        return { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
-      };
-      /** Una chiamata a Gemini (Edge Function) con un'immagine e un prompt: torna la mappa in RGBA. */
-      const askGemini = async (canvas, prompt) => {
-        const b64 = canvas.toDataURL("image/png").split(",")[1];
-        const r = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY },
-          body: JSON.stringify({ group: "body", promptOverride: prompt, referenceImagesBase64: [b64], referenceAnalysisError: "skip" })
-        });
-        const data = await r.json();
-        if (!r.ok || !data.imageBase64) throw new Error(data?.error || `Errore HTTP ${r.status}`);
-        const img = await new Promise((ok, ko) => {
-          const im = new Image();
-          im.onload = () => ok(im);
-          im.onerror = ko;
-          im.src = `data:image/png;base64,${data.imageBase64}`; // anche se è JPEG, il browser lo legge
-        });
-        setMapUrls((u) => [...u.slice(-1), img.src]);
-        return imageToRgba(img);
-      };
-      const oc = document.createElement("canvas");
-      oc.width = original.width;
-      oc.height = original.height;
-      oc.getContext("2d").drawImage(original.img, 0, 0);
-      let map;
-      if (fileFromDisk) {
-        setStatus("⏳ Leggo la mappa delle parti...");
-        map = imageToRgba(await loadImage(fileFromDisk));
-      } else {
-        setStatus("⏳ 1/2 Gemini ricolora il personaggio per parti (1–2 minuti)...");
-        map = await askGemini(oc, PARTMAP_PROMPT);
-      }
-      const fg = foregroundMask(original);
-      // 2° passaggio: solo la testa, ingrandita, per occhi, sopracciglia, bocca, baffi
-      let faceMap = null;
-      const crop = headCrop({ map, original, fg });
-      if (crop) {
-        setStatus("⏳ 2/2 Gemini ricolora il viso ingrandito (1–2 minuti)...");
-        const k = Math.min(4, 1024 / Math.max(crop.w, crop.h));
-        const cc = document.createElement("canvas");
-        cc.width = Math.round(crop.w * k);
-        cc.height = Math.round(crop.h * k);
-        const cctx = cc.getContext("2d");
-        cctx.imageSmoothingQuality = "high";
-        cctx.drawImage(oc, crop.x, crop.y, crop.w, crop.h, 0, 0, cc.width, cc.height);
-        try {
-          faceMap = await askGemini(cc, FACE_PARTMAP_PROMPT);
-        } catch (err) {
-          faceMap = null; // senza mappa del viso: tratti presi dalla mappa intera
-        }
-      }
-      setStatus("⏳ Ritaglio i pezzi dall'originale seguendo la mappa...");
-      await new Promise((r) => setTimeout(r, 30));
-      const comps = mapComponents({ map, original, fg, faceMap, faceCrop: crop }).comps;
-      setPartComps(comps);
-      if (silent) return comps;
-      const out = piecesFromPartMap({ map, original, fg, faceMap, faceCrop: crop });
-      if (crop && !faceMap) out.warnings.push("Mappa del viso non disponibile: occhi e bocca presi dalla mappa intera (meno precisi).");
-      const pc = checkPieces(out.pieces, original);
-      for (const c of pc.checks) out.pieces.find((p) => p.name === c.name).check = c;
-      const usable = out.transform.iou >= 0.85;
-      setRes({
-        pieces: out.pieces, scale: out.transform.s, front: [], warnings: out.warnings, fidelityError: 0, faithful: usable, usable,
-        piecesOk: pc.ok, sheetName: fileFromDisk ? fileFromDisk.name : "mappa delle parti (Gemini)"
-      });
-      setStatus(
-        usable
-          ? `✅ ${out.pieces.length} pezzi dalla mappa delle parti (sagoma ${Math.round(out.transform.iou * 100)}%${faceMap ? ", viso dalla mappa ingrandita" : ""}).`
-          : `⚠️ La mappa non combacia con la sagoma (IoU ${out.transform.iou.toFixed(2)}): rigenerala.`
-      );
-      return comps;
-    } catch (err) {
-      setStatus(`❌ Mappa delle parti: ${err.message || err}`);
-      return null;
-    } finally {
-      if (!silent) setBusy(false);
-    }
-  }
-
   async function handleSheet(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setBusy(true);
     setRes(null);
+    setStatus("⏳ Separo i pezzi e li rimetto al loro posto...");
     try {
-      // AUTOMATICO: senza mappa delle parti la si genera prima (posizione e nome dei pezzi);
-      // se Gemini non risponde si prosegue con il metodo precedente
-      let comps = partComps;
-      if (!comps && original?.img) comps = await handlePartMap(null, { silent: true });
-      setBusy(true);
-      setStatus("⏳ Separo i pezzi e li rimetto al loro posto...");
       const img = await loadImage(file);
       const c = document.createElement("canvas");
       c.width = img.naturalWidth;
@@ -228,9 +117,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, partComps: comps });
-      if (comps) out.warnings.unshift(`Posizione e nome dei pezzi dalla mappa delle parti (${comps.length} parti).`);
-      else out.warnings.unshift("Mappa delle parti non disponibile: pezzi posizionati con il metodo precedente (meno affidabile).");
+      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules });
       setRes({ ...out, sheetName: file.name });
       const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(
@@ -365,17 +252,6 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       </div>
       <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <input type="file" accept="image/*" disabled={busy} onChange={handleSheet} />
-        <button type="button" className="btn" disabled={busy || !original?.img} onClick={() => handlePartMap(null)} title="Gemini ricolora l'originale per parti; i pezzi si ritagliano dall'originale: niente tavola da ricomporre">
-          🎨 Pezzi dalla mappa delle parti
-        </button>
-        {partComps && <span className="hint" style={{ margin: 0, color: "#3c3" }}>🎨 mappa pronta: ora carica la tavola, i pezzi verranno messi al loro posto con la mappa</span>}
-        {mapUrls.map((u, i) => (
-          <a key={i} className="btn secondary" href={u} download={i === mapUrls.length - 1 && mapUrls.length > 1 ? "partmap_viso.png" : "partmap.png"}>⬇️ Mappa {mapUrls.length > 1 ? (i ? "viso" : "corpo") : ""}</a>
-        ))}
-        <label className="btn secondary" style={{ cursor: "pointer" }} title="Carica una mappa delle parti già generata (partmap.png)">
-          📂 Carica mappa
-          <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={(e) => e.target.files?.[0] && handlePartMap(e.target.files[0])} />
-        </label>
         {res && (
           <>
             <select value={view} onChange={(e) => setView(e.target.value)}>

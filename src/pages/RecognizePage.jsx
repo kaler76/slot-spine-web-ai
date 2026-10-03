@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
 import { recognizeParts, refineObjectWithMask, foregroundFromUniformBorder, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
-import { resolvePose, acceptDetectedPose } from "../lib/poseRecovery.js";
+import { resolvePose } from "../lib/poseRecovery.js";
 import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 import ManualPosePicker from "../components/ManualPosePicker.jsx";
@@ -38,37 +38,6 @@ const PART_COLORS = [
 const POSE_LINKS = [
   [11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [15, 17], [15, 19], [15, 21], [16, 18], [16, 20], [16, 22]
 ];
-
-/**
- * MediaPipe su più versioni dell'immagine: com'è; su grigio medio con margine (le illustrazioni su
- * nero o trasparente lo confondono); la stessa ridotta a 512 px. Restituisce la prima posa
- * accettabile (acceptDetectedPose), con le coordinate riportate all'immagine originale.
- */
-function detectPoseVariants(pose, c) {
-  const W = c.width, H = c.height;
-  const variants = [{ canvas: c, s: 1, ox: 0, oy: 0 }];
-  for (const side of [Math.round(Math.max(W, H) * 1.2), 512]) {
-    const v = document.createElement("canvas");
-    v.width = v.height = side;
-    const ctx = v.getContext("2d");
-    ctx.fillStyle = "#808080";
-    ctx.fillRect(0, 0, side, side);
-    const s = (side / 1.2) / Math.max(W, H), ox = (side - W * s) / 2, oy = (side - H * s) / 2;
-    ctx.drawImage(c, ox, oy, W * s, H * s);
-    variants.push({ canvas: v, s, ox, oy });
-  }
-  for (const v of variants) {
-    let pts;
-    try { pts = pose.detect(v.canvas)?.landmarks?.[0]; } catch { continue; }
-    if (!pts) continue;
-    const mapped = pts.map((p) => ({ ...p, x: (p.x * v.canvas.width - v.ox) / v.s / W, y: (p.y * v.canvas.height - v.oy) / v.s / H }));
-    try {
-      acceptDetectedPose(mapped);
-      return { landmarks: [mapped] };
-    } catch { /* prova la variante successiva */ }
-  }
-  return null;
-}
 
 let modelsPromise = null;
 function loadModels() {
@@ -160,7 +129,7 @@ export default function RecognizePage() {
       let recovered;
       try {
         recovered = await resolvePose({
-          detect: () => detectPoseVariants(pose, c), width: W, height: H,
+          detect: () => pose.detect(c), width: W, height: H,
           recover: async () => {
             setStatus("⏳ Preparazione del personaggio...");
             return recoverPose(c);

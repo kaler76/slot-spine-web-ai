@@ -18,7 +18,6 @@ import { checkPieces } from "./pieceCheck.js";
 import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.js";
 import { finishAttachments } from "./attachmentFinishing.js";
 import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
-import { placeByPartMap } from "./partMap.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -412,8 +411,7 @@ export function labelPieces(pieces, landmarks) {
     }
   }
   cand.sort((a, b) => b.score - a.score || b.hit - a.hit || a.dist - b.dist);
-  // nomi già dati dalla mappa delle parti: non si riassegnano
-  const taken = new Set(), done = new Set(pieces.filter((p) => p.faceLocked).map((p) => p.name));
+  const taken = new Set(), done = new Set();
   for (const c of cand) {
     if (taken.has(c.p) || done.has(c.r.name)) continue;
     c.p.name = c.r.name;
@@ -423,10 +421,10 @@ export function labelPieces(pieces, landmarks) {
   // pezzi del viso (occhi, sopracciglia, bocca, ciocche) attaccati alla testa: faceRig.js
   let rest = pieces.filter((p) => !taken.has(p) && !p.faceLocked);
   const lockedNames = new Set(pieces.filter((p) => p.faceLocked).map((p) => p.name));
-  const face = labelFacePieces(rest, landmarks, pieces.find((p) => (taken.has(p) || p.faceLocked) && p.name === "testa"), lockedNames);
+  const face = labelFacePieces(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"), lockedNames);
   rest = rest.filter((p) => !face.has(p));
   // capelli posteriori: sempre un pezzo a sé dietro la testa (faceRig.labelBackHair)
-  const backHair = labelBackHair(rest, landmarks, pieces.find((p) => (taken.has(p) || p.faceLocked) && p.name === "testa"));
+  const backHair = labelBackHair(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"));
   rest = rest.filter((p) => !backHair.has(p));
   let k = 0;
   for (const p of rest) p.name = rest.length > 1 ? `oggetto_${++k}` : "oggetto";
@@ -580,7 +578,7 @@ function rigInfo(p, joints, landmarks, pieces = []) {
  * @param {Object} [o.joints] - articolazioni di recognizeParts (base collo, mani)
  * @returns {{ pieces: Array, scale: number, front: Array, warnings: string[] }}
  */
-export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true, partComps = null }) {
+export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true }) {
   const warnings = [];
   checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
@@ -612,21 +610,9 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     const r = placeAtTarget(scalePiece(p, scale), original, t.pt, 0.8 * fr.u);
     return r ? { ...r, err: r.pos.err + 10 * Math.abs(Math.log(r.s)) } : null;
   };
-  // MAPPA DELLE PARTI (partMap.placeByPartMap): posizione e nome dalla sovrapposizione delle
-  // sagome con le parti della mappa; i pezzi restano quelli della tavola
-  const mapPlace = new Map();
-  if (partComps?.length) {
-    const scaled = pieces.map((p) => scalePiece(p, scale));
-    for (const a of placeByPartMap(scaled, partComps, original.width, original.height)) mapPlace.set(scaled.indexOf(a.piece), a);
-  }
-  const faceGroup = fr && !mapPlace.size ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
-  pieces = pieces.map((p, pIdx) => {
+  const faceGroup = fr ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
+  pieces = pieces.map((p) => {
     const sp = scalePiece(p, scale);
-    const mp = mapPlace.get(pIdx);
-    if (mp) {
-      const q = Math.abs(mp.s - 1) > 0.01 ? scalePiece(sp, mp.s) : sp;
-      return { ...q, x: mp.x, y: mp.y, matchError: +((1 - mp.iou) * 100).toFixed(1), name: mp.name, faceLocked: true, mapIoU: mp.iou };
-    }
     const target = faceGroup.get(p);
     if (target) {
       const placed = target.placed;
@@ -739,18 +725,14 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   let assembly = null;
   for (const p of pieces) p.aligned = { x: p.x, y: p.y }; // posizione trovata, prima del ritaglio dall'originale
   if (transplant && original) {
-    // collo: base del collo riconosciuta, altrimenti un po' sopra la linea delle spalle
-    const shs = [LM.shoulderSx, LM.shoulderDx].map((i) => landmarks?.[i]).filter(Boolean);
-    const neckY = joints?.base_collo?.y ?? (shs.length === 2 ? (shs[0].y + shs[1].y) / 2 - 0.2 * Math.abs(shs[0].x - shs[1].x) : null);
-    const t = transplantOriginal(pieces, original, { neckY });
+    const t = transplantOriginal(pieces, original);
     pieces = t.pieces;
     if (t.rest.length) {
       pieces.push(...t.rest);
       [...pieces].sort((a, b) => a.order - b.order).forEach((p, i) => (p.order = i));
       warnings.push(`${t.rest.map((p) => `${p.name} (${p.area} px, su ${p.attachTo || "radice"})`).join(", ")}: parti dell'originale assenti dalla tavola (es. scintille, particelle), aggiunte come pezzi fermi con i pixel dell'originale.`);
     }
-    // parti del personaggio non spiegate dalla tavola = riempite per vicinanza + pezzi resto
-    assembly = { iou: +t.iou.toFixed(3), holeShare: +t.holeShare.toFixed(4), filledShare: +(t.filledShare + t.restShare).toFixed(4) };
+    assembly = { iou: +t.iou.toFixed(3), holeShare: +t.holeShare.toFixed(4), filledShare: +t.filledShare.toFixed(4) };
     if (t.filledShare > 0.005)
       warnings.push(`${(t.filledShare * 100).toFixed(1)}% del personaggio non era in nessun pezzo della tavola (es. una parte del mantello): assegnato al pezzo più vicino, controlla.`);
   }

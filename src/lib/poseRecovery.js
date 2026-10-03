@@ -20,41 +20,9 @@ export function validateRecovery(data) {
   }
   return data;
 }
-/**
- * Posa di MediaPipe su un'ILLUSTRAZIONE (caso reale: donna in abito lungo, figura nitida, posa
- * rifiutata -> 9 click a mano). validatePose è pensato per il server e scarta tutto se un dito o
- * un'anca ha visibilità < 0.5: sotto un abito o un guanto succede sempre. Qui, solo per MediaPipe:
- *  - obbligatori: naso, spalle, gomiti, polsi (visibilità >= 0.3) e anche (>= 0.05: coperte dalla
- *    gonna, la posizione stimata resta buona);
- *  - dita poco visibili o mancanti: ricostruite oltre il polso lungo l'avambraccio;
- *  - stessi controlli geometrici di validatePose (spalle, busto, braccia non collassati).
- * Coordinate normalizzate 0..1 (tolleranza 5% fuori dall'immagine).
- */
-export const POSE_CORE = [0, 11, 12, 13, 14, 15, 16];
-export function acceptDetectedPose(points) {
-  if (!Array.isArray(points) || points.length !== 33) throw new Error('pose_shape');
-  const ok = (p, v) => p && [p.x, p.y].every(Number.isFinite) && p.x > -0.05 && p.x < 1.05 && p.y > -0.05 && p.y < 1.05 && (p.visibility ?? 1) >= v;
-  for (const i of POSE_CORE) if (!ok(points[i], 0.3)) throw new Error('pose_point');
-  for (const i of [23, 24]) if (!ok(points[i], 0.05)) throw new Error('pose_point');
-  const P = points.map((p) => (p ? { ...p, visibility: p.visibility ?? 1 } : p));
-  const d = (a, b) => Math.hypot(P[a].x - P[b].x, P[a].y - P[b].y);
-  if (d(11, 12) < 0.035 || d(23, 24) < 0.015 || d(11, 23) < 0.05 || d(12, 24) < 0.05) throw new Error('pose_collapsed');
-  for (const [a, b] of [[11, 13], [13, 15], [12, 14], [14, 16]]) if (d(a, b) < 0.01 || d(a, b) > 0.7) throw new Error('pose_limb');
-  const sw = d(11, 12);
-  for (const [w, e, fingers] of [[15, 13, [17, 19, 21]], [16, 14, [18, 20, 22]]]) {
-    const len = d(w, e) || 1, dx = (P[w].x - P[e].x) / len, dy = (P[w].y - P[e].y) / len;
-    fingers.forEach((f, k) => {
-      if (ok(P[f], 0.3)) return;
-      const off = [0.05, 0, -0.06][k], ahead = [0.14, 0.16, 0.1][k];
-      P[f] = { x: P[w].x + dx * ahead * sw - dy * off * sw, y: P[w].y + dy * ahead * sw + dx * off * sw, visibility: 0.3 };
-    });
-  }
-  return P;
-}
-
 export async function resolvePose({ detect, recover, width, height }) {
   let points;
-  try { points=acceptDetectedPose((await detect())?.landmarks?.[0]); } catch { /* Recover once, server bounds its own retries. */ }
+  try { points=validatePose((await detect())?.landmarks?.[0]); } catch { /* Recover once, server bounds its own retries. */ }
   let source='mediapipe', heldObjects=[];
   if (!points) {
     const result=validateRecovery(await recover());
