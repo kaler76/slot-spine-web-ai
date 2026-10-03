@@ -3,15 +3,15 @@ Using the attached character image, produce a PART MAP of it for 2D skeletal ani
 - Fill every pixel of the character with ONE flat solid color depending on which part it belongs to. No outlines, no shading, no gradients, no texture, no anti-aliasing glow, no text, no labels.
 - Background: pure black #000000.
 Part colors (left/right are the CHARACTER's anatomical sides: the character's RIGHT arm is on the viewer's LEFT):
-- HEAD: face skin, ears, neck, front hair framing the face, hat/crown/helmet = pure red #FF0000
-- BACK HAIR (hair falling behind the head, neck and shoulders) = purple #8000FF
+- HEAD: face skin, ears, NECK ONLY DOWN TO ITS BASE, hat/crown/helmet = pure red #FF0000. The red area must STOP at the base of the neck: shoulders, collarbones, chest and neckline are NOT head.
+- HAIR (all hair behind and around the head, including long hair falling over the shoulders) = purple #8000FF
 - SIDE HAIR LOCKS hanging in front, beside the face = dark green #008000
 - EYES (each eye, iris and white) = cyan #00FFFF
 - EYEBROWS = magenta #FF00FF
 - MOUTH / LIPS = gray #808080
 - MUSTACHE (if any) = brown #804000
-- TORSO: chest, shoulders, collarbones, belly, hips, legs, feet and all clothing on them = pure green #00FF00
-- CHARACTER'S RIGHT ARM (upper arm, forearm, hand, glove, bracelet) = pure blue #0000FF
-- CHARACTER'S LEFT ARM (upper arm, forearm, hand, glove, bracelet) = pure yellow #FFFF00
+- TORSO: shoulders (the rounded top of each shoulder), collarbones, chest, neckline skin, belly, hips, legs, feet and all clothing on them = pure green #00FF00
+- CHARACTER'S RIGHT ARM (bare skin of the upper arm from the armpit down, forearm, hand, glove, bracelet) = pure blue #0000FF
+- CHARACTER'S LEFT ARM (bare skin of the upper arm from the armpit down, forearm, hand, glove, bracelet) = pure yellow #FFFF00
 - HELD OBJECTS (staff, sword, cigarette holder, bag, lightning bolt…) and smoke/particles = orange #FF8000
 - Anything else (jewelry, earrings, belt ornaments) = the color of the part it is attached to.

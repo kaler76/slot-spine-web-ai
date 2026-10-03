@@ -18,6 +18,7 @@ import { checkPieces } from "./pieceCheck.js";
 import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.js";
 import { finishAttachments } from "./attachmentFinishing.js";
 import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
+import { placeByPartMap } from "./partMap.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -411,7 +412,8 @@ export function labelPieces(pieces, landmarks) {
     }
   }
   cand.sort((a, b) => b.score - a.score || b.hit - a.hit || a.dist - b.dist);
-  const taken = new Set(), done = new Set();
+  // nomi già dati dalla mappa delle parti: non si riassegnano
+  const taken = new Set(), done = new Set(pieces.filter((p) => p.faceLocked).map((p) => p.name));
   for (const c of cand) {
     if (taken.has(c.p) || done.has(c.r.name)) continue;
     c.p.name = c.r.name;
@@ -421,10 +423,10 @@ export function labelPieces(pieces, landmarks) {
   // pezzi del viso (occhi, sopracciglia, bocca, ciocche) attaccati alla testa: faceRig.js
   let rest = pieces.filter((p) => !taken.has(p) && !p.faceLocked);
   const lockedNames = new Set(pieces.filter((p) => p.faceLocked).map((p) => p.name));
-  const face = labelFacePieces(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"), lockedNames);
+  const face = labelFacePieces(rest, landmarks, pieces.find((p) => (taken.has(p) || p.faceLocked) && p.name === "testa"), lockedNames);
   rest = rest.filter((p) => !face.has(p));
   // capelli posteriori: sempre un pezzo a sé dietro la testa (faceRig.labelBackHair)
-  const backHair = labelBackHair(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"));
+  const backHair = labelBackHair(rest, landmarks, pieces.find((p) => (taken.has(p) || p.faceLocked) && p.name === "testa"));
   rest = rest.filter((p) => !backHair.has(p));
   let k = 0;
   for (const p of rest) p.name = rest.length > 1 ? `oggetto_${++k}` : "oggetto";
@@ -578,7 +580,7 @@ function rigInfo(p, joints, landmarks, pieces = []) {
  * @param {Object} [o.joints] - articolazioni di recognizeParts (base collo, mani)
  * @returns {{ pieces: Array, scale: number, front: Array, warnings: string[] }}
  */
-export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true }) {
+export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true, partComps = null }) {
   const warnings = [];
   checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
@@ -610,9 +612,21 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     const r = placeAtTarget(scalePiece(p, scale), original, t.pt, 0.8 * fr.u);
     return r ? { ...r, err: r.pos.err + 10 * Math.abs(Math.log(r.s)) } : null;
   };
-  const faceGroup = fr ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
-  pieces = pieces.map((p) => {
+  // MAPPA DELLE PARTI (partMap.placeByPartMap): posizione e nome dalla sovrapposizione delle
+  // sagome con le parti della mappa; i pezzi restano quelli della tavola
+  const mapPlace = new Map();
+  if (partComps?.length) {
+    const scaled = pieces.map((p) => scalePiece(p, scale));
+    for (const a of placeByPartMap(scaled, partComps, original.width, original.height)) mapPlace.set(scaled.indexOf(a.piece), a);
+  }
+  const faceGroup = fr && !mapPlace.size ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
+  pieces = pieces.map((p, pIdx) => {
     const sp = scalePiece(p, scale);
+    const mp = mapPlace.get(pIdx);
+    if (mp) {
+      const q = Math.abs(mp.s - 1) > 0.01 ? scalePiece(sp, mp.s) : sp;
+      return { ...q, x: mp.x, y: mp.y, matchError: +((1 - mp.iou) * 100).toFixed(1), name: mp.name, faceLocked: true, mapIoU: mp.iou };
+    }
     const target = faceGroup.get(p);
     if (target) {
       const placed = target.placed;

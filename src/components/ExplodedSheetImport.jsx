@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
 import { importExplodedSheet, chooseChromaColor } from "../lib/explodedSheet.js";
-import { piecesFromPartMap, PARTMAP_PROMPT } from "../lib/partMap.js";
+import { piecesFromPartMap, headCrop, mapComponents, PARTMAP_PROMPT, FACE_PARTMAP_PROMPT } from "../lib/partMap.js";
 import { foregroundMask } from "../lib/sheetAssembly.js";
 import { checkPieces } from "../lib/pieceCheck.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
@@ -73,6 +73,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
   const [view, setView] = useState("compare");
+  // parti della mappa (posizione e nome dei pezzi della tavola): restano finché si cambia personaggio
+  const [partComps, setPartComps] = useState(null);
   const canvasRef = useRef(null);
   const navigate = useNavigate();
   // sfondo della tavola scelto sul personaggio (colore assente dal disegno)
@@ -116,27 +118,21 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     setBusy(true);
     setRes(null);
     try {
-      let map;
-      if (fileFromDisk) {
-        setStatus("⏳ Leggo la mappa delle parti...");
-        const img = await loadImage(fileFromDisk);
+      const imageToRgba = (img) => {
         const c = document.createElement("canvas");
         c.width = img.naturalWidth;
         c.height = img.naturalHeight;
         const ctx = c.getContext("2d");
         ctx.drawImage(img, 0, 0);
-        map = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
-      } else {
-        setStatus("⏳ Gemini ricolora il personaggio per parti (1–2 minuti)...");
-        const oc = document.createElement("canvas");
-        oc.width = original.width;
-        oc.height = original.height;
-        oc.getContext("2d").drawImage(original.img, 0, 0);
-        const b64 = oc.toDataURL("image/png").split(",")[1];
+        return { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
+      };
+      /** Una chiamata a Gemini (Edge Function) con un'immagine e un prompt: torna la mappa in RGBA. */
+      const askGemini = async (canvas, prompt) => {
+        const b64 = canvas.toDataURL("image/png").split(",")[1];
         const r = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY },
-          body: JSON.stringify({ group: "body", promptOverride: PARTMAP_PROMPT, referenceImagesBase64: [b64], referenceAnalysisError: "skip" })
+          body: JSON.stringify({ group: "body", promptOverride: prompt, referenceImagesBase64: [b64], referenceAnalysisError: "skip" })
         });
         const data = await r.json();
         if (!r.ok || !data.imageBase64) throw new Error(data?.error || `Errore HTTP ${r.status}`);
@@ -144,29 +140,56 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
           const im = new Image();
           im.onload = () => ok(im);
           im.onerror = ko;
-          im.src = `data:image/png;base64,${data.imageBase64}`;
+          im.src = `data:image/png;base64,${data.imageBase64}`; // anche se è JPEG, il browser lo legge
         });
-        const c = document.createElement("canvas");
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
-        const ctx = c.getContext("2d");
-        ctx.drawImage(img, 0, 0);
-        map = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
+        return imageToRgba(img);
+      };
+      const oc = document.createElement("canvas");
+      oc.width = original.width;
+      oc.height = original.height;
+      oc.getContext("2d").drawImage(original.img, 0, 0);
+      let map;
+      if (fileFromDisk) {
+        setStatus("⏳ Leggo la mappa delle parti...");
+        map = imageToRgba(await loadImage(fileFromDisk));
+      } else {
+        setStatus("⏳ 1/2 Gemini ricolora il personaggio per parti (1–2 minuti)...");
+        map = await askGemini(oc, PARTMAP_PROMPT);
+      }
+      const fg = foregroundMask(original);
+      // 2° passaggio: solo la testa, ingrandita, per occhi, sopracciglia, bocca, baffi
+      let faceMap = null;
+      const crop = headCrop({ map, original, fg });
+      if (crop) {
+        setStatus("⏳ 2/2 Gemini ricolora il viso ingrandito (1–2 minuti)...");
+        const k = Math.min(4, 1024 / Math.max(crop.w, crop.h));
+        const cc = document.createElement("canvas");
+        cc.width = Math.round(crop.w * k);
+        cc.height = Math.round(crop.h * k);
+        const cctx = cc.getContext("2d");
+        cctx.imageSmoothingQuality = "high";
+        cctx.drawImage(oc, crop.x, crop.y, crop.w, crop.h, 0, 0, cc.width, cc.height);
+        try {
+          faceMap = await askGemini(cc, FACE_PARTMAP_PROMPT);
+        } catch (err) {
+          faceMap = null; // senza mappa del viso: tratti presi dalla mappa intera
+        }
       }
       setStatus("⏳ Ritaglio i pezzi dall'originale seguendo la mappa...");
       await new Promise((r) => setTimeout(r, 30));
-      const fg = foregroundMask(original);
-      const out = piecesFromPartMap({ map, original, fg });
+      const out = piecesFromPartMap({ map, original, fg, faceMap, faceCrop: crop });
+      setPartComps(mapComponents({ map, original, fg, faceMap, faceCrop: crop }).comps);
+      if (crop && !faceMap) out.warnings.push("Mappa del viso non disponibile: occhi e bocca presi dalla mappa intera (meno precisi).");
       const pc = checkPieces(out.pieces, original);
       for (const c of pc.checks) out.pieces.find((p) => p.name === c.name).check = c;
       const usable = out.transform.iou >= 0.85;
       setRes({
         pieces: out.pieces, scale: out.transform.s, front: [], warnings: out.warnings, fidelityError: 0, faithful: usable, usable,
-        piecesOk: pc.ok, sheetName: fileFromDisk ? fileFromDisk.name : "mappa delle parti (Gemini)", partMap: map
+        piecesOk: pc.ok, sheetName: fileFromDisk ? fileFromDisk.name : "mappa delle parti (Gemini)"
       });
       setStatus(
         usable
-          ? `✅ ${out.pieces.length} pezzi dalla mappa delle parti (sagoma ${Math.round(out.transform.iou * 100)}%, copertura ${Math.round(out.coverage * 100)}%).`
+          ? `✅ ${out.pieces.length} pezzi dalla mappa delle parti (sagoma ${Math.round(out.transform.iou * 100)}%${faceMap ? ", viso dalla mappa ingrandita" : ""}).`
           : `⚠️ La mappa non combacia con la sagoma (IoU ${out.transform.iou.toFixed(2)}): rigenerala.`
       );
     } catch (err) {
@@ -191,7 +214,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules });
+      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, partComps });
+      if (partComps) out.warnings.unshift(`Posizione e nome dei pezzi dalla mappa delle parti (${partComps.length} parti).`);
       setRes({ ...out, sheetName: file.name });
       const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(
@@ -329,6 +353,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         <button type="button" className="btn" disabled={busy || !original?.img} onClick={() => handlePartMap(null)} title="Gemini ricolora l'originale per parti; i pezzi si ritagliano dall'originale: niente tavola da ricomporre">
           🎨 Pezzi dalla mappa delle parti
         </button>
+        {partComps && <span className="hint" style={{ margin: 0, color: "#3c3" }}>🎨 mappa pronta: ora carica la tavola, i pezzi verranno messi al loro posto con la mappa</span>}
         <label className="btn secondary" style={{ cursor: "pointer" }} title="Carica una mappa delle parti già generata (partmap.png)">
           📂 Carica mappa
           <input type="file" accept="image/*" style={{ display: "none" }} disabled={busy} onChange={(e) => e.target.files?.[0] && handlePartMap(e.target.files[0])} />
