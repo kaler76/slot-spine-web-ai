@@ -120,7 +120,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules });
+      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, profile });
       setRes({ ...out, sheetName: file.name });
       const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(

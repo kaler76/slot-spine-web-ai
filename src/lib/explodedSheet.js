@@ -18,6 +18,7 @@ import { checkPieces } from "./pieceCheck.js";
 import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.js";
 import { finishAttachments } from "./attachmentFinishing.js";
 import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
+import { PROFILES, DEFAULT_PROFILE } from "./separationProfiles.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -730,6 +731,40 @@ export function longLockSide(p, pieces, landmarks) {
   return cx > nose.x ? "sx" : "dx";
 }
 
+/**
+ * Profilo con RUOLI ESPLICITI (testa-busto): ogni pezzo deve avere uno dei ruoli del profilo.
+ * Nessun oggetto separato (la mano tiene l'oggetto nello stesso pezzo del braccio), niente baffi:
+ * - baffo_* -> bocca (la più vicina al centro del viso se manca la bocca);
+ * - oggetto/accessorio vicino alla testa -> ciocca del suo lato (mai figlio del braccio).
+ * I nomi del braccio restano braccio_dx / braccio_sx (alzato/abbassato è la loro posa).
+ */
+function applyRoles(pieces, roles, landmarks, warnings) {
+  const names = new Set(roles.map((r) => r.name).concat(["braccio_dx", "braccio_sx"]));
+  const nose = landmarks?.[LM.nose];
+  const head = pieces.find((q) => q.name === "testa");
+  const cx = (p) => p.x + p.width / 2;
+  const mids = pieces.filter((p) => /^baffo/.test(p.name));
+  if (mids.length && !pieces.some((p) => p.name === "bocca")) {
+    const ref = nose ? nose.x : head ? cx(head) : 0;
+    mids.sort((a, b) => Math.abs(cx(a) - ref) - Math.abs(cx(b) - ref));
+    mids[0].name = "bocca";
+  }
+  for (const p of pieces) {
+    if (names.has(p.name) || isFaceName(p.name) && /^(occhio|sopracciglio|bocca|ciocca)/.test(p.name)) continue;
+    const old = p.name;
+    const side = longLockSide(p, pieces, landmarks) || (nose && (cx(p) > nose.x ? "sx" : "dx"));
+    if (side && !/^(testa|busto|braccio)/.test(old)) {
+      p.name = pieces.some((q) => q.name === `ciocca_${side}`) ? `ciocca_${side}_2` : `ciocca_${side}`;
+      delete p.attachTo;
+      warnings.push(`${old} -> ${p.name}: nel profilo Testa-busto non ci sono oggetti né baffi separati (controlla).`);
+    }
+  }
+  const missing = roles.map((r) => r.name).filter((n) => !/^braccio_/.test(n) && !pieces.some((p) => p.name === n));
+  const arms = pieces.filter((p) => /^braccio_(dx|sx)$/.test(p.name)).length;
+  if (missing.length || arms < 2)
+    warnings.push(`Profilo Testa-busto: ruoli mancanti ${[...missing, ...(arms < 2 ? [`braccia (${arms}/2)`] : [])].join(", ")}. Controlla la tavola (12 pezzi).`);
+}
+
 const overlapCenter = (p, q) => overlapStats(p, q).c || { x: p.x + p.width / 2, y: p.y + p.height / 2 };
 
 /** Genitore e pivot per il rig (stesse convenzioni di partExtraction.js). */
@@ -770,8 +805,13 @@ function rigInfo(p, joints, landmarks, pieces = []) {
  * @param {Object} [o.joints] - articolazioni di recognizeParts (base collo, mani)
  * @returns {{ pieces: Array, scale: number, front: Array, warnings: string[] }}
  */
-export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true }) {
+export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true, profile = DEFAULT_PROFILE }) {
   const warnings = [];
+  // PROFILO (separationProfiles.js). "testa-busto": si usano I PEZZI DELLA TAVOLA così come sono
+  // (pixel della tavola, niente ritaglio dall'originale, niente resto_N), niente taglio al polso,
+  // nomi dai 12 ruoli espliciti.
+  const prof = PROFILES[profile] || PROFILES[DEFAULT_PROFILE];
+  const fromOriginal = transplant && prof.fillFromOriginal;
   checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
   if (original) {
@@ -877,13 +917,14 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   fillResidual(pieces, original, warnings);
   labelPieces(pieces, landmarks);
   // mano + oggetto lungo in un solo pezzo (handObject.js): nome mano_oggetto_<lato>, pivot al polso
-  const handObjects = applyHandObjects(pieces, landmarks, joints);
+  const handObjects = prof.wristCut ? applyHandObjects(pieces, landmarks, joints) : [];
   // Un oggetto è TENUTO in mano: se è finito lontano da entrambe le mani (tavola ridisegnata,
   // confronto ambiguo), lo si ricerca solo attorno alle mani.
   const hands = [joints?.mano_sx || landmarks?.[LM.wristSx], joints?.mano_dx || landmarks?.[LM.wristDx]].filter(Boolean);
   const sw = landmarks ? Math.hypot(landmarks[LM.shoulderSx].x - landmarks[LM.shoulderDx].x, landmarks[LM.shoulderSx].y - landmarks[LM.shoulderDx].y) : 0;
   let accN = 0;
-  if (hands.length && sw) {
+  if (prof.roles) applyRoles(pieces, prof.roles, landmarks, warnings);
+  else if (hands.length && sw) {
     for (const p of pieces) {
       if (!p.name.startsWith("oggetto")) continue;
       const r = 0.5 * sw + Math.max(p.width, p.height) / 2;
@@ -951,7 +992,13 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   // così utilizzabile: si giudica la sagoma, non il colore.
   let assembly = null;
   for (const p of pieces) p.aligned = { x: p.x, y: p.y }; // posizione trovata, prima del ritaglio dall'originale
-  if (transplant && original) {
+  if (!fromOriginal && transplant && original) {
+    // solo la MISURA della sagoma (stessa posa?): i pixel restano quelli della tavola
+    const t = transplantOriginal(pieces, original);
+    assembly = { iou: +t.iou.toFixed(3), holeShare: +t.holeShare.toFixed(4), filledShare: +t.filledShare.toFixed(4) };
+    if (t.rest.length)
+      warnings.push(`${t.rest.map((p) => `${p.name} (${p.area} px)`).join(", ")}: parti dell'originale non presenti nella tavola, NON aggiunte (si usano solo i pezzi della tavola).`);
+  } else if (transplant && original) {
     const t = transplantOriginal(pieces, original);
     pieces = t.pieces;
     if (t.rest.length) {
@@ -971,7 +1018,9 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   pieces.sort((a, b) => a.order - b.order);
   if (usable && fidelityError > USABLE_MAX)
     warnings.unshift(
-      `Tavola ridisegnata (errore colori ${fidelityError}) ma con la stessa posa (sagome sovrapposte ${Math.round(assembly.iou * 100)}%): i pixel visibili sono presi dall'originale, la tavola resta solo nelle zone nascoste. Ok per il character, non per il dataset.`
+      fromOriginal
+        ? `Tavola ridisegnata (errore colori ${fidelityError}) ma con la stessa posa (sagome sovrapposte ${Math.round(assembly.iou * 100)}%): i pixel visibili sono presi dall'originale, la tavola resta solo nelle zone nascoste. Ok per il character, non per il dataset.`
+        : `Tavola ridisegnata (errore colori ${fidelityError}) ma con la stessa posa (sagome sovrapposte ${Math.round(assembly.iou * 100)}%): si usano i pezzi della tavola così come sono. Ok per il character, non per il dataset.`
     );
   else if (!usable)
     warnings.unshift(
@@ -993,7 +1042,10 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   front.push(...finishing.front);
   const pc = checkPieces(pieces, original);
   for (const c of pc.checks) pieces.find((p) => p.name === c.name).check = c;
-  if (usable) warnings.push(...pc.warnings, ...checkHandObjects(pieces, landmarks, joints));
+  // pezzi della tavola usati così come sono e tavola ridisegnata: il confronto dei COLORI con
+  // l'originale segnalerebbe ogni pezzo (sono ridisegnati per scelta), quindi non si mostra
+  if (usable && !fromOriginal && !faithful) warnings.push("Tavola ridisegnata: controllo dei colori pezzo per pezzo non applicato (si usano i pezzi della tavola).");
+  else if (usable) warnings.push(...pc.warnings, ...checkHandObjects(pieces, landmarks, joints));
   return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable, assembly, piecesOk: pc.ok, pieceChecks: pc.checks,
     handObjects: handObjects.map((h) => ({ name: h.piece.name, side: h.side })),
     finishing: { version: finishing.version, rules: structuredClone(attachmentRules), changes: finishing.changes } };
