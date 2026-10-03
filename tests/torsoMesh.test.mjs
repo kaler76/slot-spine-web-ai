@@ -100,3 +100,10 @@ test("testa come mesh: cima e mento in ritardo, pesi validi, viso rigido", () =>
   assert.equal(rot[rot.length - 1].time, 4);
   assert.ok(!("angle" in rot[0]));
 });
+
+test("mesh con edges (linee della griglia): Spine non avvisa 'mesh internal edges lost'", () => {
+  const mesh = out.skins[0].attachments.busto.busto;
+  const nV = mesh.uvs.length / 2;
+  assert.ok(mesh.edges.length > 0 && mesh.edges.length % 2 === 0);
+  assert.ok(mesh.edges.every((e) => e % 2 === 0 && e / 2 < nV), "edges = indice di vertice x 2");
+});

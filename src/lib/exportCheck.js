@@ -41,6 +41,9 @@ export function verifyExportSkeleton(json, parts = []) {
       const nV = att.uvs.length / 2;
       if (att.triangles.some((t) => t < 0 || t >= nV)) errors.push(`Mesh "${s.name}": triangolo con vertice inesistente.`);
       if (!(att.hull > 2 && att.hull <= nV)) errors.push(`Mesh "${s.name}": contorno (hull) non valido.`);
+      // edges (non essenziali): senza, Spine avvisa "mesh internal edges lost"; valori = indice × 2
+      if (!att.edges?.length) warnings.push(`Mesh "${s.name}": senza "edges", Spine perde le linee interne della mesh.`);
+      else if (att.edges.length % 2 || att.edges.some((e) => e % 2 || e < 0 || e / 2 >= nV)) errors.push(`Mesh "${s.name}": edges non validi.`);
       if (att.vertices.length !== att.uvs.length) {
         // pesata: [n, (osso, x, y, peso) * n] per vertice
         let i = 0, v = 0;

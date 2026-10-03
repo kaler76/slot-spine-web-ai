@@ -55,7 +55,14 @@ function gridMesh(skin, name, cols, rows, weightsAt) {
       const d = index.get(`${c},${r + 1}`), e = index.get(`${c + 1},${r + 1}`);
       triangles.push(a, b, e, a, e, d);
     }
-  return { type: "mesh", uvs, triangles, vertices, hull, width: w, height: h, name };
+  // "edges" (dati non essenziali): linee della griglia, contorno compreso, come coppie di indici
+  // ×2 (formato dell'export di Spine). Senza, Spine avvisa "mesh internal edges lost".
+  const edges = [];
+  for (let r = 0; r <= rows; r++)
+    for (let c = 0; c < cols; c++) edges.push(index.get(`${c},${r}`) * 2, index.get(`${c + 1},${r}`) * 2);
+  for (let c = 0; c <= cols; c++)
+    for (let r = 0; r < rows; r++) edges.push(index.get(`${c},${r}`) * 2, index.get(`${c},${r + 1}`) * 2);
+  return { type: "mesh", uvs, triangles, vertices, hull, edges, width: w, height: h, name };
 }
 
 /**
