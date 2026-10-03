@@ -4,6 +4,7 @@
 // ordine di disegno, ruolo e animazione di partenza. Puro e testabile: nessun DOM.
 
 import { faceDefaults } from "./faceRig.js";
+import { isHandObjectName } from "./handObject.js";
 
 /** Ruolo (rigRules.PART_ROLES) e animazione di partenza per nome del pezzo. */
 const DEFAULTS = {
@@ -14,6 +15,9 @@ const DEFAULTS = {
   oggetto: { role: "accessory", animationType: "sway", speed: 0.7 }
 };
 const defaultsFor = (name) =>
+  // mano + oggetto lungo (handObject.js): un solo blocco con pivot al polso, eredita il braccio
+  (name.startsWith("presa_") || isHandObjectName(name) ? { role: "hand", animationType: "static", speed: 1 } :
+    name.startsWith("copertura_") ? { role: "other", animationType: "static", speed: 1 } : null) ||
   DEFAULTS[name] || faceDefaults(name) || (name.startsWith("oggetto") ? DEFAULTS.oggetto : { role: "other", animationType: "static", speed: 1 });
 
 /**
@@ -52,7 +56,7 @@ export function piecesToCharacterParts(pieces) {
       pivotFx: +((p.pivot.x - p.x) / p.width).toFixed(4),
       pivotFy: +((p.pivot.y - p.y) / p.height).toFixed(4),
       role: d.role,
-      animationType: d.animationType,
+      animationType: p.motionLocked ? "static" : d.animationType,
       speed: d.speed
     };
   });

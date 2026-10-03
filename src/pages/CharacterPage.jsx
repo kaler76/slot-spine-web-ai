@@ -16,7 +16,11 @@ import {
   updateCharacterPartMetadata,
   saveCharacterExport,
   renameCharacter,
-  logRigCorrection
+  logRigCorrection,
+  renameCharacterPart,
+  getOriginalPartImage,
+  replaceCharacterPartImage,
+  updateCharacterPartOffset
 } from "../lib/charactersRepository.js";
 import { downloadCharacterPackage } from "../lib/exportZip.js";
 import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMask } from "../lib/rigRules.js";
@@ -52,6 +56,30 @@ function sanitizeKey(name) {
  * che includa anche le parti ruotate, non solo la loro posizione non ruotata.
  */
 /** Pixel RGBA di un'immagine remota (Storage pubblico): per decidere il materiale delle parti. */
+/** Ricampiona un PNG a w×h con dimezzamenti successivi (qualità migliore nelle riduzioni forti). */
+async function resampleImage(blob, w, h) {
+  let src = await createImageBitmap(blob);
+  let cw = src.width, ch = src.height;
+  while (cw / 2 >= w && ch / 2 >= h) {
+    const c = document.createElement("canvas");
+    c.width = Math.round(cw / 2);
+    c.height = Math.round(ch / 2);
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, 0, 0, c.width, c.height);
+    src = c;
+    cw = c.width;
+    ch = c.height;
+  }
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, w, h);
+  return new Promise((res) => out.toBlob(res, "image/png"));
+}
+
 function loadImagePixels(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -215,14 +243,21 @@ export default function CharacterPage() {
   // automatica (-> registro correzioni). Persistita in sessionStorage per pagina.
   const rigProposalRef = useRef(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [keySaved, setKeySaved] = useState(null);
+  const [renaming, setRenaming] = useState(false);
+  const [scalePct, setScalePct] = useState(100);
+  const [scaleBranch, setScaleBranch] = useState(true);
+  const [scaling, setScaling] = useState(false);
 
   // --- Rinomina character ---
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  // silent: ricarica senza schermata di caricamento (rinomina/ridimensiona mentre si modifica una parte)
+  const refresh = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await getCharacterWithDetails(id);
@@ -401,6 +436,9 @@ export default function CharacterPage() {
 
   function startEditingPart(p) {
     setEditingPartId(p.id);
+    setKeyDraft(p.part_key);
+    setKeySaved(null);
+    setScalePct(100);
     setEditValues({
       width: p.width,
       height: p.height,
@@ -422,6 +460,70 @@ export default function CharacterPage() {
 
   function cancelEditingPart() {
     setEditingPartId(null);
+  }
+
+  /** Rinomina la parte SUBITO su database e Storage (Invio o uscita dal campo). */
+  async function handleRenamePart(p) {
+    const newKey = sanitizeKey(keyDraft);
+    if (!newKey || newKey === p.part_key) {
+      setKeyDraft(p.part_key);
+      return;
+    }
+    setRenaming(true);
+    setStatus(`⏳ Rinomino "${p.part_key}" → "${newKey}"...`);
+    try {
+      await renameCharacterPart({ characterId: character.id, partId: p.id, oldKey: p.part_key, newKey, siblings: character.parts });
+      setKeyDraft(newKey);
+      setKeySaved(newKey);
+      setStatus(`✅ "${p.part_key}" rinominata in "${newKey}" (figli ricollegati).`);
+      await refresh({ silent: true });
+    } catch (err) {
+      setKeyDraft(p.part_key);
+      setStatus(`❌ Rinomina: ${err.message || err}`);
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  /**
+   * Ridimensiona il pezzo in %: ricampiona il PNG partendo SEMPRE dall'originale (copiato in
+   * _orig/ alla prima volta), quindi più passaggi non degradano l'immagine. Il pivot resta lo
+   * stesso punto del disegno (frazioni invariate). Con "tutto il ramo" scala anche i figli e i
+   * loro attacchi (offset), così restano attaccati nello stesso punto.
+   */
+  async function handleScalePart(p) {
+    const f = Number(scalePct) / 100;
+    if (!(f > 0) || f === 1) return;
+    setScaling(true);
+    try {
+      const parts = character.parts;
+      const resized = {};
+      const scaleImage = async (part) => {
+        setStatus(`⏳ Ridimensiono "${part.part_key}" al ${scalePct}%...`);
+        const w = Math.max(1, Math.round(part.width * f)), h = Math.max(1, Math.round(part.height * f));
+        const src = await getOriginalPartImage(character.id, part.part_key);
+        const blob = await resampleImage(src, w, h);
+        await replaceCharacterPartImage({ characterId: character.id, partId: part.id, partKey: part.part_key, imageBlob: blob, width: w, height: h });
+        resized[part.id] = { w, h };
+      };
+      const walk = async (part) => {
+        await scaleImage(part);
+        if (!scaleBranch) return;
+        for (const child of parts.filter((c) => c.parent_key === part.part_key && c.id !== part.id)) {
+          await updateCharacterPartOffset(child.id, Math.round(child.offset_x * f), Math.round(child.offset_y * f));
+          await walk(child);
+        }
+      };
+      await walk(p);
+      setEditValues((v) => ({ ...v, width: resized[p.id].w, height: resized[p.id].h }));
+      setStatus(`✅ Ridimensionate al ${scalePct}%: ${Object.keys(resized).length} parti.`);
+      setScalePct(100);
+      await refresh({ silent: true });
+    } catch (err) {
+      setStatus(`❌ Ridimensionamento: ${err.message || err}`);
+    } finally {
+      setScaling(false);
+    }
   }
 
   function rigStorageKey(kind) {
@@ -939,7 +1041,7 @@ export default function CharacterPage() {
   }
 
   return (
-    <div className="page">
+    <div className="page page-wide">
       <Link to="/characters" className="back-link">← Tutti i character</Link>
       {editingName ? (
         <div className="row char-name-edit">
@@ -1001,76 +1103,135 @@ export default function CharacterPage() {
             {[...character.parts].sort((a, b) => a.z_index - b.z_index).map((p) => {
               const isEditing = editingPartId === p.id;
               if (isEditing) {
+                const childCount = character.parts.filter((c) => c.parent_key === p.part_key).length;
                 return (
-                  <div className="tech-details-row tech-details-row-char tech-details-row-editing" key={p.id}>
-                    <span className="tech-edit-pair" style={{ flexDirection: "column", alignItems: "flex-start" }}>
-                      {p.part_key}
-                      <select
-                        value={editValues.role || ""}
-                        title="Ruolo della parte: usato da 'Applica regole rig' per pivot e genitore"
-                        onChange={(e) => setEditValues((v) => ({ ...v, role: e.target.value }))}
-                      >
-                        <option value="">— ruolo —</option>
-                        {PART_ROLES.map((r) => (
-                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                        ))}
-                      </select>
-                    </span>
-                    <select
-                      value={editValues.parentKey}
-                      onChange={(e) => setEditValues((v) => ({ ...v, parentKey: e.target.value }))}
-                    >
-                      <option value="root">— (radice)</option>
-                      {character.parts.filter((pp) => pp.id !== p.id).map((pp) => (
-                        <option key={pp.id} value={pp.part_key}>{pp.part_key}</option>
-                      ))}
-                    </select>
-                    <span className="tech-edit-pair" title="Le dimensioni riflettono sempre il file immagine reale: per cambiarle serve ricaricare/ritagliare di nuovo l'immagine, non sono modificabili qui per evitare che l'export risulti disallineato dal PNG effettivo.">
-                      {editValues.width}×{editValues.height}px 🔒
-                    </span>
-                    <span className="tech-edit-pair">
-                      <input type="number" value={editValues.offsetX} onChange={(e) => setEditValues((v) => ({ ...v, offsetX: e.target.value }))} />
-                      <input type="number" value={editValues.offsetY} onChange={(e) => setEditValues((v) => ({ ...v, offsetY: e.target.value }))} />
-                    </span>
-                    <input type="number" value={editValues.zIndex} onChange={(e) => setEditValues((v) => ({ ...v, zIndex: e.target.value }))} />
-                    <input
-                      type="number"
-                      value={editValues.rotation}
-                      title="Rotazione di riposo del bone (gradi, antiorario positivo — come in Spine)"
-                      onChange={(e) => setEditValues((v) => ({ ...v, rotation: e.target.value }))}
-                    />
-                    <span className="tech-edit-pair">
-                      <select value={editValues.anchorX} onChange={(e) => setEditValues((v) => ({ ...v, anchorX: e.target.value, pivotFx: null, pivotFy: null }))}>
-                        <option value="left">⬅️</option>
-                        <option value="center">◯</option>
-                        <option value="right">➡️</option>
-                      </select>
-                      <select value={editValues.anchorY} onChange={(e) => setEditValues((v) => ({ ...v, anchorY: e.target.value, pivotFx: null, pivotFy: null }))}>
-                        <option value="top">⬆️</option>
-                        <option value="center">◯</option>
-                        <option value="bottom">⬇️</option>
-                      </select>
-                    </span>
-                    <select
-                      value={editValues.animationType}
-                      onChange={(e) => setEditValues((v) => ({ ...v, animationType: e.target.value }))}
-                    >
-                      {AVAILABLE_PART_ANIMATION_TYPES.map((t) => (
-                        <option key={t} value={t}>{ANIM_LABELS[t]}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min="1"
-                      max="8"
-                      value={editValues.segments}
-                      title="Segmenti (solo con animazione Fisica o Vento): divide il pezzo in N fasce che si piegano a cascata"
-                      onChange={(e) => setEditValues((v) => ({ ...v, segments: e.target.value }))}
-                    />
-                    <span className="tech-edit-actions">
-                      <button type="button" className="btn tiny" disabled={savingEdit} onClick={() => saveEditingPart(p.id, p.part_key)}>✓</button>
-                      <button type="button" className="btn secondary tiny" onClick={cancelEditingPart}>✕</button>
-                    </span>
+                  <div className="tech-edit-panel" key={p.id}>
+                    <div className="tech-edit-panel-title">✏️ Modifica parte</div>
+                    <div className="tech-edit-grid">
+                      <label className="tech-edit-field wide">
+                        Nome parte (salvato subito)
+                        <span className="tech-edit-pair">
+                          <input
+                            type="text"
+                            value={keyDraft}
+                            disabled={renaming}
+                            title="Invio o clic fuori = rinomina su database e Storage; i figli vengono ricollegati. Esc = annulla"
+                            onChange={(e) => setKeyDraft(e.target.value)}
+                            onBlur={() => handleRenamePart(p)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur();
+                              if (e.key === "Escape") setKeyDraft(p.part_key);
+                            }}
+                          />
+                          {renaming ? <span className="tech-edit-saved">⏳</span> : keySaved === p.part_key && <span className="tech-edit-saved">✓ salvato</span>}
+                        </span>
+                      </label>
+                      <label className="tech-edit-field">
+                        Ruolo
+                        <select value={editValues.role || ""} onChange={(e) => setEditValues((v) => ({ ...v, role: e.target.value }))}>
+                          <option value="">— ruolo —</option>
+                          {PART_ROLES.map((r) => (
+                            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="tech-edit-field">
+                        Genitore
+                        <select value={editValues.parentKey} onChange={(e) => setEditValues((v) => ({ ...v, parentKey: e.target.value }))}>
+                          <option value="root">— (radice)</option>
+                          {character.parts.filter((pp) => pp.id !== p.id).map((pp) => (
+                            <option key={pp.id} value={pp.part_key}>{pp.part_key}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="tech-edit-field">
+                        Dimensioni (file PNG)
+                        <span className="value" title="Le dimensioni seguono il file immagine reale: si cambiano solo con 'Ridimensiona'.">
+                          {editValues.width}×{editValues.height}px 🔒
+                        </span>
+                      </div>
+                      <div className="tech-edit-field wide">
+                        Ridimensiona pezzo (%)
+                        <span className="tech-edit-pair">
+                          <input type="number" min="5" max="400" step="1" value={scalePct} disabled={scaling} onChange={(e) => setScalePct(e.target.value)} style={{ maxWidth: 90 }} />
+                          <button type="button" className="btn tiny secondary" disabled={scaling} onClick={() => setScalePct(90)}>90</button>
+                          <button type="button" className="btn tiny secondary" disabled={scaling} onClick={() => setScalePct(75)}>75</button>
+                          <button type="button" className="btn tiny secondary" disabled={scaling} onClick={() => setScalePct(50)}>50</button>
+                          <button type="button" className="btn tiny" disabled={scaling || Number(scalePct) === 100} onClick={() => handleScalePart(p)}>
+                            {scaling ? "⏳" : "↘ Ridimensiona"}
+                          </button>
+                        </span>
+                        {childCount > 0 && (
+                          <label className="check">
+                            <input type="checkbox" checked={scaleBranch} onChange={(e) => setScaleBranch(e.target.checked)} />
+                            anche i {childCount} figli (tutto il ramo, con i loro attacchi)
+                          </label>
+                        )}
+                      </div>
+                      <label className="tech-edit-field">
+                        Offset X
+                        <input type="number" value={editValues.offsetX} onChange={(e) => setEditValues((v) => ({ ...v, offsetX: e.target.value }))} />
+                      </label>
+                      <label className="tech-edit-field">
+                        Offset Y
+                        <input type="number" value={editValues.offsetY} onChange={(e) => setEditValues((v) => ({ ...v, offsetY: e.target.value }))} />
+                      </label>
+                      <label className="tech-edit-field">
+                        Z (ordine)
+                        <input type="number" value={editValues.zIndex} onChange={(e) => setEditValues((v) => ({ ...v, zIndex: e.target.value }))} />
+                      </label>
+                      <label className="tech-edit-field">
+                        Rotazione (°)
+                        <input
+                          type="number"
+                          value={editValues.rotation}
+                          title="Rotazione di riposo del bone (gradi, antiorario positivo — come in Spine)"
+                          onChange={(e) => setEditValues((v) => ({ ...v, rotation: e.target.value }))}
+                        />
+                      </label>
+                      <div className="tech-edit-field">
+                        Ancoraggio{editValues.pivotFx != null && editValues.pivotFy != null ? " (🎯 pivot preciso)" : ""}
+                        <span className="tech-edit-pair">
+                          <select value={editValues.anchorX} onChange={(e) => setEditValues((v) => ({ ...v, anchorX: e.target.value, pivotFx: null, pivotFy: null }))}>
+                            <option value="left">⬅️ sinistra</option>
+                            <option value="center">◯ centro</option>
+                            <option value="right">➡️ destra</option>
+                          </select>
+                          <select value={editValues.anchorY} onChange={(e) => setEditValues((v) => ({ ...v, anchorY: e.target.value, pivotFx: null, pivotFy: null }))}>
+                            <option value="top">⬆️ alto</option>
+                            <option value="center">◯ centro</option>
+                            <option value="bottom">⬇️ basso</option>
+                          </select>
+                        </span>
+                      </div>
+                      <label className="tech-edit-field">
+                        Animazione
+                        <select value={editValues.animationType} onChange={(e) => setEditValues((v) => ({ ...v, animationType: e.target.value }))}>
+                          {AVAILABLE_PART_ANIMATION_TYPES.map((t) => (
+                            <option key={t} value={t}>{ANIM_LABELS[t]}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="tech-edit-field">
+                        Velocità
+                        <input type="number" min="0.1" step="0.05" value={editValues.speed} onChange={(e) => setEditValues((v) => ({ ...v, speed: e.target.value }))} />
+                      </label>
+                      <label className="tech-edit-field">
+                        Segmenti
+                        <input
+                          type="number"
+                          min="1"
+                          max="8"
+                          value={editValues.segments}
+                          title="Segmenti (solo con animazione Fisica o Vento): divide il pezzo in N fasce che si piegano a cascata"
+                          onChange={(e) => setEditValues((v) => ({ ...v, segments: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="tech-edit-actions">
+                      <button type="button" className="btn secondary tiny" onClick={cancelEditingPart}>✕ Annulla</button>
+                      <button type="button" className="btn tiny" disabled={savingEdit || renaming || scaling} onClick={() => saveEditingPart(p.id, p.part_key)}>✓ Salva</button>
+                    </div>
                   </div>
                 );
               }

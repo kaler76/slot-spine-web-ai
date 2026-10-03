@@ -13,7 +13,11 @@
 // Tutto puro e testabile: nessun DOM.
 
 import { LM } from "./partRecognition.js";
-import { labelFacePieces, isFaceName, facePivot } from "./faceRig.js";
+import { labelFacePieces, labelBackHair, isFaceName, facePivot, faceFrame } from "./faceRig.js";
+import { checkPieces } from "./pieceCheck.js";
+import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.js";
+import { finishAttachments } from "./attachmentFinishing.js";
+import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
 
 /** Colori di sfondo "chroma" proponibili per la tavola esplosa. */
 export const CHROMA_COLORS = [
@@ -246,8 +250,13 @@ export function alignPiece(piece, orig, s = 1, { coarse = 8, nFew = 200, window 
   const many = samplesOf(piece, 4000);
   const pw = piece.width * s, ph = piece.height * s;
   let best = { x: 0, y: 0, err: Infinity };
-  for (let ty = -Math.round(ph / 2); ty <= orig.height - ph / 2; ty += coarse)
-    for (let tx = -Math.round(pw / 2); tx <= orig.width - pw / 2; tx += coarse) {
+  // con la finestra si scorre solo il suo riquadro (stessa griglia di passo coarse)
+  const ty0 = -Math.round(ph / 2), tx0 = -Math.round(pw / 2);
+  const snap = (v, o) => o + Math.max(0, Math.ceil((v - o) / coarse)) * coarse;
+  const yA = window ? snap(window.cy - window.r - ph / 2, ty0) : ty0, yB = window ? Math.min(orig.height - ph / 2, window.cy + window.r - ph / 2) : orig.height - ph / 2;
+  const xA = window ? snap(window.cx - window.r - pw / 2, tx0) : tx0, xB = window ? Math.min(orig.width - pw / 2, window.cx + window.r - pw / 2) : orig.width - pw / 2;
+  for (let ty = yA; ty <= yB; ty += coarse)
+    for (let tx = xA; tx <= xB; tx += coarse) {
       // finestra opzionale: il CENTRO del pezzo deve cadere entro r da (cx,cy)
       if (window && Math.hypot(tx + pw / 2 - window.cx, ty + ph / 2 - window.cy) > window.r) continue;
       const e = matchError(piece, few, orig, tx, ty, s);
@@ -281,6 +290,49 @@ export function estimateScale(piece, orig, scales = [0.8, 0.85, 0.9, 0.95, 1.05,
     if (r.err < best.err) best = { s, err: r.err };
   }
   return best.s;
+}
+
+/** Ricomposizione con i pixel dell'originale: sagome sovrapposte almeno così (IoU) e buchi al massimo così. */
+// calibrate: zeus 0.861 / 5.3% (stessa posa) contro folletto_ridisegnata 0.815 / 9.3% (posa cambiata)
+export const ASSEMBLY_IOU_MIN = 0.84;
+export const ASSEMBLY_HOLES_MAX = 0.01;
+export const ASSEMBLY_FILL_MAX = 0.07;
+/** Errore oltre il quale un pezzo piccolo non combacia (= pieceCheck.PIECE_RULES.smallErrMax). */
+const SMALL_ERR_MAX = 65;
+/** Scale provate per i pezzi piccoli del viso (relative alla scala comune della tavola). */
+const FACE_SCALES = [0.6, 0.7, 0.8, 0.9, 1.1, 1.2, 1.3, 1.45];
+
+/**
+ * Pezzo PICCOLO che non combacia alla scala comune: il modello spesso disegna occhi,
+ * sopracciglia e bocca più grandi o più piccoli del resto (caso reale: Zeus, occhi ingranditi
+ * -> "posizione incerta", occhio chiamato dettaglio_viso, sopracciglia chiamate oggetto e
+ * portate vicino alla mano). Si cerca il pezzo a più scale, solo attorno al viso.
+ * @returns {{ piece, pos, s } | null} pezzo riscalato e posizione, se migliora davvero
+ */
+export function alignFacePieceScaled(piece, original, win, current) {
+  let best = null;
+  for (const s of FACE_SCALES) {
+    const sp = scalePiece(piece, s);
+    if (sp.width < 4 || sp.height < 4) continue;
+    const pos = alignPiece(sp, original, 1, { coarse: 2, nFew: 600, window: win });
+    if (!best || pos.err < best.pos.err) best = { piece: sp, pos, s };
+  }
+  // accettato solo se combacia (sotto la soglia dei pezzi piccoli) e migliora nettamente
+  if (!best || !isFinite(best.pos.err) || best.pos.err > SMALL_ERR_MAX || best.pos.err > current - 15) return null;
+  return best;
+}
+
+/** Tratto del viso cercato solo attorno al suo punto (raggio r), a scala 1 e alle scale del viso. */
+function placeAtTarget(piece, original, pt, r, maxErr = 72) {
+  let best = null;
+  for (const s of [1, ...FACE_SCALES]) {
+    const sp = scalePiece(piece, s);
+    if (sp.width < 4 || sp.height < 4) continue;
+    const pos = alignPiece(sp, original, 1, { coarse: 2, nFew: 300, window: { cx: pt.x, cy: pt.y, r } });
+    // a parità (entro 3) si preferisce la scala 1
+    if (!best || pos.err < best.pos.err - (s === 1 ? 0 : 0) - (best.s === 1 ? 3 : 0)) best = { piece: sp, pos, s };
+  }
+  return best && isFinite(best.pos.err) && best.pos.err <= maxErr ? best : null;
 }
 
 /** Pezzo scalato (nearest) per lavorare tutto in coordinate dell'originale. */
@@ -331,6 +383,7 @@ export function labelPieces(pieces, landmarks) {
   const all = [...new Set(ROLES.flatMap((r) => r.pts))].filter((i) => P(i));
   const cand = [];
   for (const p of pieces) {
+    if (p.faceLocked) continue; // tratto del viso già riconosciuto dal gruppo (sheetAssembly)
     const coveredAll = new Set(all.filter((i) => covers(p, P(i))));
     for (const r of ROLES) {
       if (!r.must.some((i) => covers(p, P(i)))) continue;
@@ -366,9 +419,13 @@ export function labelPieces(pieces, landmarks) {
     done.add(c.r.name);
   }
   // pezzi del viso (occhi, sopracciglia, bocca, ciocche) attaccati alla testa: faceRig.js
-  let rest = pieces.filter((p) => !taken.has(p));
-  const face = labelFacePieces(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"));
+  let rest = pieces.filter((p) => !taken.has(p) && !p.faceLocked);
+  const lockedNames = new Set(pieces.filter((p) => p.faceLocked).map((p) => p.name));
+  const face = labelFacePieces(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"), lockedNames);
   rest = rest.filter((p) => !face.has(p));
+  // capelli posteriori: sempre un pezzo a sé dietro la testa (faceRig.labelBackHair)
+  const backHair = labelBackHair(rest, landmarks, pieces.find((p) => taken.has(p) && p.name === "testa"));
+  rest = rest.filter((p) => !backHair.has(p));
   let k = 0;
   for (const p of rest) p.name = rest.length > 1 ? `oggetto_${++k}` : "oggetto";
 }
@@ -421,6 +478,68 @@ export function orderPieces(pieces, orig) {
   return front.map(([b, f]) => [b.name, f.name]);
 }
 
+/** Distanza dal punto al pixel opaco più vicino del pezzo (campionato a passo 2). */
+function nearestPixel(p, pt) {
+  let d = Infinity;
+  for (let y = 0; y < p.height; y += 2)
+    for (let x = 0; x < p.width; x += 2)
+      if (p.rgba[(y * p.width + x) * 4 + 3] >= 128) d = Math.min(d, Math.hypot(p.x + x - pt.x, p.y + y - pt.y));
+  return d;
+}
+
+/** Pixel opachi di p sovrapposti a q (campionati): conteggio e baricentro. */
+function overlapStats(p, q, step = 2) {
+  let n = 0, sx = 0, sy = 0;
+  if (!q) return { n, c: null };
+  for (let y = 0; y < p.height; y += step)
+    for (let x = 0; x < p.width; x += step) {
+      if (p.rgba[(y * p.width + x) * 4 + 3] < 128) continue;
+      if (alphaAt(q, p.x + x, p.y + y) > 128) { n++; sx += p.x + x; sy += p.y + y; }
+    }
+  return { n, c: n ? { x: sx / n, y: sy / n } : null };
+}
+/** Pezzo del corpo su cui poggia di più (testa, busto, braccia). */
+function hostPiece(p, pieces) {
+  let best = null, torso = null;
+  for (const q of pieces) {
+    if (q === p || !/^(testa|busto|braccio_(sx|dx))$/.test(q.name)) continue;
+    const { n } = overlapStats(p, q, 3);
+    if (q.name === "busto") torso = { q, n };
+    if (n && (!best || n > best.n)) best = { q, n };
+  }
+  // un lembo di stoffa fra busto e braccio appartiene al busto (non segue la rotazione del braccio)
+  if (best && torso?.n && /^braccio/.test(best.q.name) && torso.n >= 0.5 * best.n) return torso.q;
+  return best?.q || pieces.find((q) => q.name === "busto") || null;
+}
+
+/**
+ * COPERTURA DELLA SPALLA (lembo del mantello con fibula, tavola Zeus corretta dall'utente):
+ * pezzo non tenuto in mano che poggia SIA sul busto SIA su un braccio vicino alla spalla.
+ * Figlio del busto, pivot alla spalla, disegnato davanti a busto e braccio, fermo.
+ * @returns {string|null} lato ("sx"/"dx") se è una copertura della spalla
+ */
+export function shoulderCoverSide(p, pieces, landmarks) {
+  const busto = pieces.find((q) => q.name === "busto");
+  if (!busto || !landmarks) return null;
+  let total = 0;
+  for (let y = 0; y < p.height; y += 3) for (let x = 0; x < p.width; x += 3) if (p.rgba[(y * p.width + x) * 4 + 3] >= 128) total++;
+  // basta poco busto sotto (Zeus: 7%, il lembo sta quasi tutto sulla spalla del braccio)
+  if (!total || overlapStats(p, busto, 3).n < 0.05 * total) return null;
+  let best = null;
+  for (const side of ["sx", "dx"]) {
+    const arm = pieces.find((q) => q.name === `braccio_${side}`);
+    const sh = landmarks[side === "sx" ? LM.shoulderSx : LM.shoulderDx];
+    if (!arm || !sh) continue;
+    const { n, c } = overlapStats(p, arm, 3);
+    if (n < 0.1 * total) continue;
+    const d = Math.hypot(c.x - sh.x, c.y - sh.y);
+    if (!best || d < best.d) best = { side, d };
+  }
+  // vicino alla spalla: entro la diagonale del pezzo
+  return best && best.d <= Math.hypot(p.width, p.height) ? best.side : null;
+}
+const overlapCenter = (p, q) => overlapStats(p, q).c || { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+
 /** Genitore e pivot per il rig (stesse convenzioni di partExtraction.js). */
 function rigInfo(p, joints, landmarks, pieces = []) {
   const L = (i) => landmarks?.[i];
@@ -431,6 +550,14 @@ function rigInfo(p, joints, landmarks, pieces = []) {
   else if (p.name === "testa") { parent = "busto"; pivot = joints?.base_collo || mid(L(LM.shoulderSx), L(LM.shoulderDx)); }
   else if (p.name === "braccio_sx") { parent = "busto"; pivot = L(LM.shoulderSx); }
   else if (p.name === "braccio_dx") { parent = "busto"; pivot = L(LM.shoulderDx); }
+  else if (p.handObject && handObjectRig(p, landmarks, joints)) ({ parent, pivot } = handObjectRig(p, landmarks, joints));
+  else if (p.attachTo) {
+    // accessorio appoggiato su un pezzo del corpo: pivot al baricentro della zona in comune
+    parent = p.attachTo;
+    pivot = p.coverShoulder
+      ? L(p.coverShoulder === "sx" ? LM.shoulderSx : LM.shoulderDx)
+      : overlapCenter(p, pieces.find((q) => q.name === p.attachTo));
+  }
   else if (isFaceName(p.name)) { parent = "testa"; pivot = facePivot(p, pieces.find((q) => q.name === "testa")); }
   else {
     // oggetto: lo tiene la mano più vicina al suo centro
@@ -451,7 +578,7 @@ function rigInfo(p, joints, landmarks, pieces = []) {
  * @param {Object} [o.joints] - articolazioni di recognizeParts (base collo, mani)
  * @returns {{ pieces: Array, scale: number, front: Array, warnings: string[] }}
  */
-export function importExplodedSheet({ sheet, original, landmarks, joints, minArea }) {
+export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true }) {
   const warnings = [];
   checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
@@ -472,35 +599,101 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   const biggest = pieces.reduce((a, b) => (b.area > a.area ? b : a));
   const scale = estimateScale(biggest, original);
   if (Math.abs(scale - 1) > 0.01) warnings.push(`Tavola in scala diversa dall'originale: fattore ${scale.toFixed(2)}.`);
+  // finestra del viso per la ricerca a più scale dei pezzi piccoli
+  const fr = faceFrame(landmarks);
+  const faceWin = fr && { cx: fr.center.x, cy: fr.center.y, r: Math.max(3 * fr.u, 1.6 * fr.radius) };
+  // gruppo dei tratti del viso (sheetAssembly.planFaceGroup): ogni tratto cercato solo attorno al
+  // suo punto della posa, nell'ordine sinistra/destra e alto/basso della tavola
+  // costo = errore della ricerca locale + penalità per la scala lontana da 1 (un pezzo sbagliato
+  // si "adatta" più facilmente rimpicciolito)
+  const placeCost = (p, t) => {
+    const r = placeAtTarget(scalePiece(p, scale), original, t.pt, 0.8 * fr.u);
+    return r ? { ...r, err: r.pos.err + 10 * Math.abs(Math.log(r.s)) } : null;
+  };
+  const faceGroup = fr ? planFaceGroup(pieces, landmarks, scale, placeCost) : new Map();
   pieces = pieces.map((p) => {
     const sp = scalePiece(p, scale);
+    const target = faceGroup.get(p);
+    if (target) {
+      const placed = target.placed;
+      if (placed) {
+        if (Math.abs(placed.s - 1) > 0.01)
+          warnings.push(`${target.name}: disegnato in scala diversa dal viso (×${(1 / placed.s).toFixed(2)}), riportato alla scala dell'originale.`);
+        return { ...placed.piece, x: placed.pos.x, y: placed.pos.y, matchError: +placed.pos.err.toFixed(1), name: target.name, faceLocked: true, rescaled: +placed.s.toFixed(2), sheetPiece: sp };
+      }
+    }
     // pezzi PICCOLI (occhi, sopracciglia, bocca, ciocche): a passo 8 la ricerca grossolana salta
     // la posizione giusta e trova un falso minimo altrove (caso reale: folletto con viso, occhi
     // finiti sul busto). Sotto il 12% del lato dell'originale si cerca a passo 2 con più campioni.
     const small = Math.max(sp.width, sp.height) < 0.12 * Math.max(original.width, original.height);
     const pos = alignPiece(sp, original, 1, small ? { coarse: 2, nFew: 1000 } : undefined);
+    if (small && pos.err > SMALL_ERR_MAX && fr) {
+      const r = alignFacePieceScaled(sp, original, faceWin, pos.err);
+      if (r) {
+        warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: disegnato in scala diversa dal viso (×${(1 / r.s).toFixed(2)}), riportato alla scala dell'originale (errore ${pos.err.toFixed(0)} → ${r.pos.err.toFixed(0)}).`);
+        return { ...r.piece, x: r.pos.x, y: r.pos.y, matchError: +r.pos.err.toFixed(1), rescaled: +r.s.toFixed(2) };
+      }
+    }
     if (pos.err > 80) warnings.push(`Pezzo ${p.sheetX},${p.sheetY}: posizione incerta (errore ${pos.err.toFixed(0)}).`);
     return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
   });
+  // baffi del gruppo del viso: devono poggiare sulla testa (il pezzo più grande che copre il
+  // naso); altrimenti sono ciocche ai lati del viso (folletto_viso): ricerca normale e regole di faceRig
+  const nose = landmarks?.[LM.nose];
+  const headGuess = nose && pieces.filter((p) => !p.faceLocked && alphaAt(p, nose.x, nose.y) > 128).sort((a, b) => b.area - a.area)[0];
+  pieces = pieces.map((p) => {
+    if (!p.faceLocked || !/^baffo/.test(p.name)) return p;
+    let n = 0;
+    for (let y = 0; y < p.height; y += 2) for (let x = 0; x < p.width; x += 2) if (p.rgba[(y * p.width + x) * 4 + 3] >= 128) n++;
+    if (headGuess && overlapStats(p, headGuess, 2).n >= 0.3 * n) return p;
+    const wi = warnings.findIndex((w) => w.startsWith(`${p.name}: disegnato`));
+    if (wi >= 0) warnings.splice(wi, 1);
+    const sp = p.sheetPiece;
+    const pos = alignPiece(sp, original, 1, { coarse: 2, nFew: 1000 });
+    return { ...sp, x: pos.x, y: pos.y, matchError: +pos.err.toFixed(1) };
+  });
+  for (const p of pieces) delete p.sheetPiece;
   labelPieces(pieces, landmarks);
+  // mano + oggetto lungo in un solo pezzo (handObject.js): nome mano_oggetto_<lato>, pivot al polso
+  const handObjects = applyHandObjects(pieces, landmarks, joints);
   // Un oggetto è TENUTO in mano: se è finito lontano da entrambe le mani (tavola ridisegnata,
   // confronto ambiguo), lo si ricerca solo attorno alle mani.
   const hands = [joints?.mano_sx || landmarks?.[LM.wristSx], joints?.mano_dx || landmarks?.[LM.wristDx]].filter(Boolean);
   const sw = landmarks ? Math.hypot(landmarks[LM.shoulderSx].x - landmarks[LM.shoulderDx].x, landmarks[LM.shoulderSx].y - landmarks[LM.shoulderDx].y) : 0;
+  let accN = 0;
   if (hands.length && sw) {
     for (const p of pieces) {
       if (!p.name.startsWith("oggetto")) continue;
-      const c = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
       const r = 0.5 * sw + Math.max(p.width, p.height) / 2;
-      if (hands.some((h) => Math.hypot(c.x - h.x, c.y - h.y) <= r)) continue;
+      // TENUTO in mano = qualche pixel del pezzo vicino alla mano (entro 1/4 della larghezza delle
+      // spalle), non solo il centro "abbastanza vicino" (Zeus: lembo sulla spalla preso per oggetto)
+      if (hands.some((h) => nearestPixel(p, h) <= 0.25 * sw)) continue;
       let best = null;
       for (const h of hands) {
         const pos = alignPiece(p, original, 1, { window: { cx: h.x, cy: h.y, r } });
         if (!best || pos.err < best.err) best = pos;
       }
-      if (best && isFinite(best.err)) {
-        warnings.push(`${p.name}: lontano dalle mani, riposizionato vicino alla mano (errore ${best.err.toFixed(0)}).`);
+      // spostato vicino alla mano SOLO se lì combacia nettamente meglio: un pezzo che non è un
+      // oggetto impugnato (sopracciglio, ciocca, lembo del mantello) non deve finire sulla mano
+      // (caso reale Zeus: sopracciglia e ciocche portate accanto alla mano con errore 90-105)
+      if (best && isFinite(best.err) && best.err < Math.min(p.matchError - 15, USABLE_MAX)) {
+        warnings.push(`${p.name}: lontano dalle mani, riposizionato vicino alla mano (errore ${p.matchError.toFixed(0)} → ${best.err.toFixed(0)}).`);
         Object.assign(p, { x: best.x, y: best.y, matchError: +best.err.toFixed(1) });
+      } else {
+        // non è tenuto in mano: copertura della spalla, oppure accessorio del pezzo su cui poggia
+        const side = shoulderCoverSide(p, pieces, landmarks);
+        if (side) {
+          p.name = `copertura_spalla_${side}`;
+          p.attachTo = "busto";
+          p.coverShoulder = side;
+          p.motionLocked = true;
+          warnings.push(`${p.name}: lembo sopra la spalla, figlio del busto, davanti al braccio (controlla).`);
+        } else {
+          const host = hostPiece(p, pieces);
+          p.name = `accessorio_${++accN}`;
+          if (host) p.attachTo = host.name;
+          warnings.push(`${p.name}: non è in mano, agganciato a ${host ? host.name : "radice"} come accessorio (controlla il nome).`);
+        }
       }
     }
   }
@@ -510,18 +703,50 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   const head = pieces.find((p) => p.name === "testa");
   if (head)
     for (const p of pieces)
-      if (/^(occhio|sopracciglio|bocca)(_|$)/.test(p.name) && p.order < head.order) p.order = head.order + 0.5;
+      if (/^(occhio|sopracciglio|bocca|baffo)(_|$)/.test(p.name) && p.order < head.order) p.order = head.order + 0.5;
+      // capelli posteriori sempre DIETRO testa e busto (pendono dietro le spalle)
+      else if (/^capelli_dietro/.test(p.name)) p.order = -1;
+  // copertura della spalla sempre davanti a busto e braccio
+  for (const p of pieces)
+    if (p.coverShoulder) {
+      const under = pieces.filter((q) => q.name === "busto" || q.name === `braccio_${p.coverShoulder}`);
+      p.order = Math.max(p.order, ...under.map((q) => q.order)) + 0.5;
+    }
   [...pieces].sort((a, b) => a.order - b.order).forEach((p, i) => (p.order = i));
-  for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks, pieces));
-  pieces.sort((a, b) => a.order - b.order);
   // Fedeltà della tavola: errore medio pesato sull'area. Una tavola che RIDISEGNA il personaggio
   // (proporzioni, dettagli, posa diversi) non si ricompone sull'originale e non va usata come
   // dato di addestramento.
   const totA = pieces.reduce((a, p) => a + p.area, 0) || 1;
   const fidelityError = +(pieces.reduce((a, p) => a + p.matchError * p.area, 0) / totA).toFixed(1);
   const faithful = fidelityError <= FIDELITY_MAX;
-  const usable = fidelityError <= USABLE_MAX;
-  if (!usable)
+  // PIXEL VISIBILI DALL'ORIGINALE (sheetAssembly.transplantOriginal): la tavola resta solo nelle
+  // zone nascoste. Una tavola ridisegnata ma con la stessa POSA (sagome che coincidono) diventa
+  // così utilizzabile: si giudica la sagoma, non il colore.
+  let assembly = null;
+  for (const p of pieces) p.aligned = { x: p.x, y: p.y }; // posizione trovata, prima del ritaglio dall'originale
+  if (transplant && original) {
+    const t = transplantOriginal(pieces, original);
+    pieces = t.pieces;
+    if (t.rest.length) {
+      pieces.push(...t.rest);
+      [...pieces].sort((a, b) => a.order - b.order).forEach((p, i) => (p.order = i));
+      warnings.push(`${t.rest.map((p) => `${p.name} (${p.area} px, su ${p.attachTo || "radice"})`).join(", ")}: parti dell'originale assenti dalla tavola (es. scintille, particelle), aggiunte come pezzi fermi con i pixel dell'originale.`);
+    }
+    assembly = { iou: +t.iou.toFixed(3), holeShare: +t.holeShare.toFixed(4), filledShare: +t.filledShare.toFixed(4) };
+    if (t.filledShare > 0.005)
+      warnings.push(`${(t.filledShare * 100).toFixed(1)}% del personaggio non era in nessun pezzo della tavola (es. una parte del mantello): assegnato al pezzo più vicino, controlla.`);
+  }
+  const poseOk = assembly && assembly.iou >= ASSEMBLY_IOU_MIN && assembly.holeShare <= ASSEMBLY_HOLES_MAX && assembly.filledShare <= ASSEMBLY_FILL_MAX;
+  const usable = fidelityError <= USABLE_MAX || !!poseOk;
+  if (assembly && !poseOk && fidelityError <= USABLE_MAX)
+    warnings.push(`Sagoma dei pezzi poco sovrapposta all'originale (IoU ${assembly.iou}, buchi ${(assembly.holeShare * 100).toFixed(1)}%): controlla la ricomposizione.`);
+  for (const p of pieces) Object.assign(p, rigInfo(p, joints, landmarks, pieces));
+  pieces.sort((a, b) => a.order - b.order);
+  if (usable && fidelityError > USABLE_MAX)
+    warnings.unshift(
+      `Tavola ridisegnata (errore colori ${fidelityError}) ma con la stessa posa (sagome sovrapposte ${Math.round(assembly.iou * 100)}%): i pixel visibili sono presi dall'originale, la tavola resta solo nelle zone nascoste. Ok per il character, non per il dataset.`
+    );
+  else if (!usable)
     warnings.unshift(
       `Tavola NON fedele all'originale (errore medio ${fidelityError}, limite ${USABLE_MAX}): il modello ha cambiato la posa o le forme. Ricomposizione sbagliata: rigenera la tavola.`
     );
@@ -529,5 +754,20 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     warnings.unshift(
       `Tavola leggermente ridisegnata (errore medio ${fidelityError}, fedele fino a ${FIDELITY_MAX}): posa uguale, va bene per il character ma non per il dataset di addestramento.`
     );
-  return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable };
+  // Controllo PEZZO PER PEZZO (pieceCheck.js): la fedeltà è una media sull'area e non vede un
+  // occhio finito sul busto. Su una tavola già da rifare non aggiunge nulla: solo se utilizzabile.
+  // Apply a saved, validated mask recipe only after alignment/rigging. Fidelity above
+  // intentionally remains the score of the incoming sheet, not the repaired layers.
+  if (attachmentRules.length && (!usable || !checkPieces(pieces, original).ok)) {
+    throw new Error("Raccordi non applicati: la tavola deve superare fedeltà e controllo dei singoli pezzi prima delle correzioni salvate.");
+  }
+  const finishing = finishAttachments(pieces, { original, rules: attachmentRules });
+  pieces = finishing.pieces;
+  front.push(...finishing.front);
+  const pc = checkPieces(pieces, original);
+  for (const c of pc.checks) pieces.find((p) => p.name === c.name).check = c;
+  if (usable) warnings.push(...pc.warnings, ...checkHandObjects(pieces, landmarks, joints));
+  return { pieces, scale, front, bg, warnings, fidelityError, faithful, usable, assembly, piecesOk: pc.ok, pieceChecks: pc.checks,
+    handObjects: handObjects.map((h) => ({ name: h.piece.name, side: h.side })),
+    finishing: { version: finishing.version, rules: structuredClone(attachmentRules), changes: finishing.changes } };
 }

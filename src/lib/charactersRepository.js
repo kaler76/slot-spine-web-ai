@@ -282,3 +282,74 @@ export async function renameCharacter(characterId, name) {
   const { error } = await supabase.from(CHARACTERS_TABLE).update({ name }).eq("id", characterId);
   if (error) throw error;
 }
+
+/** Percorso dell'immagine ORIGINALE (mai ricampionata) di una parte: sorgente di ogni ridimensionamento. */
+const originalPartPath = (characterId, partKey) => `${characterId}/_orig/${partKey}.png`;
+
+/**
+ * Rinomina una parte in tempo reale: sposta il PNG (e l'originale, se c'è) nello Storage,
+ * aggiorna part_key/image_path/image_url e il parent_key delle parti figlie.
+ * @returns {Promise<string>} la chiave effettiva salvata
+ */
+export async function renameCharacterPart({ characterId, partId, oldKey, newKey, siblings = [] }) {
+  if (!newKey || newKey === oldKey) return oldKey;
+  if (newKey === "root") throw new Error('"root" è riservato.');
+  if (siblings.some((p) => p.id !== partId && p.part_key === newKey)) throw new Error(`Esiste già una parte "${newKey}".`);
+  const bucket = supabase.storage.from(STORAGE_BUCKET);
+  const from = `${characterId}/${oldKey}.png`, to = `${characterId}/${newKey}.png`;
+  const { error: moveErr } = await bucket.move(from, to);
+  if (moveErr) {
+    // fallback: copia (scarica + carica) senza cancellare la vecchia
+    const { data: blob, error: dlErr } = await bucket.download(from);
+    if (dlErr) throw dlErr;
+    const { error: upErr } = await bucket.upload(to, blob, { contentType: "image/png", upsert: true });
+    if (upErr) throw upErr;
+  }
+  await bucket.move(originalPartPath(characterId, oldKey), originalPartPath(characterId, newKey)); // può non esistere
+  const url = `${bucket.getPublicUrl(to).data.publicUrl}?v=${Date.now()}`;
+  const { error } = await supabase
+    .from(PARTS_TABLE)
+    .update({ part_key: newKey, image_path: to, image_url: url })
+    .eq("id", partId);
+  if (error) throw error;
+  const { error: childErr } = await supabase
+    .from(PARTS_TABLE)
+    .update({ parent_key: newKey })
+    .eq("character_id", characterId)
+    .eq("parent_key", oldKey);
+  if (childErr) throw childErr;
+  return newKey;
+}
+
+/**
+ * Immagine originale della parte: alla prima richiesta copia il PNG attuale in _orig/, così i
+ * ridimensionamenti successivi ripartono sempre dall'originale (nessuna perdita di qualità).
+ */
+export async function getOriginalPartImage(characterId, partKey) {
+  const bucket = supabase.storage.from(STORAGE_BUCKET);
+  const orig = originalPartPath(characterId, partKey);
+  const { data, error } = await bucket.download(orig);
+  if (!error && data) return data;
+  const { data: cur, error: curErr } = await bucket.download(`${characterId}/${partKey}.png`);
+  if (curErr) throw curErr;
+  const { error: upErr } = await bucket.upload(orig, cur, { contentType: "image/png", upsert: true });
+  if (upErr) throw upErr;
+  return cur;
+}
+
+/** Sostituisce il PNG di una parte (stesso percorso) e ne aggiorna dimensioni e URL (cache-busting). */
+export async function replaceCharacterPartImage({ characterId, partId, partKey, imageBlob, width, height }) {
+  const bucket = supabase.storage.from(STORAGE_BUCKET);
+  const path = `${characterId}/${partKey}.png`;
+  const { error: upErr } = await bucket.upload(path, imageBlob, { contentType: "image/png", upsert: true });
+  if (upErr) throw upErr;
+  const url = `${bucket.getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
+  const { error } = await supabase.from(PARTS_TABLE).update({ width, height, image_url: url }).eq("id", partId);
+  if (error) throw error;
+}
+
+/** Aggiorna solo l'offset di una parte (attacchi dei figli dopo un ridimensionamento). */
+export async function updateCharacterPartOffset(partId, offsetX, offsetY) {
+  const { error } = await supabase.from(PARTS_TABLE).update({ offset_x: offsetX, offset_y: offsetY }).eq("id", partId);
+  if (error) throw error;
+}

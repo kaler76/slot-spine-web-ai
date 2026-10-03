@@ -1,0 +1,92 @@
+{
+  "note": "Zeus: tavola ridisegnata (colori) con la stessa posa, corretta a mano dall'utente (3 ott 2026). Ricomposta con i pixel visibili dell'originale (sheetAssembly). Posa: articolazioni dal riconoscimento, viso stimato a mano.",
+  "faithful": false,
+  "usable": true,
+  "maxDiffShare": 0.03,
+  "pieces": [
+    {
+      "name": "capelli_dietro",
+      "parent": "testa",
+      "x": 363,
+      "y": 191
+    },
+    {
+      "name": "braccio_sx",
+      "parent": "busto",
+      "x": 758,
+      "y": 380
+    },
+    {
+      "name": "busto",
+      "parent": null,
+      "x": 257,
+      "y": 399
+    },
+    {
+      "name": "copertura_spalla_sx",
+      "parent": "busto",
+      "x": 690,
+      "y": 346
+    },
+    {
+      "name": "braccio_dx",
+      "parent": "busto",
+      "x": 227,
+      "y": 387
+    },
+    {
+      "name": "testa",
+      "parent": "busto",
+      "x": 418,
+      "y": 38
+    },
+    {
+      "name": "baffo_dx",
+      "parent": "testa",
+      "x": 486,
+      "y": 268
+    },
+    {
+      "name": "mano_oggetto_dx",
+      "parent": "braccio_dx",
+      "x": 168,
+      "y": 64
+    },
+    {
+      "name": "sopracciglio_dx",
+      "parent": "testa",
+      "x": 560,
+      "y": 156
+    },
+    {
+      "name": "sopracciglio_sx",
+      "parent": "testa",
+      "x": 670,
+      "y": 171
+    },
+    {
+      "name": "occhio_dx",
+      "parent": "testa",
+      "x": 549,
+      "y": 191
+    },
+    {
+      "name": "occhio_sx",
+      "parent": "testa",
+      "x": 657,
+      "y": 203
+    },
+    {
+      "name": "baffo_sx",
+      "parent": "testa",
+      "x": 639,
+      "y": 276
+    },
+    {
+      "name": "bocca",
+      "parent": "testa",
+      "x": 584,
+      "y": 285
+    }
+  ]
+}

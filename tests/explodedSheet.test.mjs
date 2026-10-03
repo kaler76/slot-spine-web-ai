@@ -34,14 +34,17 @@ for (const name of fs.existsSync(root) ? fs.readdirSync(root) : []) {
   if ((expected.usable ?? expected.faithful ?? true) === false) continue;
 
   test(`${name}: pezzi e ordine di disegno`, () => {
-    assert.deepEqual(r.pieces.map((p) => p.name), expected.pieces.map((p) => p.name));
+    // i pezzi "resto_N" (parti dell'originale assenti dalla tavola) si aggiungono: non contano qui
+    assert.deepEqual(r.pieces.filter((p) => p.restOf === undefined).map((p) => p.name), expected.pieces.map((p) => p.name));
   });
 
   test(`${name}: ogni pezzo torna al suo posto`, () => {
     for (const e of expected.pieces) {
       const p = r.pieces.find((q) => q.name === e.name);
       assert.ok(p, `${e.name} mancante`);
-      const d = Math.hypot(p.x - e.x, p.y - e.y);
+      // posizione dell'allineamento (il ritaglio dall'originale può allargare il riquadro)
+      const at = p.aligned || p;
+      const d = Math.hypot(at.x - e.x, at.y - e.y);
       assert.ok(d <= 3, `${e.name}: spostato di ${d.toFixed(1)}px`);
       assert.equal(p.parent, e.parent, `${e.name}: genitore`);
     }

@@ -16,10 +16,15 @@ import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.
 export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, { face = false } = {}) {
   return `Using the attached character image, create an EXPLODED VIEW sheet of the same character for 2D skeletal animation (Spine).
 - Same character, same art style, same scale and same proportions as the original. Do not redesign anything.
-- Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and EVERY HELD OBJECT as its own piece (a sword or staff is ONE piece). Do NOT split armor, clothing or accessories into small plates or fragments.
+- Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and every other held object as its own piece. EXCEPTION — a hand gripping a LONG object (staff, spear, sword, lightning bolt): that hand and the whole object are ONE single piece, cut from the arm at the wrist. Do NOT split armor, clothing or accessories into small plates or fragments.
 - Do NOT change the pose: every piece keeps EXACTLY the same angle and shape it has in the original (bent or crossed arms stay bent or crossed, a raised arm stays raised). Only move pieces apart, never rotate, straighten or re-pose them.
 - Keep every piece as close as possible to its original position, just moved apart so that no piece touches or overlaps another (clear gap between pieces).
-- Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding an object.
+- Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding a small separate object.
+- Internal shoulder cut surfaces must continue the skin or clothing shading, without a new black outline across the joint. Preserve the character's existing exterior outlines.
+- BACK HAIR: hair that falls BEHIND the head (back of the head, behind the neck or shoulders) is ALWAYS its own separate piece, never fused with the head or the torso. Extend it a little where the head hid it, so it can sway behind the head. The head piece keeps only the hair in front of the face, the crown/wreath and the beard, with a clean outline.
+- Clothing that passes IN FRONT of a shoulder (cape flap, drape with brooch/fibula): ONE separate piece, keeping its original shape and overlap; the shoulder under it must be complete (no exposed hole).
+- HAND + LONG OBJECT piece: keep the ORIGINAL pixels of the grip — hand silhouette, finger positions and the object's angle. Do not separate the fingers from the object, do not cut a hand-shaped hole, do not redraw the part of the object hidden inside the fist (it stays hidden). The arm piece ends at the wrist: redraw only the hidden wrist joint with a small overlap and no new black line across it; the hand must not appear also on the arm. Move this block as a whole, never rotate or rescale it. A free (open) hand stays with its own arm.
+- Other small held objects: keep them complete, including the section hidden inside the grip.
 - Background: flat solid pure ${chroma.name} ${chroma.hex}, no gradient, no shadows, no glow, no particles, no text. The character must not contain this background color.${face ? FACE_PROMPT : ""}`;
 }
 
@@ -29,7 +34,7 @@ export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, {
  * schiaccia l'occhio aperto e scopre la palpebra: senza, si vede un buco — mutazione nei test).
  */
 const FACE_PROMPT = `
-- FACE PARTS as separate small pieces, placed just outside the head with a clear gap, same size and same shape as in the original: LEFT EYE, RIGHT EYE (each eye open, with its upper lash line), LEFT EYEBROW, RIGHT EYEBROW, MOUTH, and each side HAIR LOCK that hangs beside the face (if any). Do not draw the face parts twice.
+- FACE PARTS as separate small pieces, placed just outside the head with a clear gap, EXACTLY the same size and same shape as in the original (do not enlarge them): LEFT EYE, RIGHT EYE (each eye open, with its upper lash line), LEFT EYEBROW, RIGHT EYEBROW, MOUTH, the MUSTACHE split into LEFT and RIGHT halves (if any), and each side HAIR LOCK that hangs beside the face (if any). Do not draw the face parts twice.
 - On the HEAD piece, where the eyes were, paint CLOSED EYELIDS (skin with a curved lash line); where the eyebrows and the mouth were, paint plain skin. The head piece must have no holes.
 - At most 16 pieces in total.`;
 export const EXPLODED_PROMPT = buildExplodedPrompt();
@@ -58,7 +63,7 @@ const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, "image/png"))
  * Import di una tavola esplosa: pezzi separati su sfondo a tinta unita -> pezzi RGBA rimessi
  * al loro posto sull'originale, con nome, ordine di disegno, genitore e pivot.
  */
-export default function ExplodedSheetImport({ original, landmarks, joints, fileName, heldObjects = [] }) {
+export default function ExplodedSheetImport({ original, landmarks, joints, fileName, heldObjects = [], attachmentRules = [] }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -72,6 +77,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   async function createCharacterFromPieces() {
     if (!res) return;
     if (!res.usable && !window.confirm("La tavola NON è fedele all'originale (posa o forme cambiate): creare comunque il character?")) return;
+    const wrong = res.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
+    if (res.usable && !res.piecesOk && !window.confirm(`Pezzi fuori posto o viso incompleto${wrong.length ? ` (${wrong.join(", ")})` : ""}: creare comunque il character?`)) return;
     const base = (fileName || "personaggio").replace(/\.[^.]+$/, "");
     const name = window.prompt("Nome del nuovo character:", base);
     if (!name) return;
@@ -110,10 +117,13 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints });
+      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules });
       setRes({ ...out, sheetName: file.name });
+      const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(
-        out.faithful
+        out.usable && !out.piecesOk
+          ? `⚠️ ${out.pieces.length} pezzi separati (errore globale ${out.fidelityError}), ma il controllo pezzo per pezzo non è superato${wrong.length ? `: fuori posto ${wrong.join(", ")}` : ""}. Vedi gli avvisi.`
+          : out.faithful
           ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto${out.scale !== 1 ? ` (scala ${out.scale.toFixed(2)})` : ""}. Tavola fedele (errore ${out.fidelityError}).`
           : out.usable
             ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto. Tavola leggermente ridisegnata (errore ${out.fidelityError}): ok per il character, non per il dataset.`
@@ -183,6 +193,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       fedele: res.faithful,
       utilizzabile: res.usable,
       erroreFedelta: res.fidelityError,
+      pezziOk: res.piecesOk,
+      manoOggetto: res.handObjects || [],
+      raccordi: res.finishing,
       note: "x,y = angolo in alto a sinistra del pezzo nell'immagine originale; pivot in coordinate dell'immagine originale; order = ordine di disegno (0 = dietro).",
       pieces: res.pieces.map((p) => ({
         name: p.name,
@@ -194,7 +207,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         width: p.width,
         height: p.height,
         pivot: p.pivot,
-        matchError: p.matchError
+        matchError: p.matchError,
+        motionLocked: p.motionLocked || false,
+        controllo: p.check && { livello: p.check.level, sagoma: p.check.fgShare, errore: p.check.localError, suTesta: p.check.onHead, problemi: p.check.issues }
       })),
       davantiDietro: res.front,
       avvisi: res.warnings
@@ -271,6 +286,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   );
 }
 
+const CHECK_COLOR = { ok: "#3c3", warn: "#ffb347", bad: "#ff3366" };
+
 function PieceCard({ p }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -283,7 +300,10 @@ function PieceCard({ p }) {
     c.getContext("2d").drawImage(src, 0, 0, c.width, c.height);
   }, [p]);
   return (
-    <div style={{ textAlign: "center", fontSize: 12 }}>
+    <div
+      style={{ textAlign: "center", fontSize: 12, maxWidth: 200, padding: 4, borderRadius: 6, border: `2px solid ${CHECK_COLOR[p.check?.level] || "transparent"}` }}
+      title={p.check?.issues.join("\n") || "controllo superato"}
+    >
       <canvas
         ref={ref}
         style={{
@@ -296,6 +316,12 @@ function PieceCard({ p }) {
       <b>{p.order}. {p.name}</b>
       <div>genitore: {p.parent || "—"}</div>
       <div>scarto: {p.matchError}</div>
+      {p.check && (
+        <div style={{ color: CHECK_COLOR[p.check.level] }}>
+          {p.check.level === "ok" ? "✓ al suo posto" : p.check.level === "bad" ? "✗ fuori posto" : "⚠ da controllare"}
+          {p.check.onHead != null && ` · su testa ${Math.round(p.check.onHead * 100)}%`}
+        </div>
+      )}
     </div>
   );
 }
