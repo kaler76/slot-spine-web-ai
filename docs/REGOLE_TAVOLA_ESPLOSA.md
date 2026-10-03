@@ -144,6 +144,54 @@ Limiti noti: le zone nascoste sono disegnate da Gemini e vanno guardate in movim
 - Il viso migliore viene dalla testa **originale**; Gemini serve solo per le zone nascoste.
 - Mai fidarsi del solo colore per i tratti bianchi (sopracciglia, baffi, barba): usare il gruppo del viso.
 
+## P. PROFILO "TESTA-BUSTO" 🟡 (da validare in movimento)
+
+Profilo di separazione aggiuntivo (`src/lib/separationProfiles.js`), scelto nell'app accanto a **Standard** (folletto, avvocato, Zeus), che **resta invariato** e predefinito.
+Per personaggi con petto e spalle scoperti sopra l'abito e capelli lunghi (caso: Jessica, 3 ott 2026).
+Riferimenti: **tavola corretta di Jessica** per divisione dei pezzi e attacchi; **immagine originale** per identità, colori, posa, proporzioni e dimensioni. La tavola è un riferimento grafico, **non** un caso validato in movimento.
+
+### P1. Pezzi — 12, ruoli espliciti (mai dedotti solo da colore o dimensione)
+
+| # | Pezzo | Nome | Genitore |
+|---|---|---|---|
+| 1 | Testa-busto: testa, orecchie, orecchini, capelli anteriori corti, collo, clavicole, petto fino al bordo del vestito | `testa` | busto |
+| 2–3 | Due ciocche anteriori lunghe, separate, non duplicate sulla testa | `ciocca_dx`, `ciocca_sx` | testa |
+| 4–5 | Due sopracciglia | `sopracciglio_dx/sx` | testa |
+| 6–7 | Due occhi aperti con ciglia | `occhio_dx/sx` | testa |
+| 8 | Bocca | `bocca` | testa |
+| 9 | Capelli posteriori, un unico pezzo indipendente | `capelli_dietro` | testa |
+| 10 | Braccio alzato completo, spalla → dita, guanto, mano e oggetto nello **stesso** pezzo | `braccio_alzato` | busto |
+| 11 | Braccio abbassato completo, spalla → dita | `braccio_abbassato` | busto |
+| 12 | Vestito completo con gambe e scarpe | `busto` | radice |
+
+I capelli posteriori non possono diventare `busto`; il vestito non può diventare `accessorio`. Ruolo mancante o doppio = **errore**, non un nome inventato.
+
+### P2. Attacchi delle braccia — regola essenziale
+- Ogni braccio ha la **propria spalla arrotondata completa**, ricostruita anche dove la copre il busto.
+- La testa-busto **non** conserva frammenti di braccio o calotte delle spalle: i bordi laterali seguono l'attacco naturale verso le ascelle.
+- Attacchi estesi leggermente sotto il busto (sovrapposizione per il movimento); sfumatura della pelle continua: niente nuove linee nere, anelli scuri, superfici piatte da moncone. Contorni esterni originali conservati.
+- In ricomposizione il busto copre il margine interno degli attacchi; la rotazione delle braccia non deve produrre buchi, doppie spalle o bordi di taglio visibili.
+
+### P3. Viso e capelli
+- Sulla testa: palpebre chiuse con trucco e linea delle ciglia; pelle uniforme dove erano sopracciglia e bocca; **naso conservato**; nessun foro.
+- Tratti separati con dimensioni e forme originali; sopracciglia sopra gli occhi, bocca sotto, destra/sinistra non scambiate.
+- Capelli posteriori separati, completati, disegnati dietro testa e busto; le due ciocche anteriori indipendenti.
+
+### P4. Posa e tavola
+- Pose, angoli, scala e proporzioni dell'originale; pezzi solo spostati, mai ruotati o ridimensionati. Braccio alzato ancora piegato; braccio abbassato con la stessa inclinazione.
+- Sfondo uniforme `#0018FF`, senza fumo, ombre, bagliori, testo, particelle; spazio blu chiaro fra tutti i pezzi.
+
+### P5. Differenze dal profilo Standard
+- **Niente taglio al polso** (A6/`handObject.js` spento): braccio alzato, mano e oggetto insieme.
+- **Niente pixel dell'originale per nascondere errori**: niente `resto_N`, niente riempimento per vicinanza (F2/F4 spenti). Ciò che manca è un errore visibile.
+- Le soglie **non** si abbassano.
+
+### P6. Validazione (separata, in quest'ordine)
+1. fedeltà all'originale; 2. nomi e genitori dei pezzi; 3. assenza di duplicazioni (spalle, ciocche, tratti del viso); 4. raccordi durante il movimento (simulazione).
+I test dei personaggi approvati restano invariati; Jessica entra come **caso di riferimento**, non come caso approvato.
+
+Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del profilo (passo 2) · controlli dei raccordi (passo 3) · Jessica caso di riferimento (passo 4).
+
 ## Casi di prova
 
 `tests/fixtures/exploded/`: folletto (30), folletto_viso (32), avvocato (63), folletto_ridisegnata (84, da scartare), **zeus (79,5 colori · IoU 0,86 · utilizzabile)**. Test: `node --test tests/*.test.mjs` → 101/101, garanzia di precisione superata da avvocato, folletto, folletto_viso, zeus.

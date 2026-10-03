@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
 import { importExplodedSheet, chooseChromaColor } from "../lib/explodedSheet.js";
+import { PROFILES, DEFAULT_PROFILE, buildTestaBustoPrompt } from "../lib/separationProfiles.js";
 import { composePieces } from "../lib/partExtraction.js";
 import { preserveSharedGrip } from "../lib/sharedGrip.js";
 import { piecesToCharacterParts } from "../lib/characterFromPieces.js";
@@ -72,6 +73,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const navigate = useNavigate();
   // sfondo della tavola scelto sul personaggio (colore assente dal disegno)
   const chroma = useMemo(() => (original?.rgba ? chooseChromaColor(original) : null), [original]);
+  // profilo di separazione (separationProfiles.js): standard = regole approvate; testa-busto = Jessica
+  const [profile, setProfile] = useState(DEFAULT_PROFILE);
 
   /** Crea un character (Supabase) con un osso per pezzo e apre la sua pagina per animarlo. */
   async function createCharacterFromPieces() {
@@ -236,12 +239,23 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         Carica la tavola con il personaggio già diviso in pezzi staccati (testa, busto, braccia, oggetti) su sfondo a
         tinta unita. L'app scontorna ogni pezzo, lo rimette al suo posto sull'immagine qui sopra, gli dà il nome dalla
         posa e decide chi sta davanti. Per generarla: allega l'immagine originale a Gemini/ChatGPT con questo prompt{" "}
-        <button type="button" className="btn secondary" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined))}>
+        <select value={profile} onChange={(e) => setProfile(e.target.value)} title="Profilo di separazione dei pezzi">
+          {Object.values(PROFILES).map((p) => (
+            <option key={p.id} value={p.id}>{p.label}</option>
+          ))}
+        </select>{" "}
+        <button
+          type="button"
+          className="btn secondary"
+          onClick={() => navigator.clipboard?.writeText(profile === "testa-busto" ? buildTestaBustoPrompt(chroma || undefined) : buildExplodedPrompt(chroma || undefined))}
+        >
           📋 Copia prompt
         </button>{" "}
-        <button type="button" className="btn secondary" title="Occhi, sopracciglia, bocca e ciocche come pezzi separati (battito degli occhi, capelli al vento)" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined, { face: true }))}>
-          📋 Copia prompt con viso
-        </button>
+        {profile === "standard" && (
+          <button type="button" className="btn secondary" title="Occhi, sopracciglia, bocca e ciocche come pezzi separati (battito degli occhi, capelli al vento)" onClick={() => navigator.clipboard?.writeText(buildExplodedPrompt(chroma || undefined, { face: true }))}>
+            📋 Copia prompt con viso
+          </button>
+        )}
         {chroma && (
           <span style={{ marginLeft: 8 }}>
             sfondo consigliato per questo personaggio:{" "}
