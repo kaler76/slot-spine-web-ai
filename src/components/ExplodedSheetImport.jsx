@@ -16,7 +16,7 @@ import { createCharacter, saveCharacterPart } from "../lib/charactersRepository.
 export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, { face = false } = {}) {
   return `Using the attached character image, create an EXPLODED VIEW sheet of the same character for 2D skeletal animation (Spine).
 - Same character, same art style, same scale and same proportions as the original. Do not redesign anything.
-- Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/hair/beard), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and every other held object as its own piece. EXCEPTION — a hand gripping a LONG object (staff, spear, sword, lightning bolt): that hand and the whole object are ONE single piece, cut from the arm at the wrist. Do NOT split armor, clothing or accessories into small plates or fragments.
+- Split it into AT MOST 6-8 large separate pieces: HEAD (including hat/helmet/crown, front hair and beard), BACK HAIR (if any), TORSO WITH LEGS, LEFT ARM WITH HAND, RIGHT ARM WITH HAND, and every other held object as its own piece. EXCEPTION — a hand gripping a LONG object (staff, spear, sword, lightning bolt): that hand and the whole object are ONE single piece, cut from the arm at the wrist. Do NOT split armor, clothing or accessories into small plates or fragments.
 - Do NOT change the pose: every piece keeps EXACTLY the same angle and shape it has in the original (bent or crossed arms stay bent or crossed, a raised arm stays raised). Only move pieces apart, never rotate, straighten or re-pose them.
 - Keep every piece as close as possible to its original position, just moved apart so that no piece touches or overlaps another (clear gap between pieces).
 - Redraw the parts that were hidden: the neck/collar under the head, the shoulders where the arms attach (extend them a little under the joint), and the hand where it was holding a small separate object.
@@ -34,7 +34,7 @@ export function buildExplodedPrompt(chroma = { name: "blue", hex: "#0018FF" }, {
  * schiaccia l'occhio aperto e scopre la palpebra: senza, si vede un buco — mutazione nei test).
  */
 const FACE_PROMPT = `
-- FACE PARTS as separate small pieces, placed just outside the head with a clear gap, EXACTLY the same size and same shape as in the original (do not enlarge them): LEFT EYE, RIGHT EYE (each eye open, with its upper lash line), LEFT EYEBROW, RIGHT EYEBROW, MOUTH, the MUSTACHE split into LEFT and RIGHT halves (if any), and each side HAIR LOCK that hangs beside the face (if any). Do not draw the face parts twice.
+- FACE PARTS as separate small pieces, placed just outside the head with a clear gap and arranged like on the face (eyebrows above the eyes, mouth below, mustache halves at its sides, left stays left and right stays right), EXACTLY the same size and same shape as in the original (do not enlarge them): LEFT EYE, RIGHT EYE (each eye open, with its upper lash line), LEFT EYEBROW, RIGHT EYEBROW, MOUTH, the MUSTACHE split into LEFT and RIGHT halves (if any), and each side HAIR LOCK that hangs beside the face (if any). Do not draw the face parts twice.
 - On the HEAD piece, where the eyes were, paint CLOSED EYELIDS (skin with a curved lash line); where the eyebrows and the mouth were, paint plain skin. The head piece must have no holes.
 - At most 16 pieces in total.`;
 export const EXPLODED_PROMPT = buildExplodedPrompt();
