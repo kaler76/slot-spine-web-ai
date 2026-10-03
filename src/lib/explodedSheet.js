@@ -670,24 +670,6 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
   labelPieces(pieces, landmarks);
   // mano + oggetto lungo in un solo pezzo (handObject.js): nome mano_oggetto_<lato>, pivot al polso
   const handObjects = applyHandObjects(pieces, landmarks, joints);
-  // TESTA CON LE SPALLE (caso reale: Jessica, testa con collo, spalle e décolleté, busto = solo
-  // abito): quando la testa ruota si porterebbe dietro il petto. La tavola va rigenerata.
-  {
-    const head = pieces.find((p) => p.name === "testa");
-    const sh = [LM.shoulderSx, LM.shoulderDx].map((i) => landmarks?.[i]).filter(Boolean);
-    if (head && sh.length === 2) {
-      const swH = Math.hypot(sh[0].x - sh[1].x, sh[0].y - sh[1].y), shY = (sh[0].y + sh[1].y) / 2;
-      let below = 0, n = 0;
-      for (let y = 0; y < head.height; y += 2)
-        for (let x = 0; x < head.width; x += 2) {
-          if (head.rgba[(y * head.width + x) * 4 + 3] < 128) continue;
-          n++;
-          if (head.y + y > shY + 0.15 * swH && Math.abs(head.x + x - (sh[0].x + sh[1].x) / 2) < 0.5 * swH) below++;
-        }
-      if (n && below / n > 0.12)
-        warnings.push(`La testa comprende spalle o petto (${Math.round((below / n) * 100)}% dei pixel sotto le spalle): quando la testa si muove li trascina. Rigenera la tavola: la testa deve finire alla base del collo (il prompt lo chiede).`);
-    }
-  }
   // Un oggetto è TENUTO in mano: se è finito lontano da entrambe le mani (tavola ridisegnata,
   // confronto ambiguo), lo si ricerca solo attorno alle mani.
   const hands = [joints?.mano_sx || landmarks?.[LM.wristSx], joints?.mano_dx || landmarks?.[LM.wristDx]].filter(Boolean);
