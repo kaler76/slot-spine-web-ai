@@ -75,6 +75,7 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
   const [view, setView] = useState("compare");
   // parti della mappa (posizione e nome dei pezzi della tavola): restano finché si cambia personaggio
   const [partComps, setPartComps] = useState(null);
+  useEffect(() => setPartComps(null), [original?.img]); // nuovo personaggio: nuova mappa
   const canvasRef = useRef(null);
   const navigate = useNavigate();
   // sfondo della tavola scelto sul personaggio (colore assente dal disegno)
@@ -114,9 +115,10 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
    * ritaglia i pezzi dall'originale seguendo la mappa. Niente tavola ridisegnata da rimettere al
    * suo posto, niente posa necessaria per i nomi.
    */
-  async function handlePartMap(fileFromDisk) {
+  /** silent: usata dall'import della tavola, restituisce solo le parti della mappa. */
+  async function handlePartMap(fileFromDisk, { silent = false } = {}) {
     setBusy(true);
-    setRes(null);
+    if (!silent) setRes(null);
     try {
       const imageToRgba = (img) => {
         const c = document.createElement("canvas");
@@ -177,8 +179,10 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       }
       setStatus("⏳ Ritaglio i pezzi dall'originale seguendo la mappa...");
       await new Promise((r) => setTimeout(r, 30));
+      const comps = mapComponents({ map, original, fg, faceMap, faceCrop: crop }).comps;
+      setPartComps(comps);
+      if (silent) return comps;
       const out = piecesFromPartMap({ map, original, fg, faceMap, faceCrop: crop });
-      setPartComps(mapComponents({ map, original, fg, faceMap, faceCrop: crop }).comps);
       if (crop && !faceMap) out.warnings.push("Mappa del viso non disponibile: occhi e bocca presi dalla mappa intera (meno precisi).");
       const pc = checkPieces(out.pieces, original);
       for (const c of pc.checks) out.pieces.find((p) => p.name === c.name).check = c;
@@ -192,10 +196,12 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
           ? `✅ ${out.pieces.length} pezzi dalla mappa delle parti (sagoma ${Math.round(out.transform.iou * 100)}%${faceMap ? ", viso dalla mappa ingrandita" : ""}).`
           : `⚠️ La mappa non combacia con la sagoma (IoU ${out.transform.iou.toFixed(2)}): rigenerala.`
       );
+      return comps;
     } catch (err) {
       setStatus(`❌ Mappa delle parti: ${err.message || err}`);
+      return null;
     } finally {
-      setBusy(false);
+      if (!silent) setBusy(false);
     }
   }
 
@@ -204,8 +210,13 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     if (!file) return;
     setBusy(true);
     setRes(null);
-    setStatus("⏳ Separo i pezzi e li rimetto al loro posto...");
     try {
+      // AUTOMATICO: senza mappa delle parti la si genera prima (posizione e nome dei pezzi);
+      // se Gemini non risponde si prosegue con il metodo precedente
+      let comps = partComps;
+      if (!comps && original?.img) comps = await handlePartMap(null, { silent: true });
+      setBusy(true);
+      setStatus("⏳ Separo i pezzi e li rimetto al loro posto...");
       const img = await loadImage(file);
       const c = document.createElement("canvas");
       c.width = img.naturalWidth;
@@ -214,8 +225,9 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
       await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, partComps });
-      if (partComps) out.warnings.unshift(`Posizione e nome dei pezzi dalla mappa delle parti (${partComps.length} parti).`);
+      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, partComps: comps });
+      if (comps) out.warnings.unshift(`Posizione e nome dei pezzi dalla mappa delle parti (${comps.length} parti).`);
+      else out.warnings.unshift("Mappa delle parti non disponibile: pezzi posizionati con il metodo precedente (meno affidabile).");
       setRes({ ...out, sheetName: file.name });
       const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(
