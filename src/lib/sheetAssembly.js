@@ -164,7 +164,9 @@ export function foregroundMask({ width: W, height: H, rgba }, { tol = 28 } = {})
  * @returns {{ pieces, holeShare, filledShare, iou }} holeShare = quota del personaggio rimasta scoperta;
  *   iou = sovrapposizione fra sagoma dei pezzi (prima) e sagoma dell'originale
  */
-export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
+export function transplantOriginal(pieces, original, { maxFill = 12, neckY = null } = {}) {
+  // maxFill piccolo: solo le differenze di bordo. Zone grandi scoperte = pezzi resto_N, con il
+  // genitore scelto per anatomia (caso reale: spalle nude assegnate alla testa = "incollate").
   const { width: W, height: H, rgba } = original;
   const fg = foregroundMask(original);
   const owner = new Int16Array(W * H).fill(-1);
@@ -252,7 +254,7 @@ export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
   // NESSUN PIXEL PERSO: ciò che resta scoperto (scintille, monete, particelle che il modello non
   // ha disegnato nella tavola) diventa uno o più pezzi "resto_N" con i pixel dell'originale,
   // agganciati al pezzo più vicino. Gruppi = componenti vicine fra loro (entro restGap px).
-  const rest = restPieces(fg, owner, original, sorted, out, { minArea: Math.max(30, Math.round(0.001 * fgN)) });
+  const rest = restPieces(fg, owner, original, sorted, out, { minArea: Math.max(30, Math.round(0.001 * fgN)), neckY });
   // filledShare = parti del personaggio che nessun pezzo della tavola copriva (es. mantello dietro
   // il braccio dimenticato dal modello): assegnate al pezzo più vicino
   const restPx = rest.reduce((a, p) => a + p.area, 0);
@@ -261,12 +263,13 @@ export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
     rest,
     holeShare: fgN ? (holes - restPx) / fgN : 0,
     filledShare: fgN ? filled / fgN : 0,
+    restShare: fgN ? restPx / fgN : 0,
     iou: union ? inter / union : 0
   };
 }
 
 /** Pezzi "resto_N" dai pixel del personaggio rimasti senza pezzo (vedi transplantOriginal). */
-function restPieces(fg, owner, original, sorted, out, { restGap = 60, minArea = 30 } = {}) {
+function restPieces(fg, owner, original, sorted, out, { restGap = 60, minArea = 30, neckY = null } = {}) {
   // gruppi sotto minArea (0,1% del personaggio) si lasciano scoperti: briciole
   const { width: W, height: H, rgba } = original;
   const lab = new Int32Array(W * H);
@@ -308,16 +311,26 @@ function restPieces(fg, owner, original, sorted, out, { restGap = 60, minArea = 
       const x = i % W, y = (i - x) / W, li = ((y - y0) * w + (x - x0)) * 4;
       data[li] = rgba[i * 4]; data[li + 1] = rgba[i * 4 + 1]; data[li + 2] = rgba[i * 4 + 2]; data[li + 3] = rgba[i * 4 + 3];
     }
-    // genitore: il pezzo con più pixel posseduti nel riquadro allargato del gruppo
-    const cnt = new Map();
-    const m = restGap;
-    for (let y = Math.max(0, y0 - m); y <= Math.min(H - 1, y1 + m); y += 2)
-      for (let x = Math.max(0, x0 - m); x <= Math.min(W - 1, x1 + m); x += 2) {
-        const k = owner[y * W + x];
-        if (k >= 0) cnt.set(k, (cnt.get(k) || 0) + 1);
+    // genitore: il pezzo con cui il gruppo ha più BORDO in comune; sotto il collo mai la testa
+    // né i pezzi del viso (le spalle nude appartengono al busto o alle braccia)
+    const contact = new Map();
+    for (const i of px) {
+      const x = i % W, y = (i - x) / W;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const k = owner[ny * W + nx];
+        if (k >= 0) contact.set(k, (contact.get(k) || 0) + 1);
       }
-    const best = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0];
-    const host = best ? out[best[0]] : null;
+    }
+    const cy = px.reduce((a, i) => a + Math.floor(i / W), 0) / px.length;
+    const headLike = (p) => /^(testa|occhio|sopracciglio|bocca|baffo|ciocca|capelli_dietro|dettaglio_viso)/.test(p?.name || "");
+    let cand = [...contact.entries()].map(([k, n]) => [out[k], n]);
+    if (neckY != null && cy > neckY) {
+      const body = cand.filter(([p]) => !headLike(p));
+      cand = body.length ? body : out.filter((p) => p.name === "busto").map((p) => [p, 1]);
+    }
+    const host = cand.sort((a, b) => b[1] - a[1])[0]?.[0] || out.find((p) => p.name === "busto") || null;
     res.push({ name: `resto_${res.length + 1}`, x: x0, y: y0, width: w, height: h, rgba: data, area: px.length, matchError: 0, attachTo: host?.name || null, restOf: host?.name || null, order: host ? host.order + 0.5 : sorted.length, motionLocked: true });
   }
   return res;
