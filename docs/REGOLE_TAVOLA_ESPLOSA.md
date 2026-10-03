@@ -190,7 +190,24 @@ I capelli posteriori non possono diventare `busto`; il vestito non può diventar
 1. fedeltà all'originale; 2. nomi e genitori dei pezzi; 3. assenza di duplicazioni (spalle, ciocche, tratti del viso); 4. raccordi durante il movimento (simulazione).
 I test dei personaggi approvati restano invariati; Jessica entra come **caso di riferimento**, non come caso approvato.
 
-Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del profilo (passo 2) · controlli dei raccordi (passo 3) · Jessica caso di riferimento (passo 4).
+### P7. Correzioni Jessica (3 ott 2026)
+**P7.1 Continuità petto / vestito / braccia.** Pezzi separati per l'animazione, ma **continui** quando ricomposti: niente doppie fasce di pelle, scalini di colore, bordi netti, spalle duplicate.
+- La testa-busto conserva la pelle visibile fino alla scollatura; il vestito conserva il bustier.
+- L'eventuale estensione nascosta del petto passa **dietro** il bordo del vestito (ordine: testa-busto dietro al vestito).
+- Nei raccordi **sovrapposizioni**, con colori e sfumature coerenti con l'originale. **Vietato** sfumare i contorni esterni sulla trasparenza per nascondere errori.
+- Verifica senza contorni di selezione **e durante il movimento**.
+
+**P7.2 Naso integro.** Il naso resta sulla testa, in posizione e forma originali (punta, narici, ombre, luce). La rimozione di occhi, sopracciglia e bocca agisce **solo** nelle rispettive maschere: non cancella né appiattisce il naso, non leviga tutto il centro del volto.
+
+**P7.3 Ciuffo davanti all'occhio.** Il ciuffo frontale che passa sopra l'occhio (a sinistra dell'immagine) è un pezzo **autonomo** (`ciuffo`), distinto da capelli posteriori e ciocche laterali.
+- Sagoma, lunghezza e posizione dell'originale; la sua copia va tolta dalla testa e sotto si ricostruiscono fronte e zona dell'occhio.
+- Figlio della testa, pivot alla **radice** dei capelli, disegnato **davanti** a viso e occhio. L'occhio non si sposta per fargli spazio.
+- Animazione leggera dalla radice, senza distacchi.
+- Pezzi: **13** se il ciuffo non coincide con una ciocca già separata; se coincide, si riusa quella ciocca (nessun duplicato).
+
+Le correzioni preservano posa, proporzioni e pixel originali visibili. La sola ricomposizione a riposo **non basta**: si verificano anche sovrapposizioni e movimento.
+
+Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del profilo: pezzi della tavola così come sono, 12 ruoli ✅ (passo 2) · P7 nel prompt ✅ · ciuffo nell'importatore · controlli di naso, continuità e raccordi in movimento (passo 3) · Jessica caso di riferimento (passo 4).
 
 ## Casi di prova
 

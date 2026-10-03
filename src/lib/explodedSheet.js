@@ -759,7 +759,7 @@ function applyRoles(pieces, roles, landmarks, warnings) {
       warnings.push(`${old} -> ${p.name}: nel profilo Testa-busto non ci sono oggetti né baffi separati (controlla).`);
     }
   }
-  const missing = roles.map((r) => r.name).filter((n) => !/^braccio_/.test(n) && !pieces.some((p) => p.name === n));
+  const missing = roles.filter((r) => !r.optional).map((r) => r.name).filter((n) => !/^braccio_/.test(n) && !pieces.some((p) => p.name === n));
   const arms = pieces.filter((p) => /^braccio_(dx|sx)$/.test(p.name)).length;
   if (missing.length || arms < 2)
     warnings.push(`Profilo Testa-busto: ruoli mancanti ${[...missing, ...(arms < 2 ? [`braccia (${arms}/2)`] : [])].join(", ")}. Controlla la tavola (12 pezzi).`);
