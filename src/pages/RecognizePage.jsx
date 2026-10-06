@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FilesetResolver, PoseLandmarker, ImageSegmenter, InteractiveSegmenterLegacy } from "@mediapipe/tasks-vision";
 import { recognizeParts, refineObjectWithMask, foregroundFromUniformBorder, PARTS, SEG_LABELS } from "../lib/partRecognition.js";
-import { resolvePose, acceptDetectedPose } from "../lib/poseRecovery.js";
+import { resolvePose, acceptDetectedPose, validatePose } from "../lib/poseRecovery.js";
 import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 import ManualPosePicker from "../components/ManualPosePicker.jsx";
@@ -160,7 +160,19 @@ export default function RecognizePage() {
       let recovered;
       try {
         recovered = await resolvePose({
-          detect: () => detectPoseVariants(pose, c), width: W, height: H,
+          // prima la posa SEVERA sull'immagine com'è (metodo approvato con Zeus: una posa diversa
+          // cambia pezzi e confini, es. il drappo finito al braccio); solo se fallisce la posa
+          // tollerante su più varianti dell'immagine (illustrazioni come Jessica)
+          detect: () => {
+            try {
+              const r = pose.detect(c);
+              validatePose(r?.landmarks?.[0]);
+              return r;
+            } catch {
+              return detectPoseVariants(pose, c);
+            }
+          },
+          width: W, height: H,
           recover: async () => {
             setStatus("⏳ Preparazione del personaggio...");
             return recoverPose(c);

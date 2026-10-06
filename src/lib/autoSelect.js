@@ -56,8 +56,9 @@ const describe = (v) => `pixel visibili ${v.fill ? "dall'originale" : "dalla tav
  * @returns risultato di importExplodedSheet (della variante scelta) + selection:
  *   { version, chosen, reasons: string[], table: [{ label, score, ...misure }] }
  */
-export function autoImportSheet(args, { fills = AUTO_FILLS, reaches = AUTO_REACHES } = {}) {
+export function autoImportSheet(args, { fills = null, reaches = AUTO_REACHES } = {}) {
   const prof = PROFILES[args.profile] || PROFILES[DEFAULT_PROFILE];
+  fills = fills || prof.autoFills || AUTO_FILLS;
   const variants = [];
   let lastError = null;
   for (const fill of fills) {

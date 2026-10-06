@@ -212,3 +212,8 @@ Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del 
 ## Casi di prova
 
 `tests/fixtures/exploded/`: folletto (30), folletto_viso (32), avvocato (63), folletto_ridisegnata (84, da scartare), **zeus (79,5 colori · IoU 0,86 · utilizzabile)**. Test: `node --test tests/*.test.mjs` → 101/101, garanzia di precisione superata da avvocato, folletto, folletto_viso, zeus.
+
+## Pezzi = tavola (6 ott 2026, decisione utente su Zeus)
+- Profilo Standard: la scelta automatica usa SAGOMA E PIXEL DELLA TAVOLA (`separationProfiles.standard.autoFills = [false]`), scalati e messi nella posizione dell'originale. Il taglio lo decide la tavola.
+- Motivo: con i pixel dell'originale il taglio si "sporcava" (spalle delle braccia tagliate, bordo del drappo e collo finiti nel busto, linea nera del drappo che ruotava col braccio).
+- La variante con i pixel dell'originale (Testa-busto/Jessica) resta, con due correzioni: `peelForeign` (striscia del pezzo fermo finita nel braccio → torna al pezzo fermo) e `cleanHidden` solo sui pezzi che si muovono.

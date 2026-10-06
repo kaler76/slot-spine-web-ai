@@ -707,11 +707,31 @@ export function shoulderCoverSide(p, pieces, landmarks) {
     const { n, c } = overlapStats(p, arm, 3);
     if (n < 0.1 * total) continue;
     const d = Math.hypot(c.x - sh.x, c.y - sh.y);
-    if (!best || d < best.d) best = { side, d };
+    // vicino alla spalla: entro la diagonale del pezzo, OPPURE (posa poco precisa) più vicino alla
+    // spalla che al polso del braccio (il lembo sta sull'attacco, non sulla mano)
+    const wr = landmarks[side === "sx" ? LM.wristSx : LM.wristDx];
+    const nearShoulder = d <= Math.hypot(p.width, p.height) || (wr && d < 0.6 * Math.hypot(c.x - wr.x, c.y - wr.y));
+    if (nearShoulder && (!best || d < best.d)) best = { side, d };
   }
-  // vicino alla spalla: entro la diagonale del pezzo
-  return best && best.d <= Math.hypot(p.width, p.height) ? best.side : null;
+  return best ? best.side : null;
 }
+/** Lato della spalla più vicina se p (non capelli) le sta addosso e tocca busto o braccio. */
+export function nearShoulderSide(p, pieces, landmarks) {
+  const head = pieces.find((q) => q.name === "testa");
+  if (!landmarks || (head && hairShare(p, head) >= 0.7)) return null;
+  const c = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
+  const diag = Math.hypot(p.width, p.height);
+  let best = null;
+  for (const side of ["sx", "dx"]) {
+    const sh = landmarks[side === "sx" ? LM.shoulderSx : LM.shoulderDx];
+    if (!sh) continue;
+    const d = Math.hypot(c.x - sh.x, c.y - sh.y);
+    const touch = pieces.some((q) => (q.name === "busto" || q.name === `braccio_${side}`) && overlapStats(p, q, 3).n > 0);
+    if (touch && d <= diag && (!best || d < best.d)) best = { side, d };
+  }
+  return best?.side || null;
+}
+
 /**
  * CIOCCA LUNGA: pezzo non in mano che parte sopra le spalle, tocca il riquadro della testa e scende
  * ai lati del viso (Jessica). Lato = del personaggio (sx = a destra per chi guarda).
@@ -729,7 +749,31 @@ export function longLockSide(p, pieces, landmarks) {
   const cx = p.x + p.width / 2;
   // dalla parte del viso: oltre un quarto della larghezza della testa dal naso
   if (Math.abs(cx - nose.x) < 0.25 * head.width) return null;
+  // COLORE DEI CAPELLI (Zeus, 6 ott): il lembo viola con la fibula d'oro sulla spalla toccava il
+  // riquadro della testa ed era preso per ciocca (vento). Una ciocca ha i colori dei capelli: la
+  // fascia alta della testa (Zeus: capelli 0.99, lembo 0.43 per l'oro dell'alloro). Meno del 70% dei pixel con quei colori = non è una ciocca.
+  if (hairShare(p, head) < 0.7) return null;
   return cx > nose.x ? "sx" : "dx";
+}
+
+/** Quota dei pixel di p con un colore presente nella fascia alta (25%) della testa. */
+export function hairShare(p, head) {
+  const pal = new Set();
+  const q = (r, g, b) => ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+  for (let y = 0; y < Math.round(0.25 * head.height); y += 2)
+    for (let x = 0; x < head.width; x += 2) {
+      const i = (y * head.width + x) * 4;
+      if (head.rgba[i + 3] >= 128) pal.add(q(head.rgba[i], head.rgba[i + 1], head.rgba[i + 2]));
+    }
+  let n = 0, hit = 0;
+  for (let y = 0; y < p.height; y += 2)
+    for (let x = 0; x < p.width; x += 2) {
+      const i = (y * p.width + x) * 4;
+      if (p.rgba[i + 3] < 128) continue;
+      n++;
+      if (pal.has(q(p.rgba[i], p.rgba[i + 1], p.rgba[i + 2]))) hit++;
+    }
+  return n ? hit / n : 0;
 }
 
 /**
@@ -970,8 +1014,11 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
         Object.assign(p, { x: best.x, y: best.y, matchError: +best.err.toFixed(1) });
       } else {
         // non è tenuto in mano: copertura della spalla, oppure accessorio del pezzo su cui poggia
-        const side = shoulderCoverSide(p, pieces, landmarks);
+        let side = shoulderCoverSide(p, pieces, landmarks);
         const lock = side ? null : longLockSide(p, pieces, landmarks);
+        // posa poco precisa (Zeus con la posa dal vivo + pezzi della tavola): lembo vicino a una
+        // spalla, che tocca busto o braccio e non ha i colori dei capelli = copertura della spalla
+        if (!side && !lock) side = nearShoulderSide(p, pieces, landmarks);
         if (lock) {
           // CIOCCA LUNGA (Jessica): capelli che scendono ai lati del viso, attaccati alla testa
           p.name = pieces.some((q) => q.name === `ciocca_${lock}`) ? `ciocca_${lock}_2` : `ciocca_${lock}`;

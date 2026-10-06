@@ -167,7 +167,7 @@ export function foregroundMask({ width: W, height: H, rgba }, { tol = 28 } = {})
  * @returns {{ pieces, holeShare, filledShare, iou }} holeShare = quota del personaggio rimasta scoperta;
  *   iou = sovrapposizione fra sagoma dei pezzi (prima) e sagoma dell'originale
  */
-export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColor = false, colorTol = 140, colorMargin = 60, cleanHidden = true } = {}) {
+export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColor = false, colorTol = 140, colorMargin = 60, cleanHidden = true, peelForeign = true, peelColor = 60, peelMax = 30, peelShare = 0.08, peelLine = 4 } = {}) {
   const { width: W, height: H, rgba } = original;
   const fg = foregroundMask(original);
   const owner = new Int16Array(W * H).fill(-1);
@@ -227,6 +227,105 @@ export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColo
       q.push(j);
     }
   }
+  // BORDO D'ALTRO SUL PEZZO CHE SI MUOVE (Zeus, 6 ott): la tavola ridisegnata mette nel braccio il
+  // bordo dorato + la linea nera del drappo che scende sulla spalla; in movimento il bordo ruota col
+  // braccio (linea nera sul bicipite). Regola: una zona di colore uniforme dell'originale (contorni
+  // neri esclusi) divisa fra un pezzo fermo e uno che si muove, che nel pezzo che si muove è una
+  // striscia sottile (poca parte del pezzo, entro peelMax px dal confine) e nel pezzo fermo è
+  // almeno altrettanto grande, appartiene al pezzo fermo. Poi la linea nera che la contorna dal
+  // lato del pezzo che si muove (contorno del pezzo davanti). Sotto, nel pezzo che si muove, la
+  // zona diventa nascosta (tavola + pulizia cleanHidden).
+  let peeled = 0;
+  if (peelForeign) {
+    const moving = new Set(sorted.map((p, k) => (/^(braccio|avambraccio|mano)/.test(p.name || "") ? k : -1)).filter((k) => k >= 0));
+    const still = (k) => k >= 0 && !moving.has(k) && !/^(occhio|sopracciglio|bocca|baffo|ciocca)/.test(sorted[k].name || "");
+    const luma = (i) => 0.3 * rgba[i * 4] + 0.59 * rgba[i * 4 + 1] + 0.11 * rgba[i * 4 + 2];
+    const dark = (i) => luma(i) < 70;
+    const near = (i, j) => Math.abs(rgba[i * 4] - rgba[j * 4]) + Math.abs(rgba[i * 4 + 1] - rgba[j * 4 + 1]) + Math.abs(rgba[i * 4 + 2] - rgba[j * 4 + 2]) < peelColor;
+    const ok = (i) => fg[i] && owner[i] >= 0 && (moving.has(owner[i]) || still(owner[i])) && !dark(i);
+    // zone di colore (union-find a 4 vicini)
+    const par = new Int32Array(W * H).fill(-1);
+    const find = (i) => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+    for (let i = 0; i < W * H; i++) if (ok(i)) par[i] = i;
+    for (let i = 0; i < W * H; i++) {
+      if (par[i] < 0) continue;
+      const x = i % W;
+      for (const j of [x + 1 < W ? i + 1 : -1, i + W < W * H ? i + W : -1]) {
+        if (j < 0 || par[j] < 0 || !near(i, j)) continue;
+        const a = find(i), b = find(j);
+        if (a !== b) par[a] = b;
+      }
+    }
+    // distanza dal confine fermo/mobile, dentro i pixel del pezzo che si muove
+    const depth = new Int16Array(W * H).fill(-1);
+    const dq = [];
+    for (let i = 0; i < W * H; i++) {
+      if (!moving.has(owner[i])) continue;
+      const x = i % W, y = (i - x) / W;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < W && ny < H && still(owner[ny * W + nx])) { depth[i] = 0; dq.push(i); break; }
+      }
+    }
+    for (let qi = 0; qi < dq.length; qi++) {
+      const i = dq[qi];
+      if (depth[i] >= peelMax) continue;
+      const x = i % W, y = (i - x) / W;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (depth[j] >= 0 || owner[j] !== owner[i]) continue;
+        depth[j] = depth[i] + 1;
+        dq.push(j);
+      }
+    }
+    // conteggi per zona: pixel nel pezzo che si muove (tutti / entro peelMax) e nel pezzo fermo
+    const area = new Map(sorted.map((p, k) => [k, 0]));
+    for (let i = 0; i < W * H; i++) if (owner[i] >= 0) area.set(owner[i], area.get(owner[i]) + 1);
+    const st = new Map();
+    for (let i = 0; i < W * H; i++) {
+      if (par[i] < 0) continue;
+      const r = find(i);
+      let e = st.get(r);
+      if (!e) st.set(r, (e = { m: 0, mFar: 0, s: new Map(), k: -1 }));
+      const o = owner[i];
+      if (moving.has(o)) { e.m++; e.k = o; if (depth[i] < 0) e.mFar++; }
+      else e.s.set(o, (e.s.get(o) || 0) + 1);
+    }
+    const target = new Map();
+    for (const [r, e] of st) {
+      if (!e.m || e.mFar || !e.s.size) continue;
+      let to = -1, sMax = 0;
+      for (const [o, n] of e.s) if (n > sMax) { sMax = n; to = o; }
+      if (sMax >= e.m && e.m <= peelShare * area.get(e.k)) target.set(r, to);
+    }
+    const moved = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) {
+      if (par[i] < 0 || !moving.has(owner[i])) continue;
+      const to = target.get(find(i));
+      if (to === undefined) continue;
+      owner[i] = to;
+      moved[i] = 1;
+      peeled++;
+    }
+    // la linea nera che contorna la zona spostata, dal lato del pezzo che si muove
+    if (peeled)
+      for (let pass = 0; pass < peelLine; pass++) {
+        const add = [];
+        for (let i = 0; i < W * H; i++) {
+          if (!fg[i] || !moving.has(owner[i]) || !dark(i)) continue;
+          const x = i % W, y = (i - x) / W;
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const j = ny * W + nx;
+            if (moved[j]) { add.push([i, owner[j]]); break; }
+          }
+        }
+        for (const [i, to] of add) { owner[i] = to; moved[i] = 1; peeled++; }
+      }
+  }
   let holes = 0, filled = 0;
   for (let i = 0; i < W * H; i++) {
     if (fg[i] && owner[i] < 0) holes++;
@@ -271,7 +370,7 @@ export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColo
     // (entro 24 px); se no si scarta e si ricostruisce dai vicini. Esclusi i pixel sotto i tratti
     // del viso (palpebre chiuse disegnate apposta).
     let cleaned = 0;
-    if (cleanHidden && kept) {
+    if (cleanHidden && kept && /^(braccio|avambraccio|mano)/.test(p.name || "")) {
       const isOwn = (gx, gy) => gx >= 0 && gy >= 0 && gx < W && gy < H && owner[gy * W + gx] === k;
       const known = new Uint8Array(w * h), holes = [];
       for (let y = 0; y < h; y++)
@@ -317,6 +416,7 @@ export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColo
     rest,
     holeShare: fgN ? (holes - restPx) / fgN : 0,
     filledShare: fgN ? filled / fgN : 0,
+    peeled,
     iou: union ? inter / union : 0
   };
 }

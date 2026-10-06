@@ -33,7 +33,11 @@ export const PROFILES = {
     label: "Standard (folletto, avvocato, Zeus)",
     roles: null, // nomi dedotti dalle regole approvate
     wristCut: true, // mano + oggetto lungo tagliati al polso (handObject.js)
-    fillFromOriginal: true // resto_N e riempimento per vicinanza ammessi
+    fillFromOriginal: true, // resto_N e riempimento per vicinanza ammessi
+    // scelta automatica: PEZZI = TAVOLA (decisione utente 6 ott, Zeus): sagoma e pixel dalla tavola,
+    // scalati e messi nella posizione dell'originale. I pixel dell'originale "sporcavano" il taglio
+    // (spalle tagliate, bordo del drappo e collo nel busto)
+    autoFills: [false]
   },
   "testa-busto": {
     id: "testa-busto",
