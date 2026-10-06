@@ -12,7 +12,11 @@ const DEFAULTS = {
   testa: { role: "head", animationType: "sway", speed: 0.6 },
   braccio_sx: { role: "arm", animationType: "sway", speed: 0.8 },
   braccio_dx: { role: "arm", animationType: "sway", speed: 0.8 },
-  oggetto: { role: "accessory", animationType: "sway", speed: 0.7 }
+  oggetto: { role: "accessory", animationType: "sway", speed: 0.7 },
+  // pezzi tagliati dall'originale (originalCut.js / partExtraction.js)
+  avambraccio_sx: { role: "forearm", animationType: "sway", speed: 0.8 },
+  avambraccio_dx: { role: "forearm", animationType: "sway", speed: 0.8 },
+  cappello: { role: "headdress", animationType: "static", speed: 1 }
 };
 const defaultsFor = (name) =>
   // mano + oggetto lungo (handObject.js): un solo blocco con pivot al polso, eredita il braccio

@@ -75,6 +75,13 @@ const BODY = /^(testa|busto|braccio_(dx|sx))$/;
 
 /** P7.1 — scalini di colore ai raccordi fra testa-busto, vestito e braccia. */
 export function seamCheck(pieces, original) {
+  return seamStats(pieces, original)
+    .filter((s) => s.n >= 20 && s.share > SEAM_SHARE_MAX)
+    .map((s) => `Raccordo ${s.key}: scalino di colore o bordo netto sul ${Math.round(100 * s.share)}% del bordo dove l'originale è continuo — servono sovrapposizione e sfumatura coerenti (P7.1).`);
+}
+
+/** Misure numeriche dei raccordi (per autoSelect.js): [{ key, n, steps, share }]. */
+export function seamStats(pieces, original) {
   const W = original.width, H = original.height, o = original.rgba;
   const top = compose(pieces, W, H);
   const stats = new Map();
@@ -100,11 +107,7 @@ export function seamCheck(pieces, original) {
         if (d(colorAt(a, i), colorAt(b, j)) > SEAM_STEP_MIN) s.steps++;
         stats.set(key, s);
       }
-  const out = [];
-  for (const [key, s] of stats)
-    if (s.n >= 20 && s.steps / s.n > SEAM_SHARE_MAX)
-      out.push(`Raccordo ${key}: scalino di colore o bordo netto sul ${Math.round((100 * s.steps) / s.n)}% del bordo dove l'originale è continuo — servono sovrapposizione e sfumatura coerenti (P7.1).`);
-  return out;
+  return [...stats].map(([key, s]) => ({ key, n: s.n, steps: s.steps, share: s.n ? s.steps / s.n : 0 }));
 }
 
 /** Discendenti di un pezzo nel rig (genitore = nome). */
@@ -116,6 +119,13 @@ function subtree(pieces, root) {
 
 /** P7.1 — buchi ai raccordi ruotando braccia, testa e capelli attorno al pivot. */
 export function motionCheck(pieces, original) {
+  return motionStats(pieces, original)
+    .filter((m) => m.share > MOTION_HOLE_MAX)
+    .map((m) => `${m.name}: in movimento (±${MOTION_ANGLES[m.kind]}°) si apre un buco al raccordo di ${m.worst} px (${(m.share * 100).toFixed(1)}% del pezzo) — serve più sovrapposizione sotto il genitore (P7.1).`);
+}
+
+/** Misure numeriche del movimento (per autoSelect.js): [{ name, kind, worst, share }]. */
+export function motionStats(pieces, original) {
   const W = original.width, H = original.height;
   const rest = compose(pieces, W, H);
   const out = [];
@@ -143,13 +153,11 @@ export function motionCheck(pieces, original) {
       for (let i = 0; i < W * H; i++) if (rest[i] >= 0 && now[i] < 0 && moved.includes(pieces[rest[i]])) {
         // pixel lasciato libero dal pezzo che si muove: buco solo se vicino al raccordo
         const x = i % W, y = (i - x) / W;
-        if (Math.hypot(x - px, y - py) < 0.25 * Math.max(p.width, p.height)) holes++;
+        if (Math.hypot(x - px, y - py) < 0.25 * Math.max((p.jointBase || p).width, (p.jointBase || p).height)) holes++;
       }
       worst = Math.max(worst, holes);
     }
-    const share = worst / (p.area || p.width * p.height);
-    if (share > MOTION_HOLE_MAX)
-      out.push(`${p.name}: in movimento (±${MOTION_ANGLES[kind]}°) si apre un buco al raccordo di ${worst} px (${(share * 100).toFixed(1)}% del pezzo) — serve più sovrapposizione sotto il genitore (P7.1).`);
+    out.push({ name: p.name, kind, worst, share: worst / (p.area || p.width * p.height) });
   }
   return out;
 }

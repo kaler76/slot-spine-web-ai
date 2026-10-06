@@ -423,6 +423,7 @@ export default function RecognizePage() {
               original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba, img: sourceRef.current.img }}
               landmarks={result.landmarks}
               joints={result.joints}
+              parts={result.parts}
               fileName={result.fileName}
               heldObjects={result.heldObjects}
             />

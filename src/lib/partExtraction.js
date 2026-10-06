@@ -155,7 +155,7 @@ function hiddenPixels(parts, W, H, parentLabel, occluderLabels, reach) {
  * cipolla": ogni giro riempie il bordo del buco con la media dei vicini già noti).
  * Bozza: niente dettagli, ma nessun buco trasparente quando il pezzo davanti si muove.
  */
-function fillHoles(rgba, known, W, H, holes) {
+export function fillHoles(rgba, known, W, H, holes) {
   let todo = holes.filter((i) => !known[i]);
   let guard = 0;
   while (todo.length && guard++ < 4000) {

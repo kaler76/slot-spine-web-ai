@@ -16,6 +16,7 @@
 // Puro: nessun DOM.
 
 import { faceFrame } from "./faceRig.js";
+import { fillHoles } from "./partExtraction.js";
 
 /** Punti del viso (coordinate dell'originale) con il nome del pezzo. */
 export function faceTargets(landmarks) {
@@ -166,7 +167,7 @@ export function foregroundMask({ width: W, height: H, rgba }, { tol = 28 } = {})
  * @returns {{ pieces, holeShare, filledShare, iou }} holeShare = quota del personaggio rimasta scoperta;
  *   iou = sovrapposizione fra sagoma dei pezzi (prima) e sagoma dell'originale
  */
-export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
+export function transplantOriginal(pieces, original, { maxFill = 48, ownerByColor = false, colorTol = 140, colorMargin = 60, cleanHidden = true } = {}) {
   const { width: W, height: H, rgba } = original;
   const fg = foregroundMask(original);
   const owner = new Int16Array(W * H).fill(-1);
@@ -174,6 +175,12 @@ export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
   const idx = new Map(sorted.map((p, i) => [p, i]));
   let union = 0, inter = 0, fgN = 0;
   const cover = new Uint8Array(W * H);
+  // ownerByColor (tavole ridisegnate, sheetRegister.js): se il pezzo più davanti ha un colore
+  // lontano dall'originale e un altro pezzo che copre lo stesso pixel è nettamente più vicino,
+  // il pixel va a quest'ultimo (es. bordo del corsetto coperto per sbaglio dai capelli dietro)
+  const dFront = ownerByColor ? new Uint16Array(W * H) : null;
+  const bestD = ownerByColor ? new Uint16Array(W * H).fill(65535) : null;
+  const bestK = ownerByColor ? new Int16Array(W * H).fill(-1) : null;
   for (const p of sorted) {
     const k = idx.get(p);
     for (let y = 0; y < p.height; y++)
@@ -183,9 +190,20 @@ export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
         if (gx < 0 || gy < 0 || gx >= W || gy >= H) continue;
         const g = gy * W + gx;
         cover[g] = 1;
-        if (fg[g]) owner[g] = k; // il più davanti vince (ordine crescente)
+        if (fg[g]) {
+          owner[g] = k; // il più davanti vince (ordine crescente)
+          if (ownerByColor) {
+            const pi = (y * p.width + x) * 4;
+            const d = Math.abs(p.rgba[pi] - rgba[g * 4]) + Math.abs(p.rgba[pi + 1] - rgba[g * 4 + 1]) + Math.abs(p.rgba[pi + 2] - rgba[g * 4 + 2]);
+            dFront[g] = d;
+            if (d < bestD[g]) { bestD[g] = d; bestK[g] = k; }
+          }
+        }
       }
   }
+  if (ownerByColor)
+    for (let i = 0; i < W * H; i++)
+      if (owner[i] >= 0 && dFront[i] > colorTol && bestD[i] + colorMargin < dFront[i]) owner[i] = bestK[i];
   for (let i = 0; i < W * H; i++) {
     if (fg[i]) fgN++;
     if (fg[i] || cover[i]) union++;
@@ -247,7 +265,43 @@ export function transplantOriginal(pieces, original, { maxFill = 48 } = {}) {
           kept++;
         }
       }
-    return { ...p, x: b.x0, y: b.y0, width: w, height: h, rgba: px, area: own + kept, ownPixels: own, hiddenPixels: kept };
+    // ZONE NASCOSTE PULITE (Zeus, 6 ott): la tavola a volte disegna nella zona nascosta un pezzo
+    // d'ALTRO (bordo dorato e linea nera del drappo sulla spalla del braccio): in movimento si
+    // vede. Un pixel della tavola nascosto deve somigliare ai pixel VISIBILI del pezzo vicini
+    // (entro 24 px); se no si scarta e si ricostruisce dai vicini. Esclusi i pixel sotto i tratti
+    // del viso (palpebre chiuse disegnate apposta).
+    let cleaned = 0;
+    if (cleanHidden && kept) {
+      const isOwn = (gx, gy) => gx >= 0 && gy >= 0 && gx < W && gy < H && owner[gy * W + gx] === k;
+      const known = new Uint8Array(w * h), holes = [];
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const li = y * w + x;
+          if (!px[li * 4 + 3]) continue;
+          const gx = b.x0 + x, gy = b.y0 + y;
+          if (isOwn(gx, gy)) { known[li] = 1; continue; }
+          const fo = gx >= 0 && gy >= 0 && gx < W && gy < H ? owner[gy * W + gx] : -1;
+          if (fo >= 0 && /^(occhio|sopracciglio|bocca|baffo)/.test(sorted[fo].name || "")) { known[li] = 1; continue; }
+          let best = Infinity, any = false;
+          for (let dy = -24; dy <= 24 && best > 100; dy += 3)
+            for (let dx = -24; dx <= 24; dx += 3) {
+              const X = gx + dx, Y = gy + dy;
+              if (!isOwn(X, Y)) continue;
+              any = true;
+              const g = (Y * W + X) * 4;
+              const d = Math.abs(rgba[g] - px[li * 4]) + Math.abs(rgba[g + 1] - px[li * 4 + 1]) + Math.abs(rgba[g + 2] - px[li * 4 + 2]);
+              if (d < best) best = d;
+              if (best <= 100) break;
+            }
+          if (any && best > 100) holes.push(li);
+          else known[li] = 1;
+        }
+      if (holes.length) {
+        fillHoles(px, known, w, h, holes);
+        cleaned = holes.length;
+      }
+    }
+    return { ...p, x: b.x0, y: b.y0, width: w, height: h, rgba: px, area: own + kept, ownPixels: own, hiddenPixels: kept, cleanedHidden: cleaned };
   });
   // stesso ordine dell'array in ingresso
   const back = new Map(sorted.map((p, k) => [p, out[k]]));

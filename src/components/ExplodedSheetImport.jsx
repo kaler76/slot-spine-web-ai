@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import JSZip from "jszip";
-import { importExplodedSheet, chooseChromaColor } from "../lib/explodedSheet.js";
+import { chooseChromaColor } from "../lib/explodedSheet.js";
+import { cutFromOriginal } from "../lib/originalCut.js";
 import { PROFILES, DEFAULT_PROFILE, buildTestaBustoPrompt } from "../lib/separationProfiles.js";
 import { composePieces } from "../lib/partExtraction.js";
 import { preserveSharedGrip } from "../lib/sharedGrip.js";
@@ -40,6 +41,23 @@ const FACE_PROMPT = `
 - At most 16 pieces in total.`;
 export const EXPLODED_PROMPT = buildExplodedPrompt();
 
+/** Import con scelta automatica (autoSelect.js) in un Web Worker: la pagina resta reattiva. */
+function runAutoImport(args) {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(new URL("../workers/autoImport.worker.js", import.meta.url), { type: "module" });
+    w.onmessage = (e) => {
+      w.terminate();
+      if (e.data.ok) resolve(e.data.out);
+      else reject(new Error(e.data.error));
+    };
+    w.onerror = (e) => {
+      w.terminate();
+      reject(new Error(e.message || "errore nel calcolo in background"));
+    };
+    w.postMessage(args);
+  });
+}
+
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -64,7 +82,7 @@ const toBlob = (canvas) => new Promise((res) => canvas.toBlob(res, "image/png"))
  * Import di una tavola esplosa: pezzi separati su sfondo a tinta unita -> pezzi RGBA rimessi
  * al loro posto sull'originale, con nome, ordine di disegno, genitore e pivot.
  */
-export default function ExplodedSheetImport({ original, landmarks, joints, fileName, heldObjects = [], attachmentRules = [] }) {
+export default function ExplodedSheetImport({ original, landmarks, joints, parts, fileName, heldObjects = [], attachmentRules = [] }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -88,7 +106,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     setBusy(true);
     try {
       const generated = piecesToCharacterParts(res.pieces);
-      const parts = preserveSharedGrip(generated.parts, heldObjects);
+      // tavola come sorgente: le prese dell'originale non valgono (personaggio ridisegnato)
+      const parts = res.mode === "sheet-source" ? generated.parts : preserveSharedGrip(generated.parts, heldObjects);
       setStatus("⏳ Creo il character...");
       const character = await createCharacter(name);
       for (const [k, part] of parts.entries()) {
@@ -105,12 +124,30 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     }
   }
 
+  /** PEZZI TAGLIATI DALL'ORIGINALE (originalCut.js): nessuna tavola, misure esatte. */
+  async function cutOriginal() {
+    if (!parts) return;
+    setBusy(true);
+    setRes(null);
+    setStatus("⏳ Taglio i pezzi dall'originale...");
+    try {
+      await new Promise((r) => setTimeout(r, 30));
+      const out = cutFromOriginal({ width: original.width, height: original.height, rgba: original.rgba, parts, joints, landmarks });
+      setRes({ ...out, sheetName: "(originale)" });
+      setStatus(`✅ ${out.pieces.length} pezzi tagliati dall'originale: posizioni e misure esatte. Zone nascoste in bozza (vedi avvisi).`);
+    } catch (err) {
+      setStatus(`❌ ${err.message || err}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSheet(e) {
     const file = e.target.files?.[0];
     if (!file) return;
     setBusy(true);
     setRes(null);
-    setStatus("⏳ Separo i pezzi e li rimetto al loro posto...");
+    setStatus("⏳ Separo i pezzi, li rimetto al loro posto e provo le varianti (scelta automatica, fino a un minuto)...");
     try {
       const img = await loadImage(file);
       const c = document.createElement("canvas");
@@ -119,12 +156,22 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       const ctx = c.getContext("2d");
       ctx.drawImage(img, 0, 0);
       const sheet = { width: c.width, height: c.height, rgba: ctx.getImageData(0, 0, c.width, c.height).data };
-      await new Promise((r) => setTimeout(r, 30)); // lascia aggiornare lo stato prima del calcolo
-      const out = importExplodedSheet({ sheet, original, landmarks, joints, attachmentRules, profile });
+      const out = await runAutoImport({
+        sheet,
+        original: { width: original.width, height: original.height, rgba: original.rgba },
+        landmarks,
+        joints,
+        attachmentRules,
+        profile
+      });
       setRes({ ...out, sheetName: file.name });
       const wrong = out.pieces.filter((p) => p.check?.level === "bad").map((p) => p.name);
       setStatus(
-        out.usable && !out.piecesOk
+        out.mode === "sheet-registered"
+          ? `✅ ${out.pieces.length} pezzi della tavola rimessi sull'originale uno per uno (ognuno con la sua scala): posizioni e misure dell'originale.`
+          : out.mode === "sheet-source"
+          ? `✅ ${out.pieces.length} pezzi montati dalla tavola: personaggio ridisegnato, non ricomposto sull'originale. Controlla viso, capelli e braccia.`
+          : out.usable && !out.piecesOk
           ? `⚠️ ${out.pieces.length} pezzi separati (errore globale ${out.fidelityError}), ma il controllo pezzo per pezzo non è superato${wrong.length ? `: fuori posto ${wrong.join(", ")}` : ""}. Vedi gli avvisi.`
           : out.faithful
           ? `✅ ${out.pieces.length} pezzi separati e rimessi al loro posto${out.scale !== 1 ? ` (scala ${out.scale.toFixed(2)})` : ""}. Tavola fedele (errore ${out.fidelityError}).`
@@ -142,7 +189,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
 
   useEffect(() => {
     if (!res || !canvasRef.current) return;
-    const { width: W, height: H } = original;
+    // tela del risultato: quella dell'originale, o quella del montaggio "tavola come sorgente"
+    const { width: W, height: H } = res.canvas || original;
     const canvas = canvasRef.current;
     const composed = new ImageData(composePieces(res.pieces, W, H), W, H);
     const tmp = document.createElement("canvas");
@@ -151,12 +199,13 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     tmp.getContext("2d").putImageData(composed, 0, 0);
     const ctx = canvas.getContext("2d");
     if (view === "compare") {
-      canvas.width = W * 2;
-      canvas.height = H;
+      const OW = original.width;
+      canvas.width = OW + W;
+      canvas.height = Math.max(H, original.height);
       ctx.drawImage(original.img, 0, 0);
       ctx.fillStyle = "#222";
-      ctx.fillRect(W, 0, W, H);
-      ctx.drawImage(tmp, W, 0);
+      ctx.fillRect(OW, 0, W, canvas.height);
+      ctx.drawImage(tmp, OW, 0);
     } else {
       canvas.width = W;
       canvas.height = H;
@@ -191,7 +240,8 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
     const layout = {
       source: fileName,
       sheet: res.sheetName,
-      size: [original.width, original.height],
+      size: res.canvas ? [res.canvas.width, res.canvas.height] : [original.width, original.height],
+      modalita: res.mode || "originale",
       scale: res.scale,
       fedele: res.faithful,
       utilizzabile: res.usable,
@@ -215,10 +265,11 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         controllo: p.check && { livello: p.check.level, sagoma: p.check.fgShare, errore: p.check.localError, suTesta: p.check.onHead, problemi: p.check.issues }
       })),
       davantiDietro: res.front,
+      sceltaAutomatica: res.selection || null,
       avvisi: res.warnings
     };
     folder.file("layout.json", JSON.stringify(layout, null, 2));
-    const W = original.width, H = original.height;
+    const { width: W, height: H } = res.canvas || original;
     const c = document.createElement("canvas");
     c.width = W;
     c.height = H;
@@ -265,6 +316,11 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
         )}
       </div>
       <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        {parts && (
+          <button type="button" className="btn" disabled={busy} onClick={cutOriginal} title="Pezzi ritagliati direttamente dall'immagine originale (metodo consigliato): nessun ridisegno, posizione e misura esatte">
+            ✂️ Dividi dall'originale
+          </button>
+        )}
         <input type="file" accept="image/*" disabled={busy} onChange={handleSheet} />
         {res && (
           <>
@@ -281,6 +337,29 @@ export default function ExplodedSheetImport({ original, landmarks, joints, fileN
       {status && <div className="status">{status}</div>}
       {res && (
         <>
+          {res.selection && (
+            <details className="hint" style={{ marginBottom: 8 }} open>
+              <summary>🤖 Scelta automatica ({res.selection.version})</summary>
+              {res.selection.reasons.map((r) => (
+                <div key={r}>• {r}</div>
+              ))}
+              <table style={{ fontSize: 12, marginTop: 6, borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    <th align="left">Variante</th><th>Punteggio</th><th>Naso</th><th>Scalini</th><th>Buchi in movimento</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {res.selection.table.map((v, i) => (
+                    <tr key={v.label} style={{ fontWeight: i === 0 ? 700 : 400 }}>
+                      <td>{v.label}</td><td align="center">{v.score}</td><td align="center">{v.nose ? "⚠️" : "ok"}</td>
+                      <td align="center">{v.seamBad}</td><td align="center">{v.motionBad}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
           {res.warnings.length > 0 && (
             <div className="hint" style={{ color: "#ffb347" }}>
               {res.warnings.map((w) => (

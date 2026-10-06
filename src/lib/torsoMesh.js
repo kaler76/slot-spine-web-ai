@@ -201,6 +201,17 @@ export function addHeadMesh(skeletonJson, parts, rules = HEAD_MESH_RULES) {
   const topName = `${key}_cima`, chinName = `${key}_mento`;
   json.bones.splice(boneIdx + 1, 0, { name: topName, parent: key, x: top.x, y: top.y, rotation: 0 }, { name: chinName, parent: key, x: chin.x, y: chin.y, rotation: 0 });
   const topIdx = boneIdx + 1, chinIdx = boneIdx + 2;
+  // mesh pesate GIÀ presenti (es. busto che respira) con indici di ossa dopo la testa: le due ossa
+  // inserite li spostano di 2 (bug trovato su Jessica: testa prima del busto nell'ordine, i piedi
+  // del busto finivano pesati su "testa_mento" e si muovevano)
+  for (const slotAtts of Object.values(json.skins?.[0]?.attachments || {}))
+    for (const att of Object.values(slotAtts)) {
+      if (att.type !== "mesh" || !att.vertices || att.vertices.length === att.uvs?.length) continue;
+      for (let i = 0; i < att.vertices.length; ) {
+        const n = att.vertices[i++];
+        for (let k = 0; k < n; k++, i += 4) if (att.vertices[i] > boneIdx) att.vertices[i] += 2;
+      }
+    }
 
   // parti agganciate alla testa sopra la base del cappello (es. cappello separato) -> cima;
   // mai i pezzi del viso (occhi, sopracciglia, bocca): restano sull'osso rigido del viso

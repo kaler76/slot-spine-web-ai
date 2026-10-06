@@ -152,7 +152,7 @@ export function splitComponents(alpha, W, H, minArea = 500) {
 }
 
 /** Ritaglio RGBA di una componente (bordo morbido incluso) con il blu dello sfondo tolto dai bordi. */
-function cutPiece(img, alpha, lab, comp, bg, pad = 3) {
+export function cutPiece(img, alpha, lab, comp, bg, pad = 3) {
   const { width: W, height: H, rgba } = img;
   const x0 = Math.max(0, comp.minX - pad), y0 = Math.max(0, comp.minY - pad);
   const x1 = Math.min(W - 1, comp.maxX + pad), y1 = Math.min(H - 1, comp.maxY + pad);
@@ -372,7 +372,7 @@ export function colorClasses(original, k = 10) {
   for (let i = 0; i < W * H; i++) if (fg(i)) cls[i] = nearestClass(centers, rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]);
   return { centers, cls, W, H };
 }
-function nearestClass(centers, r, g, b) {
+export function nearestClass(centers, r, g, b) {
   let best = 0, bd = Infinity;
   for (let c = 0; c < centers.length; c++) {
     const d = (centers[c][0] - r) ** 2 + (centers[c][1] - g) ** 2 + (centers[c][2] - b) ** 2;
@@ -510,7 +510,7 @@ function fillResidual(pieces, original, warnings, ds = 3) {
 }
 
 /** Pezzo scalato (nearest) per lavorare tutto in coordinate dell'originale. */
-function scalePiece(p, s) {
+export function scalePiece(p, s) {
   if (Math.abs(s - 1) < 1e-6) return p;
   const w = Math.max(1, Math.round(p.width * s)), h = Math.max(1, Math.round(p.height * s));
   const out = new Uint8ClampedArray(w * h * 4);
@@ -829,13 +829,15 @@ function rigInfo(p, joints, landmarks, pieces = []) {
  * @param {Object} [o.joints] - articolazioni di recognizeParts (base collo, mani)
  * @returns {{ pieces: Array, scale: number, front: Array, warnings: string[] }}
  */
-export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true, profile = DEFAULT_PROFILE }) {
+export function importExplodedSheet({ sheet, original, landmarks, joints, minArea, attachmentRules = [], transplant = true, profile = DEFAULT_PROFILE, fillFromOriginal = null }) {
   const warnings = [];
   // PROFILO (separationProfiles.js). "testa-busto": si usano I PEZZI DELLA TAVOLA così come sono
   // (pixel della tavola, niente ritaglio dall'originale, niente resto_N), niente taglio al polso,
   // nomi dai 12 ruoli espliciti.
   const prof = PROFILES[profile] || PROFILES[DEFAULT_PROFILE];
-  const fromOriginal = transplant && prof.fillFromOriginal;
+  // fillFromOriginal: null = come da profilo; true/false = scelta esplicita (autoSelect.js prova
+  // entrambe e tiene quella con meno scalini e buchi)
+  const fromOriginal = transplant && (fillFromOriginal ?? prof.fillFromOriginal);
   checkSheet(sheet, original);
   const { alpha, bg } = keyBackground(sheet);
   if (original) {
