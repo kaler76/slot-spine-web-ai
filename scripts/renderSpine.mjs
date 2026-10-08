@@ -42,8 +42,9 @@ export function renderFrame(json, images, anim, t, { scale = 0.5, box = null, bg
         if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
         const tu = u * g.uvs[ia * 2] + v * g.uvs[ib * 2] + w * g.uvs[ic * 2];
         const tv = u * g.uvs[ia * 2 + 1] + v * g.uvs[ib * 2 + 1] + w * g.uvs[ic * 2 + 1];
-        const ix = Math.min(img.width - 1, Math.max(0, Math.round(tu * (img.width - 1))));
-        const iy = Math.min(img.height - 1, Math.max(0, Math.round(tv * (img.height - 1))));
+        // UV come Spine: 0 = bordo sinistro/alto, 1 = bordo destro/basso
+        const ix = Math.min(img.width - 1, Math.max(0, Math.floor(tu * img.width)));
+        const iy = Math.min(img.height - 1, Math.max(0, Math.floor(tv * img.height)));
         const si = (iy * img.width + ix) * 4, al = (img.rgba[si + 3] / 255) * col[3];
         if (!al) continue;
         const oi = (y * fw + x) * 4;

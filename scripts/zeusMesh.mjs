@@ -1,13 +1,14 @@
 // Prova "zeus mesh": Zeus in mesh pesata con tagli automatici (src/lib/meshRig.js).
 // Uso: node scripts/zeusMesh.mjs [cartella] [moltiplicatore ampiezze] [fotogrammi]
-// Scrive zeus_mesh.json / .atlas / <pezzo>.png (Spine 4.1) e i fotogrammi di controllo _frame_NN.png.
+// Scrive il pacchetto Spine 4.1: zeus_mesh.json + zeus_mesh.atlas + zeus_mesh.png (pagina unica, per il runtime)
+// e images/<pezzo>.png (per Spine: Import Data). Più i fotogrammi di controllo _frame_NN.png.
 // Versione 1 (tutto mesh): git checkout zeus-mesh-1.
 import fs from "node:fs";
 import path from "node:path";
 import { PNG } from "pngjs";
 import { recognizeParts, foregroundFromUniformBorder } from "../src/lib/partRecognition.js";
-import { buildMeshRig, atlasFor, MESH_RIG_RULES } from "../src/lib/meshRig.js";
-import { poseAt, attachmentGeometry, simulateLoop } from "../src/lib/animationSim.js";
+import { buildMeshRig, packAtlas, MESH_RIG_RULES } from "../src/lib/meshRig.js";
+import { renderFrame } from "./renderSpine.mjs";
 
 const OUT = process.argv[2] || "prototipi/zeus_mesh_5";
 const FRAMES = Number(process.argv[4] || 60); // fotogrammi di controllo sul loop (60 = 10 al secondo)
@@ -24,52 +25,17 @@ const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, 
 const rules = { ...MESH_RIG_RULES, amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * BOOST])) };
 const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, rules);
 
-fs.mkdirSync(OUT, { recursive: true });
+fs.mkdirSync(path.join(OUT, "images"), { recursive: true });
+const writePng = (file, im) => { const p = new PNG({ width: im.width, height: im.height }); p.data = Buffer.from(im.rgba); fs.writeFileSync(file, PNG.sync.write(p)); };
+json.skeleton.images = "./images/";
 fs.writeFileSync(path.join(OUT, "zeus_mesh.json"), JSON.stringify(json, null, 1));
-fs.writeFileSync(path.join(OUT, "zeus_mesh.atlas"), atlasFor(images));
-for (const [n, im] of Object.entries(images)) {
-  const p = new PNG({ width: im.width, height: im.height });
-  p.data = Buffer.from(im.rgba);
-  fs.writeFileSync(path.join(OUT, n + ".png"), PNG.sync.write(p));
-}
-const sim = simulateLoop(json, { fps: 15, images });
-console.log(JSON.stringify(report, null, 1), "\nsimulazione:", sim.ok ? "OK" : sim.problems.join(" | "));
+const page = packAtlas(images, "zeus_mesh.png");
+fs.writeFileSync(path.join(OUT, "zeus_mesh.atlas"), page.text);
+writePng(path.join(OUT, "zeus_mesh.png"), page);
+for (const [n, im] of Object.entries(images)) writePng(path.join(OUT, "images", n + ".png"), im);
+// controlli del metodo mesh: tests/meshRig.test.mjs (i controlli dei raccordi di simulateLoop valgono per i pezzi rigidi)
+console.log(JSON.stringify(report, null, 1));
 
 // fotogrammi: tutti gli slot nell'ordine di disegno (FRAMES sul loop + 1 a occhi chiusi)
-const sk = json.skeleton, sc = 0.5;
-const fw = Math.round(sk.width * sc), fh = Math.round(sk.height * sc), off = { x: sk.width / 2, y: sk.height };
 const times = [...Array.from({ length: FRAMES }, (_, f) => (f / FRAMES) * MESH_RIG_RULES.loopSeconds), MESH_RIG_RULES.blinkAt + 0.133];
-times.forEach((t, f) => {
-  const world = poseAt(json, t, "ambient");
-  const out = new PNG({ width: fw, height: fh });
-  for (let i = 0; i < fw * fh; i++) { const x = i % fw, y = (i / fw) | 0; out.data.set(((x >> 4) + (y >> 4)) & 1 ? [70, 70, 80, 255] : [50, 50, 58, 255], i * 4); }
-  for (const slot of json.slots) {
-    const g = attachmentGeometry(json, world, slot), img = images[slot.name];
-    if (!g || !img) continue;
-    const P = g.verts.map((v) => ({ x: (v.x + off.x) * sc, y: (off.y - v.y) * sc }));
-    for (let k = 0; k < g.tris.length; k += 3) {
-      const [ia, ib, ic] = [g.tris[k], g.tris[k + 1], g.tris[k + 2]];
-      const a = P[ia], b = P[ib], cc = P[ic];
-      const A = (b.x - a.x) * (cc.y - a.y) - (cc.x - a.x) * (b.y - a.y);
-      if (Math.abs(A) < 1e-9) continue;
-      const minX = Math.max(0, Math.floor(Math.min(a.x, b.x, cc.x))), maxX = Math.min(fw - 1, Math.ceil(Math.max(a.x, b.x, cc.x)));
-      const minY = Math.max(0, Math.floor(Math.min(a.y, b.y, cc.y))), maxY = Math.min(fh - 1, Math.ceil(Math.max(a.y, b.y, cc.y)));
-      for (let y = minY; y <= maxY; y++) for (let x = minX; x <= maxX; x++) {
-        const px = x + 0.5, py = y + 0.5;
-        const u = ((b.x - px) * (cc.y - py) - (cc.x - px) * (b.y - py)) / A;
-        const v = ((cc.x - px) * (a.y - py) - (a.x - px) * (cc.y - py)) / A;
-        const w = 1 - u - v;
-        if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
-        const tu = u * g.uvs[ia * 2] + v * g.uvs[ib * 2] + w * g.uvs[ic * 2];
-        const tv = u * g.uvs[ia * 2 + 1] + v * g.uvs[ib * 2 + 1] + w * g.uvs[ic * 2 + 1];
-        const ix = Math.min(img.width - 1, Math.max(0, Math.round(tu * (img.width - 1))));
-        const iy = Math.min(img.height - 1, Math.max(0, Math.round(tv * (img.height - 1))));
-        const si = (iy * img.width + ix) * 4, al = img.rgba[si + 3] / 255;
-        if (!al) continue;
-        const oi = (y * fw + x) * 4;
-        for (let ch = 0; ch < 3; ch++) out.data[oi + ch] = out.data[oi + ch] * (1 - al) + img.rgba[si + ch] * al;
-      }
-    }
-  }
-  fs.writeFileSync(path.join(OUT, `_frame_${String(f).padStart(2, "0")}.png`), PNG.sync.write(out));
-});
+times.forEach((t, f) => fs.writeFileSync(path.join(OUT, `_frame_${String(f).padStart(2, "0")}.png`), PNG.sync.write(renderFrame(json, images, "ambient", t, { scale: 0.5 }))));

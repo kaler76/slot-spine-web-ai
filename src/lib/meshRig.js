@@ -14,7 +14,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-5";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-5.1";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -264,7 +264,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   } else hair.fill(0);
   // occhi: ossa pupilla e palpebra
   for (const e of decision.eyes ? eyes : []) {
-    const b = e.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    const b = e.box, cx = (b.x0 + b.x1 + 1) / 2, cy = (b.y0 + b.y1 + 1) / 2;
     // bordo alto e basso del buco per colonna (coordinate immagine)
     e.top = [];
     e.bot = [];
@@ -349,7 +349,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const idx = new Map(order.map(([c, r], i) => [`${c},${r}`, i]));
     const uvs = [], vertices = [];
     for (const [c, r] of order) {
-      const px = bx0 + (c / cols) * (bw - 1), py = by0 + (r / rows) * (bh - 1);
+      // coordinate sui BORDI dei pixel, come le UV di Spine (u = 0 bordo sinistro, u = 1 bordo destro)
+      const px = bx0 + (c / cols) * bw, py = by0 + (r / rows) * bh;
       uvs.push(+(c / cols).toFixed(5), +(r / rows).toFixed(5));
       const label = labelAt(px, py, step);
       let w = chainWeights({ x: px, y: py }, C[label]);
@@ -440,7 +441,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // È un pezzo a parte (copia dei pixel del corpo attorno all'occhio, buco escluso) davanti al corpo:
   // a riposo coincide col corpo, quindi non si vede; nel battito la pelle stirata copre il buco.
   const lidSkin = (e) => {
-    const b = e.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, ew = b.x1 - b.x0 + 1, eh = b.y1 - b.y0 + 1;
+    const b = e.box, cx = (b.x0 + b.x1 + 1) / 2, cy = (b.y0 + b.y1 + 1) / 2, ew = b.x1 - b.x0 + 1, eh = b.y1 - b.y0 + 1; // centro sui bordi dei pixel
     const N = 24;
     // raggio del buco per settore angolare (massimo dei pixel del buco nel settore): l'anello interno
     // racchiude TUTTO il buco, anche gli angoli fra un raggio e l'altro (a occhio chiuso non resta nulla)
@@ -474,7 +475,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const local = (bb, sp) => { const dx = sp.x - bb.x, dy = sp.y - bb.y, co = Math.cos(-bb.a), si = Math.sin(-bb.a); return [+(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2)]; };
     const uvs = [], vertices = [];
     const push = (p, ws) => {
-      uvs.push(+((p.x - bx0) / (bw - 1)).toFixed(5), +((p.y - by0) / (bh - 1)).toFixed(5));
+      uvs.push(+((p.x - bx0) / bw).toFixed(5), +((p.y - by0) / bh).toFixed(5));
       const sp = toS(p);
       vertices.push(ws.length);
       for (const [bn, w] of ws) vertices.push(boneIndex[bn], ...local(bn === name ? pal : occ, sp), w);
@@ -628,7 +629,8 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
   const slotsAnim = {};
   if (decision.eyes) {
     // pupille: due sguardi (di lato e un po' in basso), come la Domatrice
-    const look = (t) => { const p = t / T; const g = (c) => Math.exp(-((p - c) ** 2) / 0.006); return g(0.22) + g(0.72); };
+    // distanza periodica: il loop si chiude sullo stesso valore
+    const look = (t) => { const p = t / T; const g = (c) => { const d = Math.min(Math.abs(p - c), 1 - Math.abs(p - c)); return Math.exp(-(d ** 2) / 0.006); }; return g(0.22) + g(0.72); };
     for (const e of eyes) {
       bones[`pupilla_${e.side}`] = { translate: xy((t) => -A.pupille * ipd * 0.5 * look(t), (t) => -A.pupille * ipd * 0.25 * look(t)) };
       // battito: 0,13 s chiusura, 0,2 s apertura (chiavi lineari, è uno scatto voluto)
@@ -649,4 +651,25 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
 /** Atlas: una pagina per immagine (file <nome>.png accanto al json). */
 export function atlasFor(images) {
   return Object.entries(images).map(([n, im]) => `${n}.png\nsize: ${im.width},${im.height}\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n${n}\n  rotate: false\n  xy: 0, 0\n  size: ${im.width}, ${im.height}\n  orig: ${im.width}, ${im.height}\n  offset: 0, 0\n  index: -1\n`).join("\n");
+}
+
+/**
+ * Atlas a PAGINA UNICA (come l'export di Spine): pezzi impilati su ripiani, 2 px di margine.
+ * @returns {{ width, height, rgba, text }} immagine della pagina e testo dell'atlas (formato 4.x)
+ */
+export function packAtlas(images, pageName, { pad = 2, maxWidth = 2048 } = {}) {
+  const items = Object.entries(images).map(([name, im]) => ({ name, im })).sort((a, b) => b.im.height - a.im.height);
+  const width = Math.min(maxWidth, Math.max(...items.map((it) => it.im.width + 2 * pad)));
+  let x = 0, y = 0, shelf = 0;
+  for (const it of items) {
+    if (x + it.im.width + 2 * pad > width) { x = 0; y += shelf; shelf = 0; }
+    it.x = x + pad; it.y = y + pad;
+    x += it.im.width + 2 * pad; shelf = Math.max(shelf, it.im.height + 2 * pad);
+  }
+  const height = y + shelf;
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  for (const { im, x: px, y: py } of items) for (let r = 0; r < im.height; r++) rgba.set(im.rgba.subarray(r * im.width * 4, (r + 1) * im.width * 4), ((py + r) * width + px) * 4);
+  const text = `${pageName}\nsize: ${width},${height}\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n` +
+    items.map(({ name, im, x: px, y: py }) => `${name}\n  rotate: false\n  xy: ${px}, ${py}\n  size: ${im.width}, ${im.height}\n  orig: ${im.width}, ${im.height}\n  offset: 0, 0\n  index: -1\n`).join("");
+  return { width, height, rgba, text };
 }
