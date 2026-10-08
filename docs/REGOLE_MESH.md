@@ -1,4 +1,4 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9.2, 8 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
 ("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato).
@@ -86,6 +86,14 @@ Il sorriso deformato (R9) non convince ("bisogna utilizzare Gemini per creare la
 - Nell'app: anteprime Originale / Gemini / Risultato, riallineamento trovato, pulsante "🔄 Ridisegna bocca (Gemini)".
   La risposta resta in memoria: "Ricrea" non richiama Gemini se il tipo di bocca non cambia.
 - Costo: una immagine Gemini per ogni "Crea character"/"Ridisegna" col sorriso ridisegnato.
+
+## R11 — Casi limite (E1–E2), zeus-mesh-9.2
+- **Personaggio che esce dal bordo dell'immagine** (Robin Hood, tagliato in basso): i vertici del bordo della griglia
+  cadono su x = W / y = H; l'etichetta del pixel più vicino si legge con le coordinate riportate dentro l'immagine.
+  Prima: errore "Impossibile leggere le proprietà di undefined (lettura di 'length')".
+- **Oggetto che attraversa la linea di mezzo** (freccia tenuta fra le due mani, arco): è UN pezzo e va tutto al lato
+  che ne ha di più, invece di essere spezzato sulla verticale del collo (due metà che si muovono ognuna col suo braccio).
+  Limite: l'altra mano non tiene l'oggetto (la freccia segue la mano dell'arco).
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

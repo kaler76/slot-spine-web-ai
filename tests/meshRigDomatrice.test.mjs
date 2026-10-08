@@ -90,3 +90,24 @@ test("D5 in movimento nessun buco nel personaggio: nessuna zona trasparente chiu
     assert.ok(holes < 30, `t=${t}: ${holes} pixel di buchi chiusi`);
   }
 });
+
+test("E1 personaggio che esce dal bordo dell'immagine (Robin Hood, 8 ott: \"reading 'length'\"): il rig si crea", () => {
+  const CW = 1200, CH = 900, r2 = new Uint8ClampedArray(CW * CH * 4), c2 = new Uint8Array(CW * CH), f2 = new Uint8Array(CW * CH);
+  for (let y = 0; y < CH; y++) for (let x = 0; x < CW; x++) { const g = y * W + x, i = y * CW + x; r2.set(rgba.subarray(g * 4, g * 4 + 4), i * 4); c2[i] = categories[g]; f2[i] = fg[g]; }
+  const a2 = Uint8Array.from(f2, (v) => v * 255);
+  const rc = recognizeParts({ width: CW, height: CH, landmarks, categories: c2, alpha: a2, rgba: r2 });
+  const out = buildMeshRig({ width: CW, height: CH, rgba: r2, fg: f2, parts: rc.parts, categories: c2, landmarks, joints: rc.joints });
+  assert.ok(out.json.skins[0].attachments.corpo.corpo.vertices.every(Number.isFinite));
+});
+
+test("E2 oggetto che attraversa la linea di mezzo (freccia fra due mani) resta UN pezzo, al lato che ne ha di più", () => {
+  const p2 = Uint8Array.from(rec.parts), f2 = Uint8Array.from(fg), midX = (landmarks[11].x + landmarks[12].x) / 2;
+  // barra orizzontale sotto il mento: 70% a sinistra della linea di mezzo (lato dx del personaggio)
+  const y0 = Math.round(landmarks[0].y + 120), x0 = Math.round(midX - 210), x1 = Math.round(midX + 90);
+  for (let y = y0; y < y0 + 6; y++) for (let x = x0; x <= x1; x++) { p2[y * W + x] = PART.oggetto_in_mano; f2[y * W + x] = 1; }
+  const out = buildMeshRig({ width: W, height: H, rgba, fg: f2, parts: p2, categories, landmarks, joints: rec.joints });
+  const n = (s) => +((out.report.decision.find((d) => d.startsWith(`braccio_${s}:`)).match(/\((\d+) px\)/) || [0, 0])[1]);
+  const base = +report.decision.find((d) => d.startsWith("braccio_sx:")).match(/\((\d+) px\)/)[1];
+  assert.equal(n("sx"), base, "nessun pezzo della barra al lato sx");
+  assert.ok(n("dx") >= 6 * (x1 - x0), `barra intera al lato dx: ${n("dx")} px`);
+});

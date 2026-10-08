@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9.2";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -291,7 +291,19 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // etichette dei pixel
   const lab = new Int8Array(W * H).fill(-1);
   const counts = {};
-  for (let i = 0; i < W * H; i++) if (fg[i]) { lab[i] = labelOf(parts[i], i % W, midX); counts[LABELS[lab[i]]] = (counts[LABELS[lab[i]]] || 0) + 1; }
+  for (let i = 0; i < W * H; i++) if (fg[i]) lab[i] = labelOf(parts[i], i % W, midX);
+  // un oggetto che attraversa la linea di mezzo (freccia tenuta con due mani, arco: Robin Hood) è UN pezzo:
+  // tutto al lato che ne ha di più, invece di spezzarlo in due sulla verticale del collo
+  {
+    const isObj = (k) => k === L_.oggetto_sx || k === L_.oggetto_dx, seen = new Uint8Array(W * H);
+    for (let s0 = 0; s0 < W * H; s0++) {
+      if (seen[s0] || !isObj(lab[s0])) continue;
+      const st = [s0], px = []; seen[s0] = 1; let nsx = 0;
+      while (st.length) { const i = st.pop(); px.push(i); if (lab[i] === L_.oggetto_sx) nsx++; const x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (!seen[j] && isObj(lab[j])) { seen[j] = 1; st.push(j); } } }
+      if (nsx && nsx < px.length) { const k = nsx * 2 >= px.length ? L_.oggetto_sx : L_.oggetto_dx; for (const i of px) lab[i] = k; }
+    }
+  }
+  for (let i = 0; i < W * H; i++) if (lab[i] >= 0) counts[LABELS[lab[i]]] = (counts[LABELS[lab[i]]] || 0) + 1;
 
   // capelli dietro: "capelli/accessori" ai lati del viso, sopra le spalle, vicino alla testa
   const hair = new Uint8Array(W * H);
@@ -462,7 +474,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       const px = bx0 + (c / cols) * bw, py = by0 + (r / rows) * bh;
       uvs.push(+(c / cols).toFixed(5), +(r / rows).toFixed(5));
       const label = labelAt(px, py, step);
-      let w = chainWeights({ x: px, y: py }, C[label]);
+      let w = chainWeights({ x: px, y: py }, C[label] || C.busto);
       if (label === "testa") {
         const f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
@@ -503,7 +515,9 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const near = new Int8Array(W * H).fill(-1), nq = [];
   for (let i = 0; i < W * H; i++) if (lab[i] >= 0) { near[i] = lab[i]; nq.push(i); }
   for (let qi = 0; qi < nq.length; qi++) { const i = nq[qi], x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (near[j] < 0) { near[j] = near[i]; nq.push(j); } } }
-  const nearLabel = (px, py) => LABELS[near[Math.round(py) * W + Math.round(px)]];
+  // coordinate dentro l'immagine: i vertici del bordo della griglia stanno sul bordo DESTRO/BASSO dell'ultimo
+  // pixel (x = W, y = H) quando il personaggio esce dall'immagine (Robin Hood, 8 ott: errore "reading 'length'")
+  const nearLabel = (px, py) => LABELS[near[Math.min(H - 1, Math.max(0, Math.round(py))) * W + Math.min(W - 1, Math.max(0, Math.round(px)))]];
 
   // corpo: le parti tagliate contano come busto/testa (nel corpo resta solo il riempimento dietro)
   // (dal gomito: l'omero resta nel corpo e segue la catena del braccio)
