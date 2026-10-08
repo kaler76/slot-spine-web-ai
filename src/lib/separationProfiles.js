@@ -37,7 +37,10 @@ export const PROFILES = {
     // scelta automatica: PEZZI = TAVOLA (decisione utente 6 ott, Zeus): sagoma e pixel dalla tavola,
     // scalati e messi nella posizione dell'originale. I pixel dell'originale "sporcavano" il taglio
     // (spalle tagliate, bordo del drappo e collo nel busto)
-    autoFills: [false]
+    autoFills: [false],
+    // 8 ott: sagoma dalla tavola ma COLORI VISIBILI DALL'ORIGINALE (sheetAssembly.recolorVisible):
+    // a riposo identico all'originale (come la versione del 3 ott), in movimento il taglio della tavola
+    recolor: true
   },
   "testa-busto": {
     id: "testa-busto",

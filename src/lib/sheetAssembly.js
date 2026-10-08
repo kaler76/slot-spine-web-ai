@@ -478,3 +478,195 @@ function restPieces(fg, owner, original, sorted, out, { restGap = 60, minArea = 
   }
   return res;
 }
+
+/**
+ * SAGOMA DALLA TAVOLA, COLORI DALL'ORIGINALE (8 ott 2026, Zeus): sintesi delle due varianti.
+ * - pixel dalla tavola (6 ott): taglio pulito in movimento, ma a riposo il disegno è quello
+ *   ridisegnato dal modello (viso, dettagli diversi dall'originale);
+ * - pixel dall'originale (3 ott): a riposo identico, ma il taglio si sporca (linea del drappo sul braccio).
+ * Qui la SAGOMA di ogni pezzo resta quella della tavola (nessun pixel cambia proprietario); solo il
+ * COLORE dei pixel visibili a riposo viene dall'originale:
+ *   - pezzi fermi o quasi (busto, testa, viso, capelli, coperture): sempre;
+ *   - pezzi che si muovono (braccio, avambraccio, mano): sempre, TRANNE nella fascia di `band` px
+ *     lungo il confine con un pezzo fermo: lì solo se il colore della tavola è vicino a quello
+ *     dell'originale. Dove differisce (bordo del drappo, linea nera del pezzo fermo) resta la
+ *     tavola, così in movimento non ruota un pezzo d'altro.
+ * Bordo e parti mancanti dalla tavola (entro `fill` px): al pezzo più vicino (vedi sotto).
+ * Ciò che resta scoperto (scintille, monete non disegnate nella tavola) diventa resto_N, come in
+ * transplantOriginal.
+ * @returns {{ pieces, rest, recolored, keptSheet, grown, holeShare }}
+ */
+export function recolorVisible(pieces, original, { tolMoving = 90, band = 16, grow = 4, fill = 48 } = {}) {
+  const { width: W, height: H, rgba } = original;
+  const fg = foregroundMask(original);
+  const owner = new Int16Array(W * H).fill(-1);
+  const sorted = [...pieces].sort((a, b) => a.order - b.order);
+  sorted.forEach((p, k) => {
+    for (let y = 0; y < p.height; y++)
+      for (let x = 0; x < p.width; x++) {
+        if (p.rgba[(y * p.width + x) * 4 + 3] < 128) continue;
+        const gx = p.x + x, gy = p.y + y;
+        if (gx >= 0 && gy >= 0 && gx < W && gy < H) owner[gy * W + gx] = k;
+      }
+  });
+  // BORDO E PARTI MANCANTI DALLA TAVOLA: pixel del personaggio scoperti entro `fill` px da un
+  // pezzo -> a un pezzo vicino, coi colori dell'originale. Entro `grow` px il più vicino; oltre,
+  // fra il pezzo fermo e quello che si muove più vicini vince quello col COLORE più simile
+  // (media dell'originale attorno al punto di contatto): la parte di braccio che la tavola ha
+  // disegnato più corta torna al braccio (pelle), il drappo dimenticato sotto il braccio va al
+  // busto (viola). A parità, il pezzo fermo.
+  const isMov = sorted.map((p) => /^(braccio|avambraccio|mano)/.test(p.name || ""));
+  const bfs = (pick) => {
+    const dist = new Int16Array(W * H).fill(-1), who = new Int16Array(W * H).fill(-1), src = new Int32Array(W * H).fill(-1), bq = [];
+    for (let i = 0; i < W * H; i++) if (fg[i] && owner[i] >= 0 && pick(owner[i])) { dist[i] = 0; who[i] = owner[i]; src[i] = i; bq.push(i); }
+    for (let qi = 0; qi < bq.length; qi++) {
+      const i = bq[qi];
+      if (dist[i] >= fill) continue;
+      const x = i % W, y = (i - x) / W;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (!fg[j] || owner[j] >= 0 || dist[j] >= 0) continue;
+        dist[j] = dist[i] + 1;
+        who[j] = who[i];
+        src[j] = src[i];
+        bq.push(j);
+      }
+    }
+    return { dist, who, src };
+  };
+  const S = bfs((k) => !isMov[k]), M = bfs((k) => isMov[k]);
+  // distanza di colore fra il pixel i e la media dell'originale del pezzo k attorno al contatto c
+  const avgCache = new Map();
+  const colorGap = (i, c, k) => {
+    let a = avgCache.get(c);
+    if (!a) {
+      const cx = c % W, cy = (c - cx) / W;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let y = Math.max(0, cy - 6); y <= Math.min(H - 1, cy + 6); y++)
+        for (let x = Math.max(0, cx - 6); x <= Math.min(W - 1, cx + 6); x++) {
+          const j = y * W + x;
+          if (owner[j] !== k || !fg[j]) continue;
+          const l = 0.3 * rgba[j * 4] + 0.59 * rgba[j * 4 + 1] + 0.11 * rgba[j * 4 + 2];
+          if (l < 60) continue; // contorni neri: non dicono il materiale
+          r += rgba[j * 4]; g += rgba[j * 4 + 1]; b += rgba[j * 4 + 2]; n++;
+        }
+      a = n ? [r / n, g / n, b / n] : [rgba[c * 4], rgba[c * 4 + 1], rgba[c * 4 + 2]];
+      avgCache.set(c, a);
+    }
+    return Math.abs(rgba[i * 4] - a[0]) + Math.abs(rgba[i * 4 + 1] - a[1]) + Math.abs(rgba[i * 4 + 2] - a[2]);
+  };
+  const grownOwner = new Int16Array(W * H).fill(-1);
+  let grown = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (!fg[i] || owner[i] >= 0) continue;
+    const ds = S.dist[i] >= 0 ? S.dist[i] : Infinity, dm = M.dist[i] >= 0 ? M.dist[i] : Infinity;
+    if (ds === Infinity && dm === Infinity) continue;
+    const near = Math.min(ds, dm);
+    if (near <= grow || dm === Infinity || ds === Infinity) grownOwner[i] = ds <= dm ? S.who[i] : M.who[i];
+    else grownOwner[i] = colorGap(i, S.src[i], S.who[i]) <= colorGap(i, M.src[i], M.who[i]) + 20 ? S.who[i] : M.who[i];
+    grown++;
+  }
+  // distanza (in px, 4 vicini) dal confine con un pezzo FERMO, dentro i pezzi che si muovono
+  const isMoving = isMov;
+  const depth = new Int16Array(W * H).fill(-1);
+  const q = [];
+  for (let i = 0; i < W * H; i++) {
+    const o = owner[i];
+    if (o < 0 || !isMoving[o]) continue;
+    const x = i % W, y = (i - x) / W;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const oj = owner[ny * W + nx];
+      if (oj >= 0 && !isMoving[oj]) { depth[i] = 0; q.push(i); break; }
+    }
+  }
+  for (let qi = 0; qi < q.length; qi++) {
+    const i = q[qi];
+    if (depth[i] >= band) continue;
+    const x = i % W, y = (i - x) / W;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const j = ny * W + nx;
+      if (depth[j] >= 0 || owner[j] !== owner[i]) continue;
+      depth[j] = depth[i] + 1;
+      q.push(j);
+    }
+  }
+  let recolored = 0, keptSheet = 0, trimmed = 0, toned = 0;
+  const faceRe = /^(occhio|sopracciglio|bocca|baffo)/;
+  const out = sorted.map((p, k) => {
+    const banded = isMov[k];
+    const px = new Uint8ClampedArray(p.rgba);
+    // differenza originale - tavola sui pixel visibili ricolorati (per il tono delle zone nascoste)
+    const pw = p.width, ph = p.height;
+    const dR = new Float64Array((pw + 1) * (ph + 1)), dG = new Float64Array((pw + 1) * (ph + 1)), dB = new Float64Array((pw + 1) * (ph + 1)), dN = new Float64Array((pw + 1) * (ph + 1));
+    const hidden = [];
+    for (let y = 0; y < p.height; y++)
+      for (let x = 0; x < p.width; x++) {
+        const li = (y * p.width + x) * 4;
+        if (px[li + 3] < 128) continue;
+        const gx = p.x + x, gy = p.y + y;
+        if (gx < 0 || gy < 0 || gx >= W || gy >= H) continue;
+        const g = gy * W + gx;
+        // sagoma della tavola che sporge oltre quella dell'originale (fulmine ridisegnato spostato:
+        // doppio contorno a riposo): via, su TUTTI i pezzi. A riposo si vede solo l'originale.
+        if (!fg[g]) { px[li + 3] = 0; trimmed++; continue; }
+        if (owner[g] !== k) { hidden.push(li); continue; }
+        if (banded && depth[g] >= 0) {
+          const d = Math.abs(px[li] - rgba[g * 4]) + Math.abs(px[li + 1] - rgba[g * 4 + 1]) + Math.abs(px[li + 2] - rgba[g * 4 + 2]);
+          if (d > tolMoving) { keptSheet++; continue; }
+        }
+        const ii = (y + 1) * (pw + 1) + x + 1;
+        dR[ii] = rgba[g * 4] - px[li]; dG[ii] = rgba[g * 4 + 1] - px[li + 1]; dB[ii] = rgba[g * 4 + 2] - px[li + 2]; dN[ii] = 1;
+        px[li] = rgba[g * 4]; px[li + 1] = rgba[g * 4 + 1]; px[li + 2] = rgba[g * 4 + 2];
+        recolored++;
+      }
+    // TONO DELLE ZONE NASCOSTE (Jessica, 8 ott): la tavola ridisegnata ha un'altra tinta; ricolorato
+    // il visibile, la pelle nascosta sotto il braccio restava una macchia più chiara in movimento.
+    // Ogni pixel nascosto riceve la differenza media originale - tavola dei pixel visibili del pezzo
+    // vicini (entro 24 px, poi 64, poi tutto il pezzo).
+    if (hidden.length && !faceRe.test(p.name || "")) {
+      for (const A of [dR, dG, dB, dN])
+        for (let y = 1; y <= ph; y++) for (let x = 1; x <= pw; x++) { const i = y * (pw + 1) + x; A[i] += A[i - 1] + A[i - pw - 1] - A[i - pw - 2]; }
+      const box = (A, x0, y0, x1, y1) => A[y1 * (pw + 1) + x1] - A[y0 * (pw + 1) + x1] - A[y1 * (pw + 1) + x0] + A[y0 * (pw + 1) + x0];
+      for (const li of hidden) {
+        const x = (li / 4) % pw, y = ((li / 4) - x) / pw;
+        for (const r of [24, 64, 100000]) {
+          const x0 = Math.max(0, x - r), y0 = Math.max(0, y - r), x1 = Math.min(pw, x + r + 1), y1 = Math.min(ph, y + r + 1);
+          const n = box(dN, x0, y0, x1, y1);
+          if (n < 20) continue;
+          px[li] += box(dR, x0, y0, x1, y1) / n; px[li + 1] += box(dG, x0, y0, x1, y1) / n; px[li + 2] += box(dB, x0, y0, x1, y1) / n;
+          toned++;
+          break;
+        }
+      }
+    }
+    // riquadro allargato ai pixel di bordo
+    let x0 = p.x, y0 = p.y, x1 = p.x + p.width - 1, y1 = p.y + p.height - 1;
+    const mine = [];
+    for (let i = 0; i < W * H; i++) if (grownOwner[i] === k) { mine.push(i); const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (!mine.length) return { ...p, rgba: px };
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, big = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < p.height; y++) big.set(px.subarray(y * p.width * 4, (y + 1) * p.width * 4), ((y + p.y - y0) * w + (p.x - x0)) * 4);
+    for (const i of mine) {
+      const x = i % W, y = (i - x) / W, li = ((y - y0) * w + (x - x0)) * 4;
+      big[li] = rgba[i * 4]; big[li + 1] = rgba[i * 4 + 1]; big[li + 2] = rgba[i * 4 + 2]; big[li + 3] = rgba[i * 4 + 3];
+    }
+    return { ...p, x: x0, y: y0, width: w, height: h, rgba: big };
+  });
+  const back = new Map(sorted.map((p, k) => [p, out[k]]));
+  // scoperto oltre il bordo: resto_N con i pixel dell'originale
+  const own2 = new Int16Array(W * H);
+  let fgN = 0, holes = 0;
+  for (let i = 0; i < W * H; i++) {
+    own2[i] = owner[i] >= 0 && fg[i] ? owner[i] : grownOwner[i];
+    if (fg[i]) { fgN++; if (own2[i] < 0) holes++; }
+  }
+  const rest = restPieces(fg, own2, original, sorted, out, { minArea: Math.max(30, Math.round(0.001 * fgN)) });
+  const restPx = rest.reduce((a, r) => a + r.area, 0);
+  return { pieces: pieces.map((p) => back.get(p)), rest, recolored, keptSheet, grown, trimmed, toned, holeShare: fgN ? (holes - restPx) / fgN : 0 };
+}

@@ -217,3 +217,12 @@ Stato attuazione: P1 (ruoli) e prompt nell'app ✅ (passo 1) · importatore del 
 - Profilo Standard: la scelta automatica usa SAGOMA E PIXEL DELLA TAVOLA (`separationProfiles.standard.autoFills = [false]`), scalati e messi nella posizione dell'originale. Il taglio lo decide la tavola.
 - Motivo: con i pixel dell'originale il taglio si "sporcava" (spalle delle braccia tagliate, bordo del drappo e collo finiti nel busto, linea nera del drappo che ruotava col braccio).
 - La variante con i pixel dell'originale (Testa-busto/Jessica) resta, con due correzioni: `peelForeign` (striscia del pezzo fermo finita nel braccio → torna al pezzo fermo) e `cleanHidden` solo sui pezzi che si muovono.
+
+## Sagoma dalla tavola, colori dall'originale (8 ott 2026, riferimento utente: zeus_ambient_spine41 del 3 ott)
+- Profilo Standard (`separationProfiles.standard.recolor = true`, `sheetAssembly.recolorVisible`): i TAGLI restano quelli della tavola (6 ott), i COLORI visibili a riposo vengono dall'originale (come il 3 ott). A riposo il personaggio è quello originale, non quello ridisegnato dal modello.
+- Pezzi che si muovono (braccio, avambraccio, mano): nella fascia di 16 px lungo il confine con un pezzo fermo resta il colore della tavola dove l'originale mostra altro (bordo del drappo, linea nera): in movimento non ruota un pezzo d'altro.
+- Sporgenze della tavola oltre la sagoma dell'originale (fulmine ridisegnato spostato): tolte da tutti i pezzi.
+- Pixel dell'originale scoperti dalla tavola (entro 48 px): entro 4 px al pezzo più vicino; oltre, fra pezzo fermo e pezzo che si muove vince il colore più simile (braccio disegnato più corto → braccio; drappo dimenticato → busto). Oltre 48 px: `resto_N` fermi (scintille).
+- Zone nascoste: tono corretto con la differenza media originale − tavola dei pixel visibili vicini dello stesso pezzo.
+- Test: `tests/recolor.test.mjs` (zeus, avvocato, folletto: a riposo ≤ 2,5% pixel diversi, ≤ 0,5% buchi, ≤ 16 pezzi).
+- Limite: con una tavola molto ridisegnata (Jessica col profilo Standard) i colori dell'originale e le zone nascoste della tavola non si accordano: in movimento compaiono brandelli. Jessica usa il profilo Testa-busto, che non è toccato.

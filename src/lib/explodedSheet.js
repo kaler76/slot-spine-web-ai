@@ -17,7 +17,7 @@ import { labelFacePieces, labelBackHair, isFaceName, facePivot, faceFrame } from
 import { checkPieces } from "./pieceCheck.js";
 import { applyHandObjects, handObjectRig, checkHandObjects } from "./handObject.js";
 import { finishAttachments } from "./attachmentFinishing.js";
-import { planFaceGroup, transplantOriginal } from "./sheetAssembly.js";
+import { planFaceGroup, transplantOriginal, recolorVisible } from "./sheetAssembly.js";
 import { PROFILES, DEFAULT_PROFILE } from "./separationProfiles.js";
 import { noseCheck, seamCheck, motionCheck } from "./testaBustoCheck.js";
 
@@ -1077,6 +1077,17 @@ export function importExplodedSheet({ sheet, original, landmarks, joints, minAre
     assembly = { iou: +t.iou.toFixed(3), holeShare: +t.holeShare.toFixed(4), filledShare: +t.filledShare.toFixed(4) };
     if (t.rest.length)
       warnings.push(`${t.rest.map((p) => `${p.name} (${p.area} px)`).join(", ")}: parti dell'originale non presenti nella tavola, NON aggiunte (si usano solo i pezzi della tavola).`);
+    // sagoma dalla tavola, COLORI visibili dall'originale (profilo: recolor)
+    if (prof.recolor) {
+      const rc = recolorVisible(pieces, original);
+      pieces = rc.pieces;
+      if (rc.rest.length) {
+        pieces.push(...rc.rest);
+        [...pieces].sort((a, b) => a.order - b.order).forEach((p, i) => (p.order = i));
+        warnings.push(`${rc.rest.map((p) => `${p.name} (${p.area} px, su ${p.attachTo || "radice"})`).join(", ")}: parti dell'originale assenti dalla tavola (es. scintille), aggiunte come pezzi fermi con i pixel dell'originale.`);
+      }
+      warnings.push(`Colori visibili presi dall'originale (${rc.recolored} px); sagome dalla tavola. Sui pezzi che si muovono restano i colori della tavola dove l'originale mostra altro (${rc.keptSheet} px).`);
+    }
   } else if (transplant && original) {
     const t = transplantOriginal(pieces, original);
     pieces = t.pieces;
