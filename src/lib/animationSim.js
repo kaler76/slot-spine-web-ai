@@ -92,8 +92,10 @@ export function attachmentGeometry(json, world, slot) {
     return { verts, tris: att.triangles, uvs: att.uvs, mesh: true };
   }
   const m = world[slot.bone];
-  const hw = att.width / 2, hh = att.height / 2, ax = att.x || 0, ay = att.y || 0;
-  const verts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => apply(m, ax + x, ay + y));
+  // region: rettangolo ruotato e scalato dall'allegato (rotation/scaleX/scaleY), poi l'osso
+  const hw = (att.width / 2) * (att.scaleX ?? 1), hh = (att.height / 2) * (att.scaleY ?? 1), ax = att.x || 0, ay = att.y || 0;
+  const rc = Math.cos(deg(att.rotation || 0)), rs = Math.sin(deg(att.rotation || 0));
+  const verts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => apply(m, ax + x * rc - y * rs, ay + x * rs + y * rc));
   return { verts, tris: [0, 1, 2, 0, 2, 3], uvs: [0, 1, 1, 1, 1, 0, 0, 0], mesh: false };
 }
 

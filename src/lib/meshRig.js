@@ -3,16 +3,17 @@
 //   - il BRACCIO che tiene un oggetto (pezzo davanti, mesh sulle sue ossa); nel corpo la zona dietro
 //     il braccio, vicino al busto, si riempie dai pixel vicini (nessuna AI);
 //   - i CAPELLI DIETRO (pezzo sotto il corpo, catena di 2 ossa che ondeggia);
-//   - gli OCCHI: buco nel corpo, bianco e pupilla sotto (la pupilla si muove), palpebra davanti
-//     (copia della fascia sopra l'occhio che si allunga in giù per il battito).
+//   - gli OCCHI: buco nel corpo, bianco e pupilla sotto (la pupilla si muove), palpebra CHIUSA
+//     davanti (pelle + ciglia sulla forma dell'occhio) che compare e scende nel battito.
 // Tutto il resto si piega con la mesh: ossa dai punti della posa, pesi dalla mappa delle parti.
-// Versioni: zeus-mesh-1 (tag git) = tutto mesh, nessun taglio. zeus-mesh-2 = questo file.
+// Versioni (tag git): zeus-mesh-1 tutto mesh; -2 tagli; -3 fulmine rigido + chiavi Bézier;
+// -4 testa non più stirata in alto, palpebra chiusa disegnata (questo file).
 // Puro: nessun DOM.
 
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-3";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-4";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -25,7 +26,7 @@ export const MESH_RIG_RULES = {
   objectMin: 0.002, // quota del personaggio oltre cui un oggetto in mano fa tagliare il braccio
   hairMin: 0.004, // quota minima dei capelli dietro per farne un pezzo
   cuts: { arm: true, hair: true, eyes: true },
-  amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.011, testaLift: 0.009, breath: 0.01, capelli: 3.0, pupille: 0.12 },
+  amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12 },
   blinkAt: 2.0
 };
 
@@ -193,7 +194,7 @@ function findEye(center, ipd, W, H, rgba, fg) {
   }
   let hx0 = w, hx1 = -1, hy0 = h, hy1 = -1;
   for (let i = 0; i < w * h; i++) if (hole[i]) { const x = i % w, y = (i / w) | 0; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y); }
-  return { x0, y0, w, h, hole, iris, white: sn > 10 ? [sr / sn, sg / sn, sb / sn] : [240, 238, 232], box: { x0: x0 + hx0, y0: y0 + hy0, x1: x0 + hx1, y1: y0 + hy1 } };
+  return { x0, y0, w, h, hole, iris, skin, white: sn > 10 ? [sr / sn, sg / sn, sb / sn] : [240, 238, 232], box: { x0: x0 + hx0, y0: y0 + hy0, x1: x0 + hx1, y1: y0 + hy1 } };
 }
 
 /**
@@ -261,13 +262,27 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   } else hair.fill(0);
   // occhi: ossa pupilla e palpebra
   for (const e of decision.eyes ? eyes : []) {
-    const b = e.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, eh = b.y1 - b.y0 + 1;
-    e.lidH = Math.max(4, Math.round(0.6 * eh));
+    const b = e.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+    // bordo alto e basso del buco per colonna (coordinate immagine)
+    e.top = [];
+    e.bot = [];
+    for (let x = 0; x < e.w; x++) { let t = -1, bt = -1; for (let y = 0; y < e.h; y++) if (e.hole[y * e.w + x]) { if (t < 0) t = y; bt = y; } e.top.push(t < 0 ? null : t + e.y0); e.bot.push(bt < 0 ? null : bt + e.y0); }
+    // bordo alto LISCIO: inviluppo superiore (minimo su ±6 colonne) poi media su ±3: il bordo grezzo
+    // ha rientri dove le ciglia scendono sull'iride, e la palpebra chiusa usciva con una tacca
+    const env = (arr, pick, r) => arr.map((v, x) => { if (v == null) return null; let m = v; for (let d = -r; d <= r; d++) { const u = arr[x + d]; if (u != null) m = pick(m, u); } return m; });
+    const avg = (arr, r) => arr.map((v, x) => { if (v == null) return null; let sum = 0, k = 0; for (let d = -r; d <= r; d++) { const u = arr[x + d]; if (u != null) { sum += u; k++; } } return sum / k; });
+    e.top = avg(env(e.top, Math.min, 6), 3);
+    e.bot = avg(env(e.bot, Math.max, 6), 3);
     // ossa orizzontali: gli allegati restano dritti senza rotazione propria
     bones.push({ name: `occhio_${e.side}`, parent: "viso", head: { x: cx, y: cy }, tail: { x: cx + 10, y: cy } });
     bones.push({ name: `pupilla_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: cy }, tail: { x: cx + 10, y: cy } });
-    bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: b.y0 - e.lidH }, tail: { x: cx + 10, y: b.y0 - e.lidH } });
-    e.blinkScale = +((e.lidH + 0.85 * eh) / e.lidH).toFixed(3);
+    // palpebra: origine sulla linea della palpebra INFERIORE; il battito schiaccia in Y verso di lei
+    // i vertici del bordo ciglia (scala Y 0,08 come la scala 0,2 della Domatrice)
+    // palpebra CHIUSA: pelle + ciglia disegnate sulla forma dell'occhio, appesa al bordo alto;
+    // nel battito compare e scende (scala Y 0 → 1 → 0). Il metodo "pelle stirata" della Domatrice
+    // con la nostra griglia dava palpebre strappate (Zeus: occhi di 25 px, celle di 34 px).
+    e.lidTop = Math.min(...e.top.filter((v) => v != null));
+    bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: e.lidTop }, tail: { x: cx + 10, y: e.lidTop } });
   }
 
   // ossa in formato Spine
@@ -411,6 +426,49 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const b = world[boneName], cxy = toS({ x: bx0 + bw / 2, y: by0 + bh / 2 }), dx = cxy.x - b.x, dy = cxy.y - b.y, co = Math.cos(-b.a), si = Math.sin(-b.a);
     attachments[name] = { x: +(dx * co - dy * si).toFixed(2), y: +(dx * si + dy * co).toFixed(2), rotation: +deg(-b.a).toFixed(2), width: bw, height: bh };
   };
+  // PALPEBRA CHIUSA: forma del buco allargata di 2 px, colore della pelle sopra l'occhio (righe
+  // senza ciglia), leggera ombra verso il basso, ciglia (colore più scuro sopra l'occhio) sul bordo basso.
+  const lidClosed = (e) => {
+    const pad = 2, w = e.w + 2 * pad, h = e.h + 2 * pad;
+    const inside = (x, y) => { for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = x - pad + dx, Y = y - pad + dy; if (X >= 0 && Y >= 0 && X < e.w && Y < e.h && e.hole[Y * e.w + X]) return true; } return false; };
+    const skin = [0, 0, 0], lash = [255, 255, 255];
+    let n = 0, lashL = 999;
+    for (let x = 0; x < e.w; x++) {
+      if (e.top[x] == null) continue;
+      for (let dy = 2; dy <= 8; dy++) {
+        const gy = e.top[x] - dy, gx = x + e.x0, k = (gy * W + gx) * 4;
+        const l = luma(rgba[k], rgba[k + 1], rgba[k + 2]);
+        if (l < lashL) { lashL = l; lash[0] = rgba[k]; lash[1] = rgba[k + 1]; lash[2] = rgba[k + 2]; }
+        if (dy >= 5 && l > 90) { skin[0] += rgba[k]; skin[1] += rgba[k + 1]; skin[2] += rgba[k + 2]; n++; }
+      }
+    }
+    if (n) for (let k = 0; k < 3; k++) skin[k] /= n;
+    // pelle: quella della guancia sotto l'occhio (sopra ci sono ciglia, ombretto, sopracciglia)
+    if (e.skin) for (let k = 0; k < 3; k++) skin[k] = e.skin[k];
+    const px = new Uint8ClampedArray(w * h * 4), mask = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (inside(x, y)) mask[y * w + x] = 1;
+    // forma a mandorla: ellisse sul riquadro del buco (+2 px) unita al buco allargato. Bordo liscio,
+    // copre anche i rientri del buco dove le ciglia scendono sull'iride (tacca scura a occhio chiuso)
+    {
+      const bx0 = e.box.x0 - e.x0 + pad, bx1 = e.box.x1 - e.x0 + pad, by0 = e.box.y0 - e.y0 + pad, by1 = e.box.y1 - e.y0 + pad;
+      const ecx = (bx0 + bx1) / 2, ecy = (by0 + by1) / 2, erx = (bx1 - bx0) / 2 + 2, ery = (by1 - by0) / 2 + 2;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (((x - ecx) / erx) ** 2 + ((y - ecy) / ery) ** 2 <= 1) mask[y * w + x] = 1;
+    }
+    for (let x = 0; x < w; x++) {
+      let y0 = -1, y1 = -1;
+      for (let y = 0; y < h; y++) if (mask[y * w + x]) { if (y0 < 0) y0 = y; y1 = y; }
+      if (y0 < 0) continue;
+      for (let y = y0; y <= y1; y++) {
+        // palpebra: più scura in alto (piega) e appena sopra le ciglia, chiara al centro
+        const f = (y - y0) / Math.max(1, y1 - y0), sh = 0.86 + 0.14 * Math.sin(Math.PI * Math.min(1, f * 1.1));
+        const lashLine = y >= y1 - 2;
+        const c = lashLine ? lash : skin.map((v) => v * sh);
+        px.set([c[0], c[1], c[2], 255], (y * w + x) * 4);
+      }
+    }
+    const name = `palpebra_${e.side}`;
+    region(name, name, e.x0 - pad, e.y0 - pad, w, h, px);
+  };
   for (const e of decision.eyes ? eyes : []) {
     const { x0: ex, y0: ey, w, h } = e;
     const wpx = new Uint8ClampedArray(w * h * 4);
@@ -425,10 +483,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const ppx = new Uint8ClampedArray(w * h * 4);
     for (let i = 0; i < w * h; i++) if (e.iris[i]) { const g = (Math.floor(i / w) + ey) * W + (i % w) + ex; ppx.set(rgba.subarray(g * 4, g * 4 + 4), i * 4); }
     region(`pupilla_${e.side}`, `pupilla_${e.side}`, ex, ey, w, h, ppx);
-    const bx0 = e.box.x0 - 2, bx1 = e.box.x1 + 2, top = e.box.y0 - e.lidH, bw = bx1 - bx0 + 1, bh = e.lidH;
-    const lpx = new Uint8ClampedArray(bw * bh * 4);
-    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const g = (top + y) * W + bx0 + x; if (fg[g] && !holeMask[g]) lpx.set(rgba.subarray(g * 4, g * 4 + 4), (y * bw + x) * 4); }
-    region(`palpebra_${e.side}`, `palpebra_${e.side}`, bx0, top, bw, bh, lpx);
+    lidClosed(e);
   }
 
   // slot: ordine di disegno (dietro → davanti)
@@ -438,7 +493,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`bianco_${e.side}`, `occhio_${e.side}`));
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`pupilla_${e.side}`, `pupilla_${e.side}`));
   slots.push(slotFor("corpo", "root"));
-  for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`));
+  for (const e of decision.eyes ? eyes : []) slots.push({ ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
 
@@ -498,7 +553,7 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
   const bones = {
     schiena: { rotate: rot(A.schiena, wave(2)) },
     petto: { rotate: rot(-A.petto, bump()), scale: xy((t) => 1 + A.breath * bump(0.25)(t), one) },
-    testa: { rotate: rot(A.testa, wave(1, 0.15)), translate: xy((t) => A.testaLift * height * bump(0.1)(t), zero) },
+    testa: { rotate: rot(A.testa, wave(1, 0.15)) },
     viso: { translate: xy((t) => -A.visoSlide * height * bump(0.1)(t), zero) }
   };
   for (const [s, ph] of [["sx", 0], ["dx", 0.3]]) {
@@ -510,6 +565,7 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
     bones.capelli_1 = { rotate: rot(A.capelli, wave(1, 0.35)) };
     bones.capelli_2 = { rotate: rot(A.capelli * 1.3, wave(1, 0.45)) };
   }
+  const slotsAnim = {};
   if (decision.eyes) {
     // pupille: due sguardi (di lato e un po' in basso), come la Domatrice
     const look = (t) => { const p = t / T; const g = (c) => Math.exp(-((p - c) ** 2) / 0.006); return g(0.22) + g(0.72); };
@@ -517,10 +573,12 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
       bones[`pupilla_${e.side}`] = { translate: xy((t) => -A.pupille * ipd * 0.5 * look(t), (t) => -A.pupille * ipd * 0.25 * look(t)) };
       // battito: 0,13 s chiusura, 0,2 s apertura (chiavi lineari, è uno scatto voluto)
       const t0 = rules.blinkAt;
-      bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 1 }, { time: t0, x: 1, y: 1 }, { time: +(t0 + 0.133).toFixed(3), x: 1, y: e.blinkScale }, { time: +(t0 + 0.333).toFixed(3), x: 1, y: 1 }, { time: T, x: 1, y: 1 }] };
+      const r3 = (v) => +v.toFixed(3);
+      bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 0.05 }, { time: t0, x: 1, y: 0.05 }, { time: r3(t0 + 0.1), x: 1, y: 1 }, { time: r3(t0 + 0.167), x: 1, y: 1 }, { time: r3(t0 + 0.333), x: 1, y: 0.05 }, { time: T, x: 1, y: 0.05 }] };
+      slotsAnim[`palpebra_${e.side}`] = { rgba: [{ time: 0, color: "ffffff00" }, { time: r3(t0 - 0.001), color: "ffffff00" }, { time: t0, color: "ffffffff" }, { time: r3(t0 + 0.333), color: "ffffffff" }, { time: r3(t0 + 0.334), color: "ffffff00" }] };
     }
   }
-  return { bones };
+  return { bones, slots: slotsAnim };
 }
 
 /** Atlas: una pagina per immagine (file <nome>.png accanto al json). */
