@@ -9,7 +9,7 @@ import { recognizeParts, foregroundFromUniformBorder } from "../src/lib/partReco
 import { buildMeshRig, atlasFor, MESH_RIG_RULES } from "../src/lib/meshRig.js";
 import { poseAt, attachmentGeometry, simulateLoop } from "../src/lib/animationSim.js";
 
-const OUT = process.argv[2] || "prototipi/zeus_mesh_3";
+const OUT = process.argv[2] || "prototipi/zeus_mesh_5";
 const FRAMES = Number(process.argv[4] || 60); // fotogrammi di controllo sul loop (60 = 10 al secondo)
 const BOOST = Number(process.argv[3] || 1);
 const D = "tests/fixtures/exploded/zeus/";

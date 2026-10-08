@@ -7,13 +7,14 @@
 //     davanti (pelle + ciglia sulla forma dell'occhio) che compare e scende nel battito.
 // Tutto il resto si piega con la mesh: ossa dai punti della posa, pesi dalla mappa delle parti.
 // Versioni (tag git): zeus-mesh-1 tutto mesh; -2 tagli; -3 fulmine rigido + chiavi Bézier;
-// -4 testa non più stirata in alto, palpebra chiusa disegnata (questo file).
+// -4 testa non più stirata in alto, palpebra chiusa disegnata; -5 palpebra "pelle" come la
+// Domatrice (anello sul contorno dell'occhio schiacciato sulla linea di mezzo) (questo file).
 // Puro: nessun DOM.
 
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-4";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-5";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -27,7 +28,8 @@ export const MESH_RIG_RULES = {
   hairMin: 0.004, // quota minima dei capelli dietro per farne un pezzo
   cuts: { arm: true, hair: true, eyes: true },
   amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12 },
-  blinkAt: 2.0
+  blinkAt: 2.0,
+  lid: "pelle" // "pelle" = pelle stirata come la Domatrice; "disegnata" = palpebra chiusa disegnata (zeus-mesh-4)
 };
 
 const lerp = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
@@ -282,7 +284,10 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     // nel battito compare e scende (scala Y 0 → 1 → 0). Il metodo "pelle stirata" della Domatrice
     // con la nostra griglia dava palpebre strappate (Zeus: occhi di 25 px, celle di 34 px).
     e.lidTop = Math.min(...e.top.filter((v) => v != null));
-    bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: e.lidTop }, tail: { x: cx + 10, y: e.lidTop } });
+    // metodo "pelle" (Domatrice): osso al centro dell'occhio, il battito schiaccia in Y l'anello del
+    // contorno verso la linea di mezzo (palpebra sopra giù, sotto su). Metodo "disegnata": osso sul bordo alto.
+    const lidY = rules.lid === "pelle" ? cy : e.lidTop;
+    bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: lidY }, tail: { x: cx + 10, y: lidY } });
   }
 
   // ossa in formato Spine
@@ -428,6 +433,60 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   };
   // PALPEBRA CHIUSA: forma del buco allargata di 2 px, colore della pelle sopra l'occhio (righe
   // senza ciglia), leggera ombra verso il basso, ciglia (colore più scuro sopra l'occhio) sul bordo basso.
+  // PALPEBRA "PELLE" come la Domatrice (analisi 8 ott): un anello di vertici sul contorno dell'occhio
+  // (ciglia sopra e sotto) pesato al 100% sull'osso palpebra, al centro dell'occhio; un anello esterno
+  // fermo sull'osso occhio; in mezzo un anello al 50%. Il battito schiaccia l'anello interno sulla
+  // linea di mezzo: la pelle sopra scende, quella sotto sale, le ciglia si incontrano.
+  // È un pezzo a parte (copia dei pixel del corpo attorno all'occhio, buco escluso) davanti al corpo:
+  // a riposo coincide col corpo, quindi non si vede; nel battito la pelle stirata copre il buco.
+  const lidSkin = (e) => {
+    const b = e.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, ew = b.x1 - b.x0 + 1, eh = b.y1 - b.y0 + 1;
+    const N = 24;
+    // raggio del buco per settore angolare (massimo dei pixel del buco nel settore): l'anello interno
+    // racchiude TUTTO il buco, anche gli angoli fra un raggio e l'altro (a occhio chiuso non resta nulla)
+    const rs = new Array(N).fill(0);
+    for (let i = 0; i < e.w * e.h; i++) {
+      if (!e.hole[i]) continue;
+      const x = (i % e.w) + e.x0 + 0.5 - cx, y = ((i / e.w) | 0) + e.y0 + 0.5 - cy;
+      const a = (Math.atan2(y, x) + 2 * Math.PI) % (2 * Math.PI), d = Math.hypot(x, y) + 0.8;
+      for (const k of [Math.floor((a / (2 * Math.PI)) * N - 0.5), Math.floor((a / (2 * Math.PI)) * N + 0.5)]) { const j = (k + N) % N; rs[j] = Math.max(rs[j], d); }
+    }
+    const inner = [], outer = [], midR = [];
+    const orx = ew / 2 + 0.55 * eh, ory = eh / 2 + 0.9 * eh;
+    for (let i = 0; i < N; i++) {
+      const a = (2 * Math.PI * i) / N, dx = Math.cos(a), dy = Math.sin(a);
+      const r = rs[i] / Math.cos(Math.PI / N); // il lato del poligono non taglia gli angoli del settore
+      const pi = { x: cx + dx * (r + 1), y: cy + dy * (r + 1) };
+      // esterno: ellisse ampia attorno all'occhio, mai dentro l'anello interno
+      const ro = 1 / Math.sqrt((dx / orx) ** 2 + (dy / ory) ** 2);
+      const po = { x: cx + dx * Math.max(ro, r + 4), y: cy + dy * Math.max(ro, r + 4) };
+      inner.push(pi); outer.push(po); midR.push(lerp(pi, po, 0.5));
+    }
+    const all = [...outer, ...inner, ...midR];
+    const bx0 = Math.floor(Math.min(...all.map((p) => p.x))) - 1, bx1 = Math.ceil(Math.max(...all.map((p) => p.x))) + 1;
+    const by0 = Math.floor(Math.min(...all.map((p) => p.y))) - 1, by1 = Math.ceil(Math.max(...all.map((p) => p.y))) + 1;
+    const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1, px = new Uint8ClampedArray(bw * bh * 4);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const g = (y + by0) * W + x + bx0; if (body[g * 4 + 3] && !holeMask[g]) px.set(body.subarray(g * 4, g * 4 + 4), (y * bw + x) * 4); }
+    const name = `palpebra_${e.side}`;
+    images[name] = { width: bw, height: bh, rgba: px };
+    // vertici: contorno = anello esterno (hull), poi interno, poi mezzo
+    const occ = world[`occhio_${e.side}`], pal = world[name];
+    const local = (bb, sp) => { const dx = sp.x - bb.x, dy = sp.y - bb.y, co = Math.cos(-bb.a), si = Math.sin(-bb.a); return [+(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2)]; };
+    const uvs = [], vertices = [];
+    const push = (p, ws) => {
+      uvs.push(+((p.x - bx0) / (bw - 1)).toFixed(5), +((p.y - by0) / (bh - 1)).toFixed(5));
+      const sp = toS(p);
+      vertices.push(ws.length);
+      for (const [bn, w] of ws) vertices.push(boneIndex[bn], ...local(bn === name ? pal : occ, sp), w);
+    };
+    outer.forEach((p) => push(p, [[`occhio_${e.side}`, 1]]));
+    inner.forEach((p) => push(p, [[name, 1]]));
+    midR.forEach((p) => push(p, [[`occhio_${e.side}`, 0.5], [name, 0.5]]));
+    const O = (i) => i % N, I = (i) => N + (i % N), M = (i) => 2 * N + (i % N);
+    const triangles = [];
+    for (let i = 0; i < N; i++) triangles.push(O(i), O(i + 1), M(i + 1), O(i), M(i + 1), M(i), M(i), M(i + 1), I(i + 1), M(i), I(i + 1), I(i));
+    attachments[name] = { type: "mesh", path: name, uvs, triangles, vertices, hull: N, width: bw, height: bh };
+  };
   const lidClosed = (e) => {
     const pad = 2, w = e.w + 2 * pad, h = e.h + 2 * pad;
     const inside = (x, y) => { for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const X = x - pad + dx, Y = y - pad + dy; if (X >= 0 && Y >= 0 && X < e.w && Y < e.h && e.hole[Y * e.w + X]) return true; } return false; };
@@ -483,7 +542,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const ppx = new Uint8ClampedArray(w * h * 4);
     for (let i = 0; i < w * h; i++) if (e.iris[i]) { const g = (Math.floor(i / w) + ey) * W + (i % w) + ex; ppx.set(rgba.subarray(g * 4, g * 4 + 4), i * 4); }
     region(`pupilla_${e.side}`, `pupilla_${e.side}`, ex, ey, w, h, ppx);
-    lidClosed(e);
+    if (rules.lid === "pelle") lidSkin(e);
+    else lidClosed(e);
   }
 
   // slot: ordine di disegno (dietro → davanti)
@@ -493,7 +553,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`bianco_${e.side}`, `occhio_${e.side}`));
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`pupilla_${e.side}`, `pupilla_${e.side}`));
   slots.push(slotFor("corpo", "root"));
-  for (const e of decision.eyes ? eyes : []) slots.push({ ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
+  for (const e of decision.eyes ? eyes : []) slots.push(rules.lid === "pelle" ? slotFor(`palpebra_${e.side}`, `occhio_${e.side}`) : { ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
 
@@ -574,6 +634,11 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
       // battito: 0,13 s chiusura, 0,2 s apertura (chiavi lineari, è uno scatto voluto)
       const t0 = rules.blinkAt;
       const r3 = (v) => +v.toFixed(3);
+      if (rules.lid === "pelle") {
+        // come la Domatrice (1 → 0,2): qui 1 → -0,04 in 0,13 s (le due palpebre si sovrappongono appena: nessuna fessura), ritorno in 0,2 s
+        bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 1 }, { time: t0, x: 1, y: 1 }, { time: r3(t0 + 0.133), x: 1, y: -0.04 }, { time: r3(t0 + 0.333), x: 1, y: 1 }, { time: T, x: 1, y: 1 }] };
+        continue;
+      }
       bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 0.05 }, { time: t0, x: 1, y: 0.05 }, { time: r3(t0 + 0.1), x: 1, y: 1 }, { time: r3(t0 + 0.167), x: 1, y: 1 }, { time: r3(t0 + 0.333), x: 1, y: 0.05 }, { time: T, x: 1, y: 0.05 }] };
       slotsAnim[`palpebra_${e.side}`] = { rgba: [{ time: 0, color: "ffffff00" }, { time: r3(t0 - 0.001), color: "ffffff00" }, { time: t0, color: "ffffffff" }, { time: r3(t0 + 0.333), color: "ffffffff" }, { time: r3(t0 + 0.334), color: "ffffff00" }] };
     }
