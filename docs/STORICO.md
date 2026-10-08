@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-9 | 8 ott | **Sorriso ridisegnato con Gemini** (bocca chiusa / con i denti): ritaglio del viso → Gemini → riallineamento → colori → pezzo sfumato in dissolvenza | Il sorriso deformato non andava bene: "bisogna utilizzare Gemini per creare la parte" | G1–G4 |
 | zeus-mesh-8 | 8 ott | **Sorriso** a scelta (no / nel loop / sempre): angoli della bocca trovati dai pixel, pezzo ad anelli sul viso, broncio raddrizzato | Richiesta: far sorridere l'avvocato | S1–S6 |
 | zeus-mesh-7 | 8 ott | Braccio lungo il fianco tagliato dal **gomito** (auto: angolo omero ≤ 35°), isole del corpo che toccano il braccio vanno nel pezzo | Domatrice: il pezzo si portava via risvolto e bottoni (striscia grigia in movimento), frammento di cerchio sospeso | D1–D5 + M1–M7 |
 | zeus-mesh-6 | 8 ott | Nell'app: Riconosci parti → **Crea character** (tabella scelte, anteprima col player Spine 4.1.56, zip Spine 4.1) | Metodo usabile dal sito, non solo da script | build + prova Zeus nel browser |

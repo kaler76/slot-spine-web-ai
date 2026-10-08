@@ -1,7 +1,7 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-8, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9, 8 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
-("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso).
+("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato).
 
 ## Principio
 L'immagine ORIGINALE è il corpo. Non si ridisegna il personaggio: si deforma con una mesh legata alle ossa e si
@@ -62,6 +62,27 @@ Richiesta dell'8 ott (avvocato: "come faccio a farlo sorridere"). Scelta nell'ap
   tiene, torna 4,8→5,3 s (dopo il battito a 2 s). "sempre": spostamento costante (nel setup la bocca resta disegnata).
 - Limite noto: è una deformazione, non un ridisegno; sotto gli angoli la pelle si stira un po'. Una bocca aperta coi
   denti richiederebbe di disegnarla (Gemini).
+
+## R10 — Sorriso RIDISEGNATO con Gemini (G1–G4), zeus-mesh-9
+Il sorriso deformato (R9) non convince ("bisogna utilizzare Gemini per creare la parte"). Nell'app, con Sorriso ≠ no:
+**bocca ridisegnata (Gemini)** (di serie) oppure **deformazione (senza AI)**; con Gemini: **bocca chiusa** o **con i denti**.
+1. Angoli e larghezza della bocca come in R9 (`findMouth`).
+2. Ritaglio 16:9 attorno alla bocca (5 × la larghezza; naso e mento dentro), trasparente → grigio medio, ingrandito a
+   1376 px e mandato alla funzione edge già in produzione `generate-sprite-sheet` (prompt personalizzato + immagine;
+   `referenceAnalysisError` valorizzato per saltare l'analisi del riferimento). Nessuna nuova funzione da pubblicare,
+   la chiave resta nei Secrets di Supabase, modello `gemini-3-pro-image-preview`.
+3. Prompt (`SMILE_PROMPTS`): cambiare SOLO la bocca, inquadratura e tutto il resto identici.
+4. **Riallineamento**: la risposta, riportata alle misure del ritaglio, si sposta (±6%) e si scala (0,94–1,06) finché i
+   pixel FUORI dalla bocca coincidono con l'originale; scarto medio > 22 → avviso "Gemini ha cambiato anche il resto del
+   viso: meglio ridisegnare".
+5. **Colori**: guadagno + scarto per canale stimati sull'anello attorno alla bocca (stessa pelle e luce).
+6. **Pezzo `bocca_sorriso`**: solo l'ellisse della bocca (1,15 × 0,85 la larghezza), pieno fino a 0,65 del raggio, poi
+   sfumato a zero; region sull'osso "viso", davanti al corpo, invisibile nel setup (colore ffffff00).
+7. **Animazione**: "nel loop" compare 3,0→3,35 s, resta, sparisce 4,85→5,2 s; "sempre" visibile per tutto il loop.
+   Con il pezzo di Gemini non si usa la deformazione R9.
+- Nell'app: anteprime Originale / Gemini / Risultato, riallineamento trovato, pulsante "🔄 Ridisegna bocca (Gemini)".
+  La risposta resta in memoria: "Ricrea" non richiama Gemini se il tipo di bocca non cambia.
+- Costo: una immagine Gemini per ogni "Crea character"/"Ridisegna" col sorriso ridisegnato.
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

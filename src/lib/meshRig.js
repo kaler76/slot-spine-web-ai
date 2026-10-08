@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-8";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -218,7 +218,7 @@ function findEye(center, ipd, W, H, rgba, fg) {
  * o rossi come le labbra; la componente più larga vicino al centro dà gli angoli (estremi sinistro e destro).
  * Senza bocca riconoscibile si usano i punti della posa.
  */
-function findMouth(landmarks, ipd, W, H, rgba, fg) {
+export function findMouth(landmarks, ipd, W, H, rgba, fg) {
   const a = landmarks[9], b = landmarks[10]; // 9 = bocca sinistra del personaggio, 10 = destra
   const mw0 = Math.max(Math.hypot(a.x - b.x, a.y - b.y), 0.45 * ipd);
   const c0 = mid(a, b);
@@ -274,7 +274,7 @@ function findMouth(landmarks, ipd, W, H, rgba, fg) {
  * @param {{ width, height, rgba, fg: Uint8Array, parts: Uint8Array, categories?: Uint8Array, landmarks, joints }} input
  * @returns {{ json, images: { [nome]: {width,height,rgba} }, report }}
  */
-export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints }, rules = MESH_RIG_RULES) {
+export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch = null }, rules = MESH_RIG_RULES) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1, fgN = 0;
   for (let i = 0; i < W * H; i++) if (fg[i]) { fgN++; const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   x0 = Math.max(0, x0 - rules.pad); y0 = Math.max(0, y0 - rules.pad); x1 = Math.min(W - 1, x1 + rules.pad); y1 = Math.min(H - 1, y1 + rules.pad);
@@ -361,11 +361,13 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   }
 
   // bocca: ossa agli angoli (figlie di "viso"), solo se richiesto il sorriso
-  const mouth = rules.smile && rules.smile !== "no" ? findMouth(landmarks, ipd, W, H, rgba, fg) : null;
+  // con la bocca ridisegnata da Gemini (smilePatch, R10) niente deformazione: il pezzo compare in dissolvenza
+  const mouth = rules.smile && rules.smile !== "no" && !smilePatch ? findMouth(landmarks, ipd, W, H, rgba, fg) : null;
+  if (smilePatch) decision.reasons.push(`bocca: sorriso RIDISEGNATO (Gemini) ${rules.smile === "sempre" ? "tenuto per tutto il loop" : "nel loop (3–5,2 s)"}, pezzo ${smilePatch.width}×${smilePatch.height} px`);
   if (mouth) {
     for (const [s, c] of [["sx", mouth.sx], ["dx", mouth.dx]]) bones.push({ name: `bocca_${s}`, parent: "viso", head: c, tail: { x: c.x + 10, y: c.y } });
     decision.reasons.push(`bocca: sorriso ${rules.smile === "sempre" ? "tenuto per tutto il loop" : "nel loop (3–5,3 s)"} (bocca ${Math.round(mouth.width)} px${mouth.frown > 1 ? `, all'ingiù di ${Math.round(mouth.frown)} px` : ""}${mouth.fromPose ? ", angoli dalla posa" : ""})`);
-  } else if (rules.smile && rules.smile !== "no") decision.reasons.push("bocca: non trovata, niente sorriso");
+  } else if (rules.smile && rules.smile !== "no" && !smilePatch) decision.reasons.push("bocca: non trovata, niente sorriso");
 
   // ossa in formato Spine
   const world = { root: { x: 0, y: 0, a: 0 } };
@@ -700,6 +702,11 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`pupilla_${e.side}`, `pupilla_${e.side}`));
   slots.push(slotFor("corpo", "root"));
   if (attachments.bocca) slots.push(slotFor("bocca", "viso"));
+  if (smilePatch) {
+    region("bocca_sorriso", "viso", smilePatch.x0, smilePatch.y0, smilePatch.width, smilePatch.height, smilePatch.rgba);
+    // nel setup è invisibile (la bocca resta quella del disegno): compare con l'animazione
+    slots.push({ ...slotFor("bocca_sorriso", "viso"), color: "ffffff00" });
+  }
   for (const e of decision.eyes ? eyes : []) slots.push(rules.lid === "pelle" ? slotFor(`palpebra_${e.side}`, `occhio_${e.side}`) : { ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
@@ -709,7 +716,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     bones: jsonBones,
     slots,
     skins: [{ name: "default", attachments: skinAtt }],
-    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }) }
+    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }, !!smilePatch) }
   };
   return {
     json,
@@ -750,7 +757,7 @@ export function smoothKeys(T, fns, fields) {
 }
 
 /** Loop di 6 s sul modello della Domatrice. */
-function loopAnimation(rules, height, decision, eyes, ipd, mouth) {
+function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn = false) {
   const T = rules.loopSeconds, A = rules.amp;
   const wave = (k, ph = 0) => (t) => Math.sin(2 * Math.PI * (k * t / T + ph));
   const bump = (ph = 0) => (t) => 0.5 * (1 - Math.cos(2 * Math.PI * (t / T + ph)));
@@ -787,6 +794,12 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth) {
     }
   }
   const slotsAnim = {};
+  if (smileRedrawn) {
+    // dissolvenza del sorriso ridisegnato: compare 3,0→3,35 s, resta, sparisce 4,85→5,2 s
+    slotsAnim.bocca_sorriso = { rgba: rules.smile === "sempre"
+      ? [{ time: 0, color: "ffffffff" }]
+      : [{ time: 0, color: "ffffff00" }, { time: 3, color: "ffffff00" }, { time: 3.35, color: "ffffffff" }, { time: 4.85, color: "ffffffff" }, { time: 5.2, color: "ffffff00" }, { time: T, color: "ffffff00" }] };
+  }
   if (decision.eyes) {
     // pupille: due sguardi (di lato e un po' in basso), come la Domatrice
     // distanza periodica: il loop si chiude sullo stesso valore

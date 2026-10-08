@@ -2,7 +2,42 @@ import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import { SpinePlayer } from "@esotericsoftware/spine-player";
 import "@esotericsoftware/spine-player/dist/spine-player.css";
-import { buildMeshRig, packAtlas, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
+import { buildMeshRig, packAtlas, findMouth, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
+import { SMILE_PROMPTS, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
+
+// Gemini (gemini-3-pro-image-preview) tramite la funzione edge già in produzione: prompt personalizzato +
+// immagine di riferimento; nessuna nuova funzione da pubblicare. Formato di uscita della funzione: 16:9, 1K.
+const GEMINI_SIDE = 1376;
+async function geminiEditMouth(cropCanvas, kind) {
+  const big = document.createElement("canvas");
+  big.width = GEMINI_SIDE;
+  big.height = Math.round((GEMINI_SIDE * 9) / 16);
+  const g = big.getContext("2d");
+  g.imageSmoothingQuality = "high";
+  g.drawImage(cropCanvas, 0, 0, big.width, big.height);
+  const b64 = big.toDataURL("image/png").split(",")[1];
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-sprite-sheet`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY },
+    // referenceAnalysisError valorizzato: la funzione salta l'analisi del riferimento (una chiamata in meno)
+    body: JSON.stringify({ group: "face", promptOverride: SMILE_PROMPTS[kind], referenceImagesBase64: [b64], referenceAnalysisError: "non richiesta: ritocco della bocca" })
+  });
+  const raw = await res.text();
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error(`Risposta non valida (HTTP ${res.status}): ${raw.slice(0, 200)}`); }
+  if (!res.ok || data?.error || !data?.imageBase64) throw new Error(data?.error || `Errore HTTP ${res.status}`);
+  return data.imageBase64;
+}
+function loadB64(b64) {
+  return new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error("immagine di Gemini non leggibile")); im.src = `data:image/png;base64,${b64}`; });
+}
+function canvasOf(rgba, w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  c.getContext("2d").putImageData(new ImageData(rgba instanceof Uint8ClampedArray ? rgba : new Uint8ClampedArray(rgba), w, h), 0, 0);
+  return c;
+}
 
 /**
  * Metodo MESH (docs/REGOLE_MESH.md): dall'originale analizzato in "Riconosci parti" crea il
@@ -14,6 +49,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const [boost, setBoost] = useState(1);
   const [cuts, setCuts] = useState({ ...MESH_RIG_RULES.cuts });
   const [smile, setSmile] = useState("no");
+  const [smileHow, setSmileHow] = useState("gemini"); // "gemini" = bocca ridisegnata, "mesh" = deformazione
+  const [smileKind, setSmileKind] = useState("chiusa");
+  const [gem, setGem] = useState(null); // { kind, patch, previews: { orig, gen, result } }
   const [pkg, setPkg] = useState(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -22,9 +60,43 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const base = (fileName || "character").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase() || "character";
 
   // a nuova analisi il pacchetto precedente non vale più
-  useEffect(() => setPkg(null), [original, parts]);
+  useEffect(() => { setPkg(null); setGem(null); }, [original, parts]);
 
-  async function build() {
+  /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
+  async function makeGeminiSmile(fg) {
+    const { width: W, height: H, rgba } = original;
+    const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
+    const mouth = findMouth(landmarks, ipd, W, H, rgba, fg);
+    const box = mouthCropBox(mouth);
+    const orig = cropRgba(rgba, W, H, box);
+    // sfondo grigio medio sotto il trasparente: Gemini lavora meglio su un'immagine piena
+    const flat = new Uint8ClampedArray(orig);
+    for (let i = 0; i < flat.length; i += 4) { const a = flat[i + 3] / 255; for (let k = 0; k < 3; k++) flat[i + k] = flat[i + k] * a + 128 * (1 - a); flat[i + 3] = 255; }
+    setStatus("⏳ Gemini ridisegna la bocca (20-60 s)...");
+    const b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), smileKind);
+    const im = await loadB64(b64);
+    const small = document.createElement("canvas");
+    small.width = box.width; small.height = box.height;
+    const sg = small.getContext("2d");
+    sg.imageSmoothingQuality = "high";
+    sg.drawImage(im, 0, 0, box.width, box.height);
+    const gen = sg.getImageData(0, 0, box.width, box.height).data;
+    const patch = smilePatchFromGemini({ orig, gen, box, mouth });
+    if (patch.error) throw new Error(patch.error);
+    // anteprime: originale, risposta di Gemini, risultato (pezzo sopra l'originale)
+    const result = new Uint8ClampedArray(flat);
+    for (let y = 0; y < patch.height; y++) for (let x = 0; x < patch.width; x++) {
+      const cx = x + patch.x0 - box.x0, cy = y + patch.y0 - box.y0, i = (y * patch.width + x) * 4, o = (cy * box.width + cx) * 4, a = patch.rgba[i + 3] / 255;
+      if (cx < 0 || cy < 0 || cx >= box.width || cy >= box.height) continue;
+      for (let k = 0; k < 3; k++) result[o + k] = result[o + k] * (1 - a) + patch.rgba[i + k] * a;
+    }
+    const url = (c) => c.toDataURL("image/png");
+    const g = { kind: smileKind, patch, previews: { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small), result: url(canvasOf(result, box.width, box.height)) } };
+    setGem(g);
+    return g;
+  }
+
+  async function build(forceGemini = false) {
     setBusy(true);
     setStatus("⏳ Creo il rig mesh...");
     try {
@@ -38,7 +110,13 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         smile,
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
-      const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints }, rules);
+      let smilePatch = null;
+      if (smile !== "no" && smileHow === "gemini") {
+        const g = gem && gem.kind === smileKind && !forceGemini ? gem : await makeGeminiSmile(fg);
+        smilePatch = g.patch;
+        setStatus("⏳ Creo il rig mesh...");
+      }
+      const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
       json.skeleton.images = "./images/";
       const page = packAtlas(images, `${base}.png`);
       const pngs = {};
@@ -127,6 +205,20 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
             <option value="loop">nel loop (sorride e torna)</option>
             <option value="sempre">sempre (sorriso fisso)</option>
           </select>
+          {smile !== "no" && (
+            <>
+              <select value={smileHow} disabled={busy} onChange={(e) => setSmileHow(e.target.value)} style={{ marginLeft: 6 }}>
+                <option value="gemini">bocca ridisegnata (Gemini)</option>
+                <option value="mesh">deformazione (senza AI)</option>
+              </select>
+              {smileHow === "gemini" && (
+                <select value={smileKind} disabled={busy} onChange={(e) => setSmileKind(e.target.value)} style={{ marginLeft: 6 }}>
+                  <option value="chiusa">bocca chiusa</option>
+                  <option value="aperta">con i denti</option>
+                </select>
+              )}
+            </>
+          )}
         </label>
         <label className="field-label-inline">
           Intensità
@@ -136,7 +228,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
             <option value={1.5}>alta</option>
           </select>
         </label>
-        <button type="button" className="btn" disabled={busy} onClick={build}>
+        <button type="button" className="btn" disabled={busy} onClick={() => build(false)}>
           {pkg ? "🔄 Ricrea" : "▶️ Crea character"}
         </button>
         {pkg && (
@@ -144,6 +236,23 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         )}
       </div>
       {status && <div className="status">{status}</div>}
+      {gem && smile !== "no" && smileHow === "gemini" && (
+        <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0" }}>
+          {[["Originale", gem.previews.orig], ["Gemini", gem.previews.gen], ["Risultato", gem.previews.result]].map(([t, u]) => (
+            <figure key={t} style={{ margin: 0, textAlign: "center", fontSize: 12 }}>
+              <img src={u} alt={t} style={{ width: 220, borderRadius: 4, border: "1px solid #333" }} />
+              <figcaption>{t}</figcaption>
+            </figure>
+          ))}
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            Riallineamento: {gem.patch.shift.dx.toFixed(1)}, {gem.patch.shift.dy.toFixed(1)} px, scala {gem.patch.shift.s.toFixed(3)}
+            {gem.patch.mismatch > 22 && <div style={{ color: "#ffb347" }}>⚠️ Gemini ha cambiato anche il resto del viso: meglio ridisegnare.</div>}
+            <div>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => build(true)} style={{ marginTop: 6 }}>🔄 Ridisegna bocca (Gemini)</button>
+            </div>
+          </div>
+        </div>
+      )}
       {pkg && (
         <>
           <table style={{ borderCollapse: "collapse", margin: "8px 0", fontSize: 13 }}>
