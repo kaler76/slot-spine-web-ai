@@ -11,6 +11,7 @@
     "test": "node --test"
   },
   "dependencies": {
+    "@esotericsoftware/spine-player": "4.1.56",
     "@mediapipe/tasks-vision": "^1.0.1",
     "@supabase/supabase-js": "^2.112.3",
     "jszip": "^3.10.1",

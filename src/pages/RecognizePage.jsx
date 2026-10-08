@@ -6,6 +6,7 @@ import { resolvePose, acceptDetectedPose, validatePose } from "../lib/poseRecove
 import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 import ManualPosePicker from "../components/ManualPosePicker.jsx";
+import MeshRigExport from "../components/MeshRigExport.jsx";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
@@ -269,7 +270,7 @@ export default function RecognizePage() {
         }
       }
       sourceRef.current = { img, W, H, rgba };
-      setResult({ W, H, landmarks, categories, hasAlpha, ...rec, poseSource: recovered.source, heldObjects: recovered.heldObjects, fileName: file.name });
+      setResult({ W, H, landmarks, categories, hasAlpha, fgAlpha: alpha || keyed || null, ...rec, poseSource: recovered.source, heldObjects: recovered.heldObjects, fileName: file.name });
       setStatus(
         `✅ Analisi completata${hasAlpha ? " (primo piano dalla trasparenza del PNG)" : ""}${recovered.source === "manual" ? " — posa indicata a mano" : recovered.source === "vision" ? " — posa recuperata sul server" : ""}.`
       );
@@ -430,6 +431,17 @@ export default function RecognizePage() {
           <div className="hint">
             Pixel per parte: {Object.entries(result.stats).map(([k, v]) => `${k} ${v}`).join(" · ")}
           </div>
+          {sourceRef.current && (
+            <MeshRigExport
+              original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba }}
+              landmarks={result.landmarks}
+              joints={result.joints}
+              parts={result.parts}
+              categories={result.categories}
+              alpha={result.fgAlpha}
+              fileName={result.fileName}
+            />
+          )}
           {sourceRef.current && (
             <ExplodedSheetImport
               original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba, img: sourceRef.current.img }}
