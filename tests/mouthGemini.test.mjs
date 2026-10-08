@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { PNG } from "pngjs";
 import { recognizeParts, foregroundFromUniformBorder } from "../src/lib/partRecognition.js";
 import { buildMeshRig, findMouth, MESH_RIG_RULES } from "../src/lib/meshRig.js";
-import { mouthCropBox, cropRgba, smilePatchFromGemini, SMILE_PROMPTS } from "../src/lib/mouthGemini.js";
+import { mouthCropBox, cropRgba, smilePatchFromGemini, SMILE_PROMPTS, isGeminiRefusal } from "../src/lib/mouthGemini.js";
 import { renderFrame } from "../scripts/renderSpine.mjs";
 
 const D = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/recognition/avvocato");
@@ -43,7 +43,15 @@ for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
 const patch = smilePatchFromGemini({ orig, gen, box, mouth });
 
 test("G1 prompt: si cambia SOLO la bocca, inquadratura identica", () => {
-  for (const p of Object.values(SMILE_PROMPTS)) { assert.match(p, /ONLY the mouth/); assert.match(p, /same framing/); }
+  for (const list of Object.values(SMILE_PROMPTS)) {
+    assert.ok(list.length >= 3, "almeno 3 varianti (Gemini a volte rifiuta: IMAGE_OTHER)");
+    for (const p of list) { assert.match(p, /ONLY the mouth/); assert.match(p, /same framing/); }
+  }
+});
+
+test("G1b rifiuto di Gemini riconosciuto (si prova la variante successiva, poi la deformazione)", () => {
+  assert.ok(isGeminiRefusal("Nessuna immagine nella risposta Gemini (finishReason: IMAGE_OTHER)."));
+  assert.ok(!isGeminiRefusal("Errore HTTP 500"));
 });
 
 test("G2 riallineamento: ritrova spostamento e scala della risposta", () => {

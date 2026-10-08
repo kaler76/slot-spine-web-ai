@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-9.1 | 8 ott | Gemini rifiuta → altre 2 varianti del prompt ("personaggio illustrato originale"), poi deformazione senza AI | Avvocato: "Nessuna immagine nella risposta Gemini (IMAGE_OTHER)" | G1b |
 | zeus-mesh-9 | 8 ott | **Sorriso ridisegnato con Gemini** (bocca chiusa / con i denti): ritaglio del viso → Gemini → riallineamento → colori → pezzo sfumato in dissolvenza | Il sorriso deformato non andava bene: "bisogna utilizzare Gemini per creare la parte" | G1–G4 |
 | zeus-mesh-8 | 8 ott | **Sorriso** a scelta (no / nel loop / sempre): angoli della bocca trovati dai pixel, pezzo ad anelli sul viso, broncio raddrizzato | Richiesta: far sorridere l'avvocato | S1–S6 |
 | zeus-mesh-7 | 8 ott | Braccio lungo il fianco tagliato dal **gomito** (auto: angolo omero ≤ 35°), isole del corpo che toccano il braccio vanno nel pezzo | Domatrice: il pezzo si portava via risvolto e bottoni (striscia grigia in movimento), frammento di cerchio sospeso | D1–D5 + M1–M7 |

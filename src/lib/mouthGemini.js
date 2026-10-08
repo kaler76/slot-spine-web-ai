@@ -6,16 +6,27 @@
 // Il risultato è un pezzo "bocca_sorriso" che nel loop compare in dissolvenza sopra il corpo.
 // Puro: nessun DOM (ridimensionamento e chiamata di rete sono nel componente).
 
+// Più varianti per tipo, provate in ordine: Gemini a volte non restituisce l'immagine (finishReason
+// IMAGE_OTHER / SAFETY / PROHIBITED_CONTENT), soprattutto con volti che sembrano di persone reali (avvocato,
+// 8 ott). Le varianti dicono che è un personaggio illustrato originale e chiedono un ritocco di stile.
+const KEEP =
+  "Everything else must stay IDENTICAL to the input, pixel for pixel: same framing, same crop, same zoom, same position of every feature, same eyes, nose, hair, skin, lighting, colors, line weight and art style. " +
+  "Do not move, rotate, crop, zoom, reframe, restyle or add anything. Same image size. No text, no borders.";
+const CONTEXT = "The attached image is a crop of an ORIGINAL stylized cartoon character illustration for a slot machine game (not a photo, not a real person). ";
 export const SMILE_PROMPTS = {
-  chiusa:
-    "Edit the attached image. Change ONLY the mouth: make the character smile warmly with the mouth CLOSED (lips together, corners clearly turned up, cheeks slightly raised). " +
-    "Everything else must stay IDENTICAL to the input, pixel for pixel: same framing, same crop, same zoom, same position of every feature, same eyes, nose, hair, skin, lighting, colors, line weight and art style. " +
-    "Do not move, rotate, crop, zoom, reframe, restyle or add anything. Same image size. No text, no borders.",
-  aperta:
-    "Edit the attached image. Change ONLY the mouth: make the character smile happily with the mouth slightly OPEN showing the upper teeth (corners clearly turned up, cheeks slightly raised). " +
-    "Everything else must stay IDENTICAL to the input, pixel for pixel: same framing, same crop, same zoom, same position of every feature, same eyes, nose, hair, skin, lighting, colors, line weight and art style. " +
-    "Do not move, rotate, crop, zoom, reframe, restyle or add anything. Same image size. No text, no borders."
+  chiusa: [
+    CONTEXT + "Edit the illustration: change ONLY the mouth so the cartoon character smiles warmly with the mouth CLOSED (lips together, corners clearly turned up, cheeks slightly raised). " + KEEP,
+    CONTEXT + "Retouch only the drawn mouth area of this game artwork: draw a friendly closed-mouth smile in the same painting style. Keep the same framing and same everything else: same framing, same crop, same zoom, same colors. Do not change the face, eyes, hair or clothes. Change ONLY the mouth.",
+    "Game art retouch on an original cartoon illustration. Change ONLY the mouth to a gentle closed smile, painted in the same style. Keep same framing, same size, all other pixels unchanged."
+  ],
+  aperta: [
+    CONTEXT + "Edit the illustration: change ONLY the mouth so the cartoon character smiles happily with the mouth slightly OPEN showing the upper teeth (corners clearly turned up, cheeks slightly raised). " + KEEP,
+    CONTEXT + "Retouch only the drawn mouth area of this game artwork: draw a happy open smile showing the upper teeth in the same painting style. Keep the same framing and same everything else: same framing, same crop, same zoom, same colors. Do not change the face, eyes, hair or clothes. Change ONLY the mouth.",
+    "Game art retouch on an original cartoon illustration. Change ONLY the mouth to a happy open smile with upper teeth, painted in the same style. Keep same framing, same size, all other pixels unchanged."
+  ]
 };
+/** Gemini non ha dato l'immagine (filtro o rifiuto): si prova la variante successiva del prompt. */
+export const isGeminiRefusal = (msg) => /Nessuna immagine nella risposta Gemini|IMAGE_OTHER|IMAGE_SAFETY|SAFETY|PROHIBITED_CONTENT|RECITATION/.test(String(msg || ""));
 
 /** Riquadro 16:9 attorno alla bocca (naso e mento dentro: servono per riallineare la risposta). */
 export function mouthCropBox(mouth) {

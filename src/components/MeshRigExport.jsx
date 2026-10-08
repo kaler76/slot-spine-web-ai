@@ -3,13 +3,13 @@ import JSZip from "jszip";
 import { SpinePlayer } from "@esotericsoftware/spine-player";
 import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { buildMeshRig, packAtlas, findMouth, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
-import { SMILE_PROMPTS, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
+import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 
 // Gemini (gemini-3-pro-image-preview) tramite la funzione edge già in produzione: prompt personalizzato +
 // immagine di riferimento; nessuna nuova funzione da pubblicare. Formato di uscita della funzione: 16:9, 1K.
 const GEMINI_SIDE = 1376;
-async function geminiEditMouth(cropCanvas, kind) {
+async function geminiEditMouth(cropCanvas, prompt) {
   const big = document.createElement("canvas");
   big.width = GEMINI_SIDE;
   big.height = Math.round((GEMINI_SIDE * 9) / 16);
@@ -21,7 +21,7 @@ async function geminiEditMouth(cropCanvas, kind) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY },
     // referenceAnalysisError valorizzato: la funzione salta l'analisi del riferimento (una chiamata in meno)
-    body: JSON.stringify({ group: "face", promptOverride: SMILE_PROMPTS[kind], referenceImagesBase64: [b64], referenceAnalysisError: "non richiesta: ritocco della bocca" })
+    body: JSON.stringify({ group: "face", promptOverride: prompt, referenceImagesBase64: [b64], referenceAnalysisError: "non richiesta: ritocco della bocca" })
   });
   const raw = await res.text();
   let data;
@@ -72,8 +72,15 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     // sfondo grigio medio sotto il trasparente: Gemini lavora meglio su un'immagine piena
     const flat = new Uint8ClampedArray(orig);
     for (let i = 0; i < flat.length; i += 4) { const a = flat[i + 3] / 255; for (let k = 0; k < 3; k++) flat[i + k] = flat[i + k] * a + 128 * (1 - a); flat[i + 3] = 255; }
-    setStatus("⏳ Gemini ridisegna la bocca (20-60 s)...");
-    const b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), smileKind);
+    // varianti del prompt in ordine: se Gemini rifiuta (IMAGE_OTHER...) si passa alla successiva
+    const prompts = SMILE_PROMPTS[smileKind];
+    let b64 = null, lastErr = null;
+    for (let k = 0; k < prompts.length && !b64; k++) {
+      setStatus(`⏳ Gemini ridisegna la bocca (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`);
+      try { b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), prompts[k]); }
+      catch (e) { lastErr = e; if (!isGeminiRefusal(e.message)) throw e; }
+    }
+    if (!b64) throw Object.assign(new Error(`Gemini ha rifiutato ${prompts.length} volte (${lastErr?.message || "nessuna immagine"})`), { refused: true });
     const im = await loadB64(b64);
     const small = document.createElement("canvas");
     small.width = box.width; small.height = box.height;
@@ -110,10 +117,17 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         smile,
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
-      let smilePatch = null;
+      let smilePatch = null, fallbackNote = "";
       if (smile !== "no" && smileHow === "gemini") {
-        const g = gem && gem.kind === smileKind && !forceGemini ? gem : await makeGeminiSmile(fg);
-        smilePatch = g.patch;
+        try {
+          const g = gem && gem.kind === smileKind && !forceGemini ? gem : await makeGeminiSmile(fg);
+          smilePatch = g.patch;
+        } catch (e) {
+          if (!e.refused) throw e;
+          // Gemini non disegna questo viso (filtro: spesso volti che sembrano persone reali): si usa la deformazione
+          rules.smile = smile;
+          fallbackNote = ` ⚠️ ${e.message}: usata la deformazione (senza AI). Per riprovare con Gemini premi di nuovo "Ricrea".`;
+        }
         setStatus("⏳ Creo il rig mesh...");
       }
       const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
@@ -123,7 +137,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       for (const [n, im] of Object.entries(images)) pngs[n] = await toPng(im);
       const pagePng = await toPng(page);
       setPkg({ json, atlas: page.text, pagePng, pngs, report });
-      setStatus(`✅ Rig creato: ${report.bones} ossa, ${report.slots.length} slot, ${report.bodyVertices} vertici sul corpo.`);
+      setStatus(`✅ Rig creato: ${report.bones} ossa, ${report.slots.length} slot, ${report.bodyVertices} vertici sul corpo.${fallbackNote}`);
     } catch (err) {
       setStatus(`❌ ${err.message || err}`);
     } finally {

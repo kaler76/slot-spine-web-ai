@@ -71,7 +71,10 @@ Il sorriso deformato (R9) non convince ("bisogna utilizzare Gemini per creare la
    1376 px e mandato alla funzione edge già in produzione `generate-sprite-sheet` (prompt personalizzato + immagine;
    `referenceAnalysisError` valorizzato per saltare l'analisi del riferimento). Nessuna nuova funzione da pubblicare,
    la chiave resta nei Secrets di Supabase, modello `gemini-3-pro-image-preview`.
-3. Prompt (`SMILE_PROMPTS`): cambiare SOLO la bocca, inquadratura e tutto il resto identici.
+3. Prompt (`SMILE_PROMPTS`, 3 varianti per tipo): cambiare SOLO la bocca, inquadratura e tutto il resto identici; si
+   dice che è un personaggio illustrato ORIGINALE per un gioco slot. Se Gemini non restituisce l'immagine
+   (finishReason IMAGE_OTHER / SAFETY / PROHIBITED_CONTENT: visto sull'avvocato l'8 ott, succede con volti che
+   sembrano persone reali) si prova la variante successiva; dopo 3 rifiuti si usa la deformazione R9 e lo si dice.
 4. **Riallineamento**: la risposta, riportata alle misure del ritaglio, si sposta (±6%) e si scala (0,94–1,06) finché i
    pixel FUORI dalla bocca coincidono con l'originale; scarto medio > 22 → avviso "Gemini ha cambiato anche il resto del
    viso: meglio ridisegnare".
