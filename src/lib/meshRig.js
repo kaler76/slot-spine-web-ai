@@ -8,13 +8,14 @@
 // Tutto il resto si piega con la mesh: ossa dai punti della posa, pesi dalla mappa delle parti.
 // Versioni (tag git): zeus-mesh-1 tutto mesh; -2 tagli; -3 fulmine rigido + chiavi Bézier;
 // -4 testa non più stirata in alto, palpebra chiusa disegnata; -5 palpebra "pelle" come la
-// Domatrice (anello sul contorno dell'occhio schiacciato sulla linea di mezzo) (questo file).
+// Domatrice (anello sul contorno dell'occhio schiacciato sulla linea di mezzo); -7 braccio lungo il
+// fianco tagliato dal GOMITO, isole del corpo che toccano il braccio nel pezzo (questo file).
 // Puro: nessun DOM.
 
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-5.1";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-7";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -27,6 +28,12 @@ export const MESH_RIG_RULES = {
   objectMin: 0.002, // quota del personaggio oltre cui un oggetto in mano fa tagliare il braccio
   hairMin: 0.004, // quota minima dei capelli dietro per farne un pezzo
   cuts: { arm: true, hair: true, eyes: true },
+  // braccio tagliato: dalla SPALLA se il braccio è staccato dal busto (Zeus, braccio alzato); dal
+  // GOMITO se l'omero scende lungo il fianco (Domatrice): l'omero resta nella mesh del corpo, così
+  // il pezzo non si porta via risvolto e bottoni della giacca. "auto" sceglie con armDownMaxDeg.
+  armFrom: "auto", // "auto" | "spalla" | "gomito"
+  armDownMaxDeg: 35, // omero entro questo angolo dalla direzione spalla→anca = lungo il fianco
+  elbowOverlap: 0.08, // il pezzo dal gomito prende anche questo tratto d'omero (× larghezza spalle)
   amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12 },
   blinkAt: 2.0,
   lid: "pelle" // "pelle" = pelle stirata come la Domatrice; "disegnata" = palpebra chiusa disegnata (zeus-mesh-4)
@@ -307,7 +314,37 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
 
   // ---- immagini ----
   const armMask = new Uint8Array(W * H);
-  for (const s of decision.arms) for (let i = 0; i < W * H; i++) if (lab[i] === L_[`braccio_${s}`] || lab[i] === L_[`oggetto_${s}`]) armMask[i] = 1;
+  const armFrom = {};
+  for (const s of decision.arms) {
+    const sh = by[`omero_${s}`].head, el = by[`avambraccio_${s}`].head, hip = landmarks[s === "sx" ? 23 : 24];
+    const ang = Math.abs(deg(Math.atan2(el.y - sh.y, el.x - sh.x) - Math.atan2(hip.y - sh.y, hip.x - sh.x)));
+    const down = Math.min(ang, 360 - ang);
+    armFrom[s] = rules.armFrom === "auto" || !rules.armFrom ? (down <= rules.armDownMaxDeg ? "gomito" : "spalla") : rules.armFrom;
+    decision.reasons.push(`braccio_${s} tagliato dal${armFrom[s] === "gomito" ? " GOMITO (omero lungo il fianco" : "la SPALLA (braccio staccato dal busto"}, ${down.toFixed(0)}°)`);
+    const fore = PART[`avambraccio_${s}`], wr = by[`mano_${s}`].head;
+    const dx = wr.x - el.x, dy = wr.y - el.y, len = Math.hypot(dx, dy) || 1, ov = (rules.elbowOverlap ?? 0.08) * shoulderW;
+    for (let i = 0; i < W * H; i++) {
+      if (lab[i] === L_[`oggetto_${s}`]) { armMask[i] = 1; continue; }
+      if (lab[i] !== L_[`braccio_${s}`]) continue;
+      if (armFrom[s] === "spalla") { armMask[i] = 1; continue; }
+      // dal gomito: avambraccio e mano, oltre il gomito lungo gomito→polso (meno la sovrapposizione)
+      const x = i % W, y = (i / W) | 0, t = ((x - el.x) * dx + (y - el.y) * dy) / len;
+      if (t >= -ov && (parts[i] === fore || Math.hypot(x - el.x, y - el.y) <= ov)) armMask[i] = 1;
+    }
+  }
+  // isole del corpo staccate dal resto che toccano il braccio tagliato (pezzi d'oggetto non
+  // riconosciuti, es. il cerchio vicino alla mano): vanno nel pezzo, non restano sospese nel corpo
+  if (decision.arms.length) {
+    const comp = new Int32Array(W * H).fill(-1), sizes = [];
+    for (let s0 = 0; s0 < W * H; s0++) {
+      if (!fg[s0] || armMask[s0] || comp[s0] >= 0) continue;
+      const id = sizes.length, st = [s0]; comp[s0] = id; let n = 0, touch = false;
+      while (st.length) { const i = st.pop(); n++; const x = i % W, y = (i / W) | 0; for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j]) touch = true; else if (fg[j] && comp[j] < 0) { comp[j] = id; st.push(j); } } }
+      sizes.push({ n, touch });
+    }
+    const main = sizes.reduce((b, c, k) => (c.n > sizes[b].n ? k : b), 0);
+    for (let i = 0; i < W * H; i++) { const c = comp[i]; if (c >= 0 && c !== main && sizes[c].touch && sizes[c].n < 0.02 * fgN) { armMask[i] = 1; const s = decision.arms[0]; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`]; } }
+  }
   const holeMask = new Uint8Array(W * H);
   for (const e of decision.eyes ? eyes : []) for (let i = 0; i < e.w * e.h; i++) if (e.hole[i]) holeMask[(Math.floor(i / e.w) + e.y0) * W + (i % e.w) + e.x0] = 1;
   // corpo: originale meno braccio tagliato, capelli dietro e buchi degli occhi; dietro il braccio,
@@ -320,7 +357,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   }
   const fillR = rules.fillBand * shoulderW;
   const dist = new Float32Array(W * H).fill(Infinity), dq = [];
-  for (let i = 0; i < W * H; i++) if (known[i] && lab[i] === L_.busto) { dist[i] = 0; dq.push(i); }
+  for (let i = 0; i < W * H; i++) if (known[i] && (lab[i] === L_.busto || decision.arms.some((s) => armFrom[s] === "gomito" && lab[i] === L_[`braccio_${s}`]))) { dist[i] = 0; dq.push(i); }
   for (let qi = 0; qi < dq.length; qi++) { const i = dq[qi], x = i % W, y = (i / W) | 0; if (dist[i] >= fillR) continue; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (!armMask[j] || dist[j] !== Infinity) continue; dist[j] = dist[i] + 1; dq.push(j); } }
   // solo dietro la parte alta del braccio (sopra il gomito): è quella che scopre il busto quando
   // ruota; dietro avambraccio e pugno il riempimento usciva dalla sagoma (macchie vicino al fianco)
@@ -329,7 +366,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (let i = 0; i < W * H; i++) {
     if (!armMask[i] || dist[i] > fillR) continue;
     const y = (i / W) | 0, s = decision.arms.find((a) => lab[i] === L_[`braccio_${a}`] || lab[i] === L_[`oggetto_${a}`]);
-    if (s && y <= elbowY[s]) holes.push(i);
+    if (s && (armFrom[s] === "gomito" || y <= elbowY[s])) holes.push(i);
   }
   fillHoles(body, known, W, H, holes);
   const crop = (src, bx0, by0, bw, bh) => { const out = new Uint8ClampedArray(bw * bh * 4); for (let y = 0; y < bh; y++) out.set(src.subarray(((y + by0) * W + bx0) * 4, ((y + by0) * W + bx0 + bw) * 4), y * bw * 4); return out; };
@@ -397,7 +434,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const nearLabel = (px, py) => LABELS[near[Math.round(py) * W + Math.round(px)]];
 
   // corpo: le parti tagliate contano come busto/testa (nel corpo resta solo il riempimento dietro)
-  const bodyMap = (n) => (n === "capelli" ? "testa" : decision.arms.some((s) => n === `braccio_${s}` || n === `oggetto_${s}`) ? "busto" : n);
+  // (dal gomito: l'omero resta nel corpo e segue la catena del braccio)
+  const bodyMap = (n) => (n === "capelli" ? "testa" : decision.arms.some((s) => (n === `braccio_${s}` && armFrom[s] === "spalla") || n === `oggetto_${s}`) ? "busto" : n);
   const attachments = {};
   attachments.corpo = gridMesh("corpo", x0, y0, cw, ch, rules.cells, (px, py, step) => bodyMap(majority(() => true, nearLabel)(px, py, step)));
 

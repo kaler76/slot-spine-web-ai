@@ -7,12 +7,13 @@ import path from "node:path";
 import { PNG } from "pngjs";
 import { poseAt, attachmentGeometry } from "../src/lib/animationSim.js";
 
+// bg: true = scacchiera, false = nero, [r,g,b,255] = tinta unita (per riconoscere il trasparente)
 export function renderFrame(json, images, anim, t, { scale = 0.5, box = null, bg = true } = {}) {
   const sk = json.skeleton;
   const bx = box || { x: sk.x, y: sk.y, width: sk.width, height: sk.height };
   const fw = Math.round(bx.width * scale), fh = Math.round(bx.height * scale);
   const out = new PNG({ width: fw, height: fh });
-  for (let i = 0; i < fw * fh; i++) { const x = i % fw, y = (i / fw) | 0; out.data.set(bg ? (((x >> 4) + (y >> 4)) & 1 ? [70, 70, 80, 255] : [50, 50, 58, 255]) : [0, 0, 0, 255], i * 4); }
+  for (let i = 0; i < fw * fh; i++) { const x = i % fw, y = (i / fw) | 0; out.data.set(Array.isArray(bg) ? bg : bg ? (((x >> 4) + (y >> 4)) & 1 ? [70, 70, 80, 255] : [50, 50, 58, 255]) : [0, 0, 0, 255], i * 4); }
   const world = poseAt(json, t, anim);
   const slotAnims = json.animations?.[anim]?.slots || {};
   for (const slot0 of json.slots) {

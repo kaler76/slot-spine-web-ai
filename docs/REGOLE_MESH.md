@@ -1,7 +1,7 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-5.1, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-7, 8 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
-("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7).
+("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice).
 
 ## Principio
 L'immagine ORIGINALE è il corpo. Non si ridisegna il personaggio: si deforma con una mesh legata alle ossa e si
@@ -27,6 +27,22 @@ Braccia: omero (spalla→gomito), avambraccio (gomito→polso), mano (polso→ma
 | Occhi | entrambi trovati | — |
 Le parti tagliate nel corpo valgono come busto/testa; dietro la parte alta del braccio tagliato il busto si riempie
 dai pixel vicini (fascia 0,14 × spalle, solo sopra il gomito: più in basso il riempimento usciva dalla sagoma).
+
+## R8 — Da dove si taglia il braccio (D1–D5), zeus-mesh-7
+Difetto visto sulla Domatrice (8 ott): il braccio col cerchio scende lungo il fianco; la mappa delle parti dà al
+braccio tutta la fascia destra della giacca, e il pezzo si portava via risvolto e bottoni. In movimento la fascia si
+spostava e lasciava vedere il riempimento grigio dietro, e un frammento del cerchio restava sospeso nel corpo.
+- **Dalla SPALLA** se l'omero è staccato dal busto (angolo spalla→gomito rispetto a spalla→anca > 35°): Zeus, 45°,
+  invariato (json identico a zeus-mesh-5.1).
+- **Dal GOMITO** se l'omero scende lungo il fianco (≤ 35°): Domatrice, 13°. Nel pezzo vanno avambraccio, mano e
+  oggetto, più un tratto d'omero di 0,08 × spalle attorno al gomito (sovrapposizione); l'omero e la giacca restano
+  nella mesh del corpo e seguono la catena del braccio. Il riempimento dietro il pezzo vale per tutto il pezzo vicino
+  al corpo (fascia 0,14 × spalle), non solo sopra il gomito.
+- **Isole**: parti del personaggio staccate dal corpo che toccano il braccio tagliato (< 2% del personaggio) vanno nel
+  pezzo come oggetto (Domatrice: frammento del cerchio; Zeus: un rombo di riempimento nascosto sotto il fulmine).
+- Regolabili in `MESH_RIG_RULES`: `armFrom` ("auto" | "spalla" | "gomito"), `armDownMaxDeg`, `elbowOverlap`.
+- Nell'app la tabella delle scelte mostra la riga "braccio_… tagliato dal GOMITO/dalla SPALLA (n°)".
+- Nota: il bordo blu sotto la manica della Domatrice è nell'originale (luce di contorno), non è un difetto.
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
@@ -56,10 +72,13 @@ Comando: `node scripts/verifySpineRuntime.mjs <cartella con spine-core> <json> <
 
 ## Strumenti
 - `scripts/zeusMesh.mjs [cartella] [ampiezze×] [fotogrammi]`: genera Zeus + fotogrammi di controllo.
+- `scripts/meshCase.mjs <nome> [cartella] [fotogrammi]`: stesso metodo su un caso di `tests/fixtures/recognition/<nome>/`
+  (come Riconosci parti → Crea character).
 - `scripts/renderSpine.mjs <json> <cartella png> <animazione> <uscita>`: rende qualsiasi JSON Spine (anche la Domatrice).
 - I controlli dei raccordi di `simulateLoop` valgono per i pezzi rigidi della tavola esplosa, non per questo metodo:
   qui valgono M1–M7.
 
 ## Da fare
 Bocca (angoli su ossa), catene per barba/ciocche, gambe; pulsante nell'app con la tabella taglio/mesh modificabile;
-prova su Jessica (capelli lunghi, bocchino) e Domatrice (deve ritrovare il taglio del braccio col cerchio).
+prova su Jessica (capelli lunghi, bocchino); leprecauno (mano col sacchetto DAVANTI alla pancia: mano doppia, serve l'originale per
+verificare che il riempimento copra tutta la mano dipinta sul corpo).
