@@ -150,7 +150,7 @@ export function decideCuts({ counts, fgN, eyes, hairN }, rules = MESH_RIG_RULES)
   for (const s of ["sx", "dx"]) {
     const n = counts[`oggetto_${s}`] || 0;
     if (rules.cuts.arm && n >= rules.objectMin * fgN) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, tiene un oggetto (${n} px)`); }
-    else reasons.push(`braccio_${s}: mesh${n ? ` (oggetto piccolo, ${n} px)` : ""}`);
+    else reasons.push(`braccio_${s}: mesh${n ? (rules.cuts.arm ? ` (oggetto piccolo, ${n} px)` : ` (tiene un oggetto di ${n} px ma il taglio del braccio è disattivato: l'oggetto si piega col corpo)`) : ""}`);
   }
   const hair = rules.cuts.hair && hairN >= rules.hairMin * fgN;
   reasons.push(hair ? `capelli dietro: TAGLIO, pezzo sotto il corpo (${hairN} px)` : "capelli dietro: nessuno");
