@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-7";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-8";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -34,6 +34,12 @@ export const MESH_RIG_RULES = {
   armFrom: "auto", // "auto" | "spalla" | "gomito"
   armDownMaxDeg: 35, // omero entro questo angolo dalla direzione spalla→anca = lungo il fianco
   elbowOverlap: 0.08, // il pezzo dal gomito prende anche questo tratto d'omero (× larghezza spalle)
+  // BOCCA (zeus-mesh-8): "no" | "loop" (sorride una volta nel loop) | "sempre" (sorriso tenuto per tutto il loop).
+  // Gli angoli della bocca salgono di smileUp × larghezza bocca e si allargano di smileOut ×; nel setup la
+  // bocca resta quella del disegno.
+  smile: "no",
+  smileUp: 0.16,
+  smileOut: 0.06,
   amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12 },
   blinkAt: 2.0,
   lid: "pelle" // "pelle" = pelle stirata come la Domatrice; "disegnata" = palpebra chiusa disegnata (zeus-mesh-4)
@@ -207,6 +213,63 @@ function findEye(center, ipd, W, H, rgba, fg) {
 }
 
 /**
+ * Bocca: angoli dai pixel, non solo dalla posa (i punti 9-10 di MediaPipe stanno spesso sopra la bocca:
+ * avvocato). Nel riquadro attorno ai punti della posa si cercano i pixel della bocca, più scuri della pelle
+ * o rossi come le labbra; la componente più larga vicino al centro dà gli angoli (estremi sinistro e destro).
+ * Senza bocca riconoscibile si usano i punti della posa.
+ */
+function findMouth(landmarks, ipd, W, H, rgba, fg) {
+  const a = landmarks[9], b = landmarks[10]; // 9 = bocca sinistra del personaggio, 10 = destra
+  const mw0 = Math.max(Math.hypot(a.x - b.x, a.y - b.y), 0.45 * ipd);
+  const c0 = mid(a, b);
+  const x0 = Math.max(0, Math.round(c0.x - 0.95 * mw0)), x1 = Math.min(W - 1, Math.round(c0.x + 0.95 * mw0));
+  const y0 = Math.max(0, Math.round(c0.y - 0.25 * mw0)), y1 = Math.min(H - 1, Math.round(c0.y + 0.85 * mw0));
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const fromPose = () => ({ sx: { x: a.x, y: a.y }, dx: { x: b.x, y: b.y }, center: c0, width: Math.hypot(a.x - b.x, a.y - b.y) || mw0, fromPose: true });
+  if (w < 6 || h < 6) return fromPose();
+  const ls = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = (y * W + x) * 4; if (fg[y * W + x]) ls.push([luma(rgba[i], rgba[i + 1], rgba[i + 2]), rgba[i] - rgba[i + 1]]); }
+  if (ls.length < 20) return fromPose();
+  const med = (k) => ls.map((v) => v[k]).sort((p, q) => p - q)[ls.length >> 1];
+  const skinL = med(0), skinRG = med(1);
+  const m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const g = (y + y0) * W + x + x0, i = g * 4;
+    if (!fg[g]) continue;
+    const l = luma(rgba[i], rgba[i + 1], rgba[i + 2]), rg = rgba[i] - rgba[i + 1];
+    if (l < 0.6 * skinL || (rg > skinRG + 45 && l < 0.95 * skinL)) m[y * w + x] = 1;
+  }
+  const comp = new Int32Array(w * h).fill(-1);
+  let best = null;
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (!m[s0] || comp[s0] >= 0) continue;
+    const st = [s0], px = []; comp[s0] = s0;
+    // vicini entro 2 px: la linea della bocca disegnata è spesso spezzata (labbro sopra, piega sotto)
+    while (st.length) { const i = st.pop(); px.push(i); const x = i % w, y = (i / w) | 0; for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (m[j] && comp[j] < 0) { comp[j] = s0; st.push(j); } } }
+    let mnx = w, mxx = -1, sy = 0;
+    for (const i of px) { const x = i % w; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); sy += (i / w) | 0; }
+    const span = mxx - mnx + 1, cx = (mnx + mxx) / 2 + x0, cy = sy / px.length + y0;
+    // bocca: larga (≥ 45% della distanza dei punti della posa), non tocca i bordi del riquadro, vicina al centro
+    if (span < 0.45 * mw0 || mnx === 0 || mxx === w - 1) continue;
+    const score = span - 1.5 * Math.abs(cx - c0.x) - 0.5 * Math.abs(cy - (c0.y + 0.2 * mw0));
+    if (!best || score > best.score) best = { score, px, mnx, mxx };
+  }
+  if (!best) return fromPose();
+  const side = (xx) => { let s = 0, n = 0; for (const i of best.px) if (Math.abs((i % w) - xx) <= 1) { s += (i / w) | 0; n++; } return { x: xx + x0 + 0.5, y: s / n + y0 + 0.5 }; };
+  const L = side(best.mnx), R = side(best.mxx);
+  // sx (personaggio) è dalla parte del punto 9
+  const [sx, dx] = Math.abs(L.x - a.x) < Math.abs(R.x - a.x) ? [L, R] : [R, L];
+  // bocca all'ingiù (broncio, avvocato): gli angoli stanno sotto la linea delle labbra al centro di "frown" px
+  const midX = (best.mnx + best.mxx) / 2, band = 0.15 * (best.mxx - best.mnx);
+  // altezza delle labbra al centro = MEDIA dei pixel della bocca nella fascia centrale (labbra piene come la
+  // Domatrice: il bordo alto del labbro sta sopra gli angoli ma la linea fra le labbra no)
+  let sumC = 0, nC = 0;
+  for (const i of best.px) if (Math.abs((i % w) - midX) <= band) { sumC += ((i / w) | 0) + y0 + 0.5; nC++; }
+  const frown = nC ? Math.max(0, (sx.y + dx.y) / 2 - sumC / nC) : 0;
+  return { sx, dx, center: mid(sx, dx), width: Math.hypot(sx.x - dx.x, sx.y - dx.y), frown, fromPose: false };
+}
+
+/**
  * Rig completo.
  * @param {{ width, height, rgba, fg: Uint8Array, parts: Uint8Array, categories?: Uint8Array, landmarks, joints }} input
  * @returns {{ json, images: { [nome]: {width,height,rgba} }, report }}
@@ -296,6 +359,13 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const lidY = rules.lid === "pelle" ? cy : e.lidTop;
     bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: lidY }, tail: { x: cx + 10, y: lidY } });
   }
+
+  // bocca: ossa agli angoli (figlie di "viso"), solo se richiesto il sorriso
+  const mouth = rules.smile && rules.smile !== "no" ? findMouth(landmarks, ipd, W, H, rgba, fg) : null;
+  if (mouth) {
+    for (const [s, c] of [["sx", mouth.sx], ["dx", mouth.dx]]) bones.push({ name: `bocca_${s}`, parent: "viso", head: c, tail: { x: c.x + 10, y: c.y } });
+    decision.reasons.push(`bocca: sorriso ${rules.smile === "sempre" ? "tenuto per tutto il loop" : "nel loop (3–5,3 s)"} (bocca ${Math.round(mouth.width)} px${mouth.frown > 1 ? `, all'ingiù di ${Math.round(mouth.frown)} px` : ""}${mouth.fromPose ? ", angoli dalla posa" : ""})`);
+  } else if (rules.smile && rules.smile !== "no") decision.reasons.push("bocca: non trovata, niente sorriso");
 
   // ossa in formato Spine
   const world = { root: { x: 0, y: 0, a: 0 } };
@@ -585,6 +655,43 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     else lidClosed(e);
   }
 
+  // BOCCA: pezzo ad anelli come la palpebra "pelle" (copia dei pixel del corpo attorno alla bocca, davanti
+  // al corpo). Anello esterno fermo sul viso: a riposo coincide col corpo e non si vede; verso l'interno i
+  // vertici seguono sempre di più gli angoli della bocca, così il sorriso piega labbra e guance senza strappi.
+  if (mouth) {
+    const N = 28, F = [1, 0.84, 0.7, 0.58, 0.47, 0.36, 0.25, 0.13];
+    const c = mouth.center, rx = mouth.width * 1.1, ry = mouth.width * 0.8, reach = mouth.width * 0.6;
+    const ring = (f) => Array.from({ length: N }, (_, i) => { const a = (2 * Math.PI * i) / N; return { x: c.x + Math.cos(a) * rx * f, y: c.y + Math.sin(a) * ry * f }; });
+    const rings = F.map(ring);
+    const all = rings.flat();
+    const bx0 = Math.max(0, Math.floor(Math.min(...all.map((q) => q.x))) - 1), bx1 = Math.min(W - 1, Math.ceil(Math.max(...all.map((q) => q.x))) + 1);
+    const by0 = Math.max(0, Math.floor(Math.min(...all.map((q) => q.y))) - 1), by1 = Math.min(H - 1, Math.ceil(Math.max(...all.map((q) => q.y))) + 1);
+    const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1, px = new Uint8ClampedArray(bw * bh * 4);
+    for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const g = (y + by0) * W + x + bx0; if (body[g * 4 + 3] && !holeMask[g]) px.set(body.subarray(g * 4, g * 4 + 4), (y * bw + x) * 4); }
+    images.bocca = { width: bw, height: bh, rgba: px };
+    const local = (bb, sp) => { const dx = sp.x - bb.x, dy = sp.y - bb.y, co = Math.cos(-bb.a), si = Math.sin(-bb.a); return [+(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2)]; };
+    const uvs = [], vertices = [];
+    const push = (q, f) => {
+      uvs.push(+((q.x - bx0) / bw).toFixed(5), +((q.y - by0) / bh).toFixed(5));
+      const g = smooth((1 - f) / 0.45); // 0 sull'anello esterno, 1 da metà raggio in giù
+      const ws = [];
+      for (const s of ["sx", "dx"]) { const k = g * smooth(1 - Math.hypot(q.x - mouth[s].x, q.y - mouth[s].y) / reach); if (k > 0.01) ws.push([`bocca_${s}`, k]); }
+      const tot = ws.reduce((a, [, v]) => a + v, 0);
+      if (tot > 1) for (const w of ws) w[1] /= tot;
+      const rest = 1 - Math.min(1, tot);
+      if (rest > 0.001) ws.push(["viso", rest]);
+      const sp = toS(q);
+      vertices.push(ws.length);
+      for (const [bn, w] of ws) vertices.push(boneIndex[bn], ...local(world[bn], sp), +w.toFixed(4));
+    };
+    rings.forEach((r, k) => r.forEach((q) => push(q, F[k])));
+    push(c, 0);
+    const V = (k, i) => k * N + (i % N), C = F.length * N, triangles = [];
+    for (let k = 0; k < F.length - 1; k++) for (let i = 0; i < N; i++) triangles.push(V(k, i), V(k, i + 1), V(k + 1, i + 1), V(k, i), V(k + 1, i + 1), V(k + 1, i));
+    for (let i = 0; i < N; i++) triangles.push(V(F.length - 1, i), V(F.length - 1, i + 1), C);
+    attachments.bocca = { type: "mesh", path: "bocca", uvs, triangles, vertices, hull: N, width: bw, height: bh };
+  }
+
   // slot: ordine di disegno (dietro → davanti)
   const slotFor = (name, bone) => ({ name, bone, attachment: name });
   const slots = [];
@@ -592,6 +699,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`bianco_${e.side}`, `occhio_${e.side}`));
   for (const e of decision.eyes ? eyes : []) slots.push(slotFor(`pupilla_${e.side}`, `pupilla_${e.side}`));
   slots.push(slotFor("corpo", "root"));
+  if (attachments.bocca) slots.push(slotFor("bocca", "viso"));
   for (const e of decision.eyes ? eyes : []) slots.push(rules.lid === "pelle" ? slotFor(`palpebra_${e.side}`, `occhio_${e.side}`) : { ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
@@ -601,7 +709,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     bones: jsonBones,
     slots,
     skins: [{ name: "default", attachments: skinAtt }],
-    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd) }
+    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }) }
   };
   return {
     json,
@@ -642,7 +750,7 @@ export function smoothKeys(T, fns, fields) {
 }
 
 /** Loop di 6 s sul modello della Domatrice. */
-function loopAnimation(rules, height, decision, eyes, ipd) {
+function loopAnimation(rules, height, decision, eyes, ipd, mouth) {
   const T = rules.loopSeconds, A = rules.amp;
   const wave = (k, ph = 0) => (t) => Math.sin(2 * Math.PI * (k * t / T + ph));
   const bump = (ph = 0) => (t) => 0.5 * (1 - Math.cos(2 * Math.PI * (t / T + ph)));
@@ -663,6 +771,20 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
   if (decision.hair) {
     bones.capelli_1 = { rotate: rot(A.capelli, wave(1, 0.35)) };
     bones.capelli_2 = { rotate: rot(A.capelli * 1.3, wave(1, 0.45)) };
+  }
+  if (mouth) {
+    // sorriso: angoli su (y Spine verso l'alto) e in fuori; lo spostamento è nel sistema dell'osso "viso"
+    // bocca all'ingiù: prima si riportano gli angoli all'altezza delle labbra (frown), poi il sorriso vero
+    const up = rules.smileUp * mouth.width + (mouth.frown || 0), out = rules.smileOut * mouth.width;
+    const on = (a, b, t) => smooth((t - a) / (b - a));
+    const amount = rules.smile === "sempre" ? () => 1 : (t) => on(3.0, 3.5, t) * (1 - on(4.8, 5.3, t));
+    for (const [s, sign] of [["sx", 1], ["dx", -1]]) {
+      // sx = lato sinistro del PERSONAGGIO = a destra nell'immagine
+      const wx = sign * out * (mouth.sx.x > mouth.dx.x ? 1 : -1), wy = up;
+      const co = Math.cos(-mouth.visoA), si = Math.sin(-mouth.visoA);
+      const lx = wx * co - wy * si, ly = wx * si + wy * co;
+      bones[`bocca_${s}`] = { translate: rules.smile === "sempre" ? [{ time: 0, x: +lx.toFixed(2), y: +ly.toFixed(2) }, { time: T, x: +lx.toFixed(2), y: +ly.toFixed(2) }] : xy((t) => lx * amount(t), (t) => ly * amount(t)) };
+    }
   }
   const slotsAnim = {};
   if (decision.eyes) {

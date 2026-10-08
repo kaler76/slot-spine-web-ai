@@ -11,6 +11,7 @@ import { renderFrame } from "./renderSpine.mjs";
 const NAME = process.argv[2] || "domatrice";
 const OUT = process.argv[3] || `prototipi/${NAME}_mesh`;
 const FRAMES = Number(process.argv[4] || 12);
+const SMILE = process.argv[5] || "no";
 const D = `tests/fixtures/recognition/${NAME}/`;
 const img = PNG.sync.read(fs.readFileSync(D + "image.png")), W = img.width, H = img.height, rgba = img.data;
 const cat = PNG.sync.read(fs.readFileSync(D + "categories.png"));
@@ -22,7 +23,7 @@ const fgA = hasAlpha ? alpha : foregroundFromUniformBorder({ width: W, height: H
 const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha: fgA || undefined, rgba });
 const fg = new Uint8Array(W * H);
 for (let i = 0; i < W * H; i++) fg[i] = fgA ? (fgA[i] >= 128 ? 1 : 0) : categories[i] ? 1 : 0;
-const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, MESH_RIG_RULES);
+const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, { ...MESH_RIG_RULES, smile: SMILE });
 
 fs.mkdirSync(path.join(OUT, "images"), { recursive: true });
 const writePng = (file, im) => { const p = new PNG({ width: im.width, height: im.height }); p.data = Buffer.from(im.rgba); fs.writeFileSync(file, PNG.sync.write(p)); };

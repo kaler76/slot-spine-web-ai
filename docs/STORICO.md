@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-8 | 8 ott | **Sorriso** a scelta (no / nel loop / sempre): angoli della bocca trovati dai pixel, pezzo ad anelli sul viso, broncio raddrizzato | Richiesta: far sorridere l'avvocato | S1–S6 |
 | zeus-mesh-7 | 8 ott | Braccio lungo il fianco tagliato dal **gomito** (auto: angolo omero ≤ 35°), isole del corpo che toccano il braccio vanno nel pezzo | Domatrice: il pezzo si portava via risvolto e bottoni (striscia grigia in movimento), frammento di cerchio sospeso | D1–D5 + M1–M7 |
 | zeus-mesh-6 | 8 ott | Nell'app: Riconosci parti → **Crea character** (tabella scelte, anteprima col player Spine 4.1.56, zip Spine 4.1) | Metodo usabile dal sito, non solo da script | build + prova Zeus nel browser |
 | zeus-mesh-5.1 | 8 ott | Pacchetto Spine 4.1 (atlas a pagina unica + images/), UV sui bordi dei pixel, verifica col runtime ufficiale; nasce REGOLE_MESH.md | Consegna; riposo diverso del 21% per UV a mezzo pixel | M1–M7 |
@@ -34,5 +35,5 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 - **Prove visive**: `prototipi/` (pacchetti e fotogrammi di ogni passo, non salvati in git).
 
 ## Da fare (aperto)
-Leprecauno (mano col sacchetto davanti alla pancia: mano doppia) — serve l'originale; bocca, barba/ciocche, gambe;
+Leprecauno (mano col sacchetto davanti alla pancia: mano doppia) — serve l'originale; barba/ciocche, gambe;
 Jessica col metodo mesh.

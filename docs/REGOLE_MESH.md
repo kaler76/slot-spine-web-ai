@@ -1,7 +1,7 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-7, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-8, 8 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
-("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice).
+("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso).
 
 ## Principio
 L'immagine ORIGINALE è il corpo. Non si ridisegna il personaggio: si deforma con una mesh legata alle ossa e si
@@ -44,6 +44,25 @@ spostava e lasciava vedere il riempimento grigio dietro, e un frammento del cerc
 - Nell'app la tabella delle scelte mostra la riga "braccio_… tagliato dal GOMITO/dalla SPALLA (n°)".
 - Nota: il bordo blu sotto la manica della Domatrice è nell'originale (luce di contorno), non è un difetto.
 
+## R9 — Sorriso (S1–S6), zeus-mesh-8
+Richiesta dell'8 ott (avvocato: "come faccio a farlo sorridere"). Scelta nell'app: **Sorriso = no / nel loop / sempre**
+(di serie "no": la bocca resta quella del disegno).
+- **Angoli dai pixel**, non dalla posa: i punti 9-10 di MediaPipe stanno spesso sopra la bocca (avvocato). Nel riquadro
+  attorno a quei punti si cercano i pixel più scuri della pelle (< 60%) o rossi come le labbra; la componente più larga
+  vicino al centro (vicini entro 2 px: la linea disegnata è spesso spezzata) dà angolo sinistro e destro. Se non c'è,
+  si usano i punti della posa (lo dice la tabella).
+- **Bocca all'ingiù** (broncio): se gli angoli stanno sotto la linea delle labbra al centro (media dei pixel della bocca
+  nella fascia centrale, non il bordo alto: le labbra piene della Domatrice non sono un broncio), il sorriso prima
+  riporta su gli angoli di quella differenza, poi sorride.
+- **Pezzo "bocca"** ad anelli, come la palpebra della Domatrice: copia dei pixel del corpo attorno alla bocca
+  (ellisse 1,1 × 0,8 la larghezza della bocca), davanti al corpo, sull'osso "viso". Anello esterno fermo sul viso
+  (a riposo coincide col corpo: S3); verso l'interno i vertici seguono le ossa `bocca_sx`/`bocca_dx` entro 0,6 × la
+  larghezza dagli angoli: gli angoli salgono, il centro quasi no, e la curva diventa un sorriso.
+- Ampiezza: su di `smileUp` 0,16 × larghezza (+ il broncio), in fuori `smileOut` 0,06 ×. "nel loop": sale 3,0→3,5 s,
+  tiene, torna 4,8→5,3 s (dopo il battito a 2 s). "sempre": spostamento costante (nel setup la bocca resta disegnata).
+- Limite noto: è una deformazione, non un ridisegno; sotto gli angoli la pelle si stira un po'. Una bocca aperta coi
+  denti richiederebbe di disegnarla (Gemini).
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.
@@ -79,6 +98,6 @@ Comando: `node scripts/verifySpineRuntime.mjs <cartella con spine-core> <json> <
   qui valgono M1–M7.
 
 ## Da fare
-Bocca (angoli su ossa), catene per barba/ciocche, gambe; pulsante nell'app con la tabella taglio/mesh modificabile;
+Catene per barba/ciocche, gambe; pulsante nell'app con la tabella taglio/mesh modificabile;
 prova su Jessica (capelli lunghi, bocchino); leprecauno (mano col sacchetto DAVANTI alla pancia: mano doppia, serve l'originale per
 verificare che il riempimento copra tutta la mano dipinta sul corpo).

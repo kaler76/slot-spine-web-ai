@@ -13,6 +13,7 @@ import { buildMeshRig, packAtlas, MESH_RIG_RULES, MESH_RIG_VERSION } from "../li
 export default function MeshRigExport({ original, landmarks, joints, parts, categories, alpha, fileName }) {
   const [boost, setBoost] = useState(1);
   const [cuts, setCuts] = useState({ ...MESH_RIG_RULES.cuts });
+  const [smile, setSmile] = useState("no");
   const [pkg, setPkg] = useState(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,6 +35,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       const rules = {
         ...MESH_RIG_RULES,
         cuts,
+        smile,
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
       const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints }, rules);
@@ -109,7 +111,8 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       <div className="hint">
         L'originale resta intero e si deforma in mesh pesata sulle ossa della posa. Si tagliano solo: il braccio che tiene
         un oggetto, i capelli lunghi dietro le spalle e gli occhi (bianco, pupilla, palpebra). Animazione "ambient" in loop
-        di {MESH_RIG_RULES.loopSeconds} s con battito di ciglia. Esporta Spine 4.1.
+        di {MESH_RIG_RULES.loopSeconds} s con battito di ciglia; a scelta il sorriso (gli angoli della bocca salgono, anche
+        da una bocca all'ingiù). Esporta Spine 4.1.
       </div>
       <div className="row" style={{ gap: 16, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
         {[["arm", "Taglia braccio con oggetto"], ["hair", "Taglia capelli lunghi"], ["eyes", "Occhi animati"]].map(([k, label]) => (
@@ -117,6 +120,14 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
             <input type="checkbox" checked={cuts[k]} disabled={busy} onChange={(e) => setCuts({ ...cuts, [k]: e.target.checked })} /> {label}
           </label>
         ))}
+        <label className="field-label-inline">
+          😊 Sorriso
+          <select value={smile} disabled={busy} onChange={(e) => setSmile(e.target.value)} style={{ marginLeft: 6 }}>
+            <option value="no">no (bocca del disegno)</option>
+            <option value="loop">nel loop (sorride e torna)</option>
+            <option value="sempre">sempre (sorriso fisso)</option>
+          </select>
+        </label>
         <label className="field-label-inline">
           Intensità
           <select value={boost} disabled={busy} onChange={(e) => setBoost(Number(e.target.value))} style={{ marginLeft: 6 }}>
