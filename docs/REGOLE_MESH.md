@@ -1,4 +1,4 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9.2, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9.3, 8 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
 ("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato).
@@ -94,6 +94,21 @@ Il sorriso deformato (R9) non convince ("bisogna utilizzare Gemini per creare la
 - **Oggetto che attraversa la linea di mezzo** (freccia tenuta fra le due mani, arco): è UN pezzo e va tutto al lato
   che ne ha di più, invece di essere spezzato sulla verticale del collo (due metà che si muovono ognuna col suo braccio).
   Limite: l'altra mano non tiene l'oggetto (la freccia segue la mano dell'arco).
+
+## R12 — Occhi trovati meglio (zeus-mesh-9.3)
+Robin Hood (8 ott, "anche gli occhi vengono chiusi male"): il buco dell'occhio era solo il bianco a destra dell'iride
+VERDE (l'iride valeva solo se blu) e il punto della posa stava di lato all'occhio: la palpebra chiudeva solo quella
+striscia e l'iride restava aperta. Avvocato: iride castana e bianco in ombra fuori dal buco, pupilla visibile a occhio
+chiuso.
+- Iride: blu (b > r) o VERDE (g > r + 20, anche scura). Castana: nessuna regola di colore (prendeva ombretto e ciglia
+  della Domatrice): la prende la chiusura per righe.
+- Bianco: chiaro e poco saturo (l > 170, sat < 60) oppure in ombra quasi senza colore (l > 120, sat < 35).
+- Buco = componente più grande + le altre ≥ 10% alla stessa altezza (il bianco dall'altra parte dell'iride); poi
+  chiusura dall'esterno e CHIUSURA PER RIGHE (fra due pixel del buco sulla stessa riga, distanza ≤ 0,6 × larghezza).
+- Seconda ricerca centrata sul buco trovato; si tiene solo se contiene ≥ 80% del primo buco ed è alta ≤ 1,5 volte
+  (le finestre più alte salivano su sopracciglia e trucco della Domatrice: provato e scartato).
+- Riflessi bianchi dentro l'iride (fra pixel d'iride su riga e colonna) vanno nella pupilla e si muovono con lei.
+- Zeus: buco più completo, occhio chiuso più pulito (json diverso da zeus-mesh-9.2 solo negli occhi); M1–M7 verdi.
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

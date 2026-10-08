@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9.2";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9.3";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -160,7 +160,33 @@ export function decideCuts({ counts, fgN, eyes, hairN }, rules = MESH_RIG_RULES)
 }
 
 /** Occhio: buco (sclera + iride, pupilla compresa) attorno al punto della posa. */
-function findEye(center, ipd, W, H, rgba, fg) {
+/**
+ * Occhio: prima ricerca attorno al punto della posa, poi di nuovo CENTRATA sul buco trovato (il punto di MediaPipe
+ * può stare di lato all'occhio: Robin Hood, 8 ott, buco solo sul bianco a destra dell'iride). Si tiene il buco più
+ * grande delle due ricerche.
+ */
+export function findEye(center, ipd, W, H, rgba, fg) {
+  const a = findEyeOnce(center, ipd, W, H, rgba, fg);
+  if (!a) return null;
+  const c2 = { x: (a.box.x0 + a.box.x1 + 1) / 2, y: (a.box.y0 + a.box.y1 + 1) / 2 };
+  if (Math.hypot(c2.x - center.x, c2.y - center.y) < 1.5) return a;
+  // seconda ricerca centrata sul buco: la si tiene solo se CONTIENE quasi tutto il primo buco (stesso occhio,
+  // trovato meglio) e non è alta più di 1,5 volte (non è salita sulle sopracciglia o sul trucco)
+  const b = findEyeOnce(c2, ipd, W, H, rgba, fg);
+  if (!b) return a;
+  let n = 0, inB = 0, nb = 0;
+  for (let i = 0; i < b.w * b.h; i++) nb += b.hole[i];
+  for (let i = 0; i < a.w * a.h; i++) {
+    if (!a.hole[i]) continue;
+    n++;
+    const gx = (i % a.w) + a.x0 - b.x0, gy = ((i / a.w) | 0) + a.y0 - b.y0;
+    if (gx >= 0 && gy >= 0 && gx < b.w && gy < b.h && b.hole[gy * b.w + gx]) inB++;
+  }
+  const ha = a.box.y1 - a.box.y0 + 1, hb = b.box.y1 - b.box.y0 + 1;
+  return nb > n && inB >= 0.8 * n && hb <= 1.5 * ha ? b : a;
+}
+
+function findEyeOnce(center, ipd, W, H, rgba, fg) {
   const rx = Math.round(0.36 * ipd), ry = Math.round(0.2 * ipd);
   const x0 = Math.max(0, Math.round(center.x - rx)), x1 = Math.min(W - 1, Math.round(center.x + rx));
   const y0 = Math.max(0, Math.round(center.y - ry)), y1 = Math.min(H - 1, Math.round(center.y + ry));
@@ -179,26 +205,57 @@ function findEye(center, ipd, W, H, rgba, fg) {
     const r = rgba[i], gg = rgba[i + 1], b = rgba[i + 2], l = luma(r, gg, b);
     const dSkin = Math.abs(r - skin[0]) + Math.abs(gg - skin[1]) + Math.abs(b - skin[2]);
     const sat = Math.max(r, gg, b) - Math.min(r, gg, b);
-    const sclera = l > 170 && sat < 60;
-    const iris = dSkin > 120 && l > 45 && b > r; // iride (blu/verde/scura ma non contorno)
+    // bianco: chiaro e poco saturo, anche in ombra (grigio-azzurro: avvocato) purché quasi senza colore
+    const sclera = (l > 170 && sat < 60) || (l > 120 && sat < 35);
+    // iride: blu (b > r) o VERDE (g > r: Robin Hood); le ciglia castane (r > g) restano fuori
+    // (iride castana: niente regola di colore, che prendeva anche ombretto e ciglia della Domatrice; la prende la
+    // chiusura per righe fra il bianco a sinistra e quello a destra)
+    const iris = dSkin > 120 && ((l > 45 && b > r) || (l > 25 && gg > r + 20));
     if (sclera || iris) m[y * w + x] = 1;
   }
   // componente più grande, poi i buchi interni (pupilla, riflesso) chiusi
   const comp = new Int32Array(w * h).fill(-1);
   let best = -1, bestN = 0;
+  const comps = new Map();
   for (let s = 0; s < w * h; s++) {
     if (!m[s] || comp[s] >= 0) continue;
-    const st = [s]; comp[s] = s; let n = 0;
-    while (st.length) { const i = st.pop(); n++; const x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (m[j] && comp[j] < 0) { comp[j] = s; st.push(j); } } }
+    const st = [s]; comp[s] = s; let n = 0, ya = h, yb = -1;
+    while (st.length) { const i = st.pop(); n++; const x = i % w, y = (i / w) | 0; ya = Math.min(ya, y); yb = Math.max(yb, y); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (m[j] && comp[j] < 0) { comp[j] = s; st.push(j); } } }
+    comps.set(s, { n, ya, yb });
     if (n > bestN) { bestN = n; best = s; }
   }
   if (best < 0 || bestN < 20) return null;
+  // oltre alla componente più grande, le altre non piccole (≥ 10%) alla STESSA altezza: il bianco dall'altra parte
+  // di un'iride scura non riconosciuta (avvocato, occhi castani: pupilla rimasta visibile a occhio chiuso).
+  // Le sopracciglia stanno più in alto e non si sovrappongono in altezza.
+  const B = comps.get(best), keep = new Set([best]);
+  for (const [k, c] of comps) {
+    if (k === best || c.n < 0.1 * bestN) continue;
+    const ov = Math.min(c.yb, B.yb) - Math.max(c.ya, B.ya) + 1;
+    if (ov >= 0.5 * (c.yb - c.ya + 1)) keep.add(k);
+  }
   const hole = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) if (comp[i] === best) hole[i] = 1;
+  for (let i = 0; i < w * h; i++) if (keep.has(comp[i])) hole[i] = 1;
   const out = new Uint8Array(w * h), q = [];
   for (let i = 0; i < w * h; i++) { const x = i % w, y = (i / w) | 0; if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && !hole[i]) { out[i] = 1; q.push(i); } }
   for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (!out[j] && !hole[j]) { out[j] = 1; q.push(j); } } }
   for (let i = 0; i < w * h; i++) if (!out[i]) hole[i] = 1;
+  // chiusura per righe: fra due pixel del buco sulla stessa riga (distanza ≤ metà della larghezza del buco)
+  // tutto è occhio. Pupilla e parte scura dell'iride toccano il contorno in alto e la chiusura dall'esterno non
+  // le prende (Robin Hood: pupilla rimasta nel corpo)
+  {
+    let hx0 = w, hx1 = -1;
+    for (let i = 0; i < w * h; i++) if (hole[i]) { hx0 = Math.min(hx0, i % w); hx1 = Math.max(hx1, i % w); }
+    const maxGap = 0.6 * (hx1 - hx0 + 1);
+    for (let y = 0; y < h; y++) {
+      let last = -1;
+      for (let x = 0; x < w; x++) {
+        if (!hole[y * w + x]) continue;
+        if (last >= 0 && x - last > 1 && x - last <= maxGap) for (let k = last + 1; k < x; k++) hole[y * w + k] = 1;
+        last = x;
+      }
+    }
+  }
   let sr = 0, sg = 0, sb = 0, sn = 0;
   const iris = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
@@ -206,6 +263,14 @@ function findEye(center, ipd, W, H, rgba, fg) {
     const g = ((i / w) | 0) + y0, x = (i % w) + x0, k = (g * W + x) * 4;
     const l = luma(rgba[k], rgba[k + 1], rgba[k + 2]), sat = Math.max(rgba[k], rgba[k + 1], rgba[k + 2]) - Math.min(rgba[k], rgba[k + 1], rgba[k + 2]);
     if (l > 170 && sat < 60) { sr += rgba[k]; sg += rgba[k + 1]; sb += rgba[k + 2]; sn++; } else iris[i] = 1;
+  }
+  // riflessi bianchi DENTRO l'iride (fra due pixel d'iride sulla stessa riga e sulla stessa colonna) sono iride:
+  // si muovono con la pupilla invece di restare fermi sul bianco (righe bianche sulla pupilla che guarda di lato)
+  {
+    const inRow = new Uint8Array(w * h), inCol = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) { let a = -1, b = -1; for (let x = 0; x < w; x++) if (iris[y * w + x]) { if (a < 0) a = x; b = x; } for (let x = a + 1; x < b; x++) inRow[y * w + x] = 1; }
+    for (let x = 0; x < w; x++) { let a = -1, b = -1; for (let y = 0; y < h; y++) if (iris[y * w + x]) { if (a < 0) a = y; b = y; } for (let y = a + 1; y < b; y++) inCol[y * w + x] = 1; }
+    for (let i = 0; i < w * h; i++) if (hole[i] && !iris[i] && inRow[i] && inCol[i]) iris[i] = 1;
   }
   let hx0 = w, hx1 = -1, hy0 = h, hy1 = -1;
   for (let i = 0; i < w * h; i++) if (hole[i]) { const x = i % w, y = (i / w) | 0; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y); }

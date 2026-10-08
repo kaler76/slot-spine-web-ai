@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-9.3 | 8 ott | Occhi: iride verde, bianco in ombra, buco dalle due parti dell'iride, chiusura per righe, ricerca ricentrata | Robin Hood e avvocato: occhi chiusi male (iride visibile) | M3, O1 + controllo visivo Zeus, Domatrice, avvocato |
 | zeus-mesh-9.2 | 8 ott | Personaggio tagliato dal bordo dell'immagine; oggetto fra le due mani = un solo pezzo | Robin Hood: errore "reading 'length'" | E1, E2 |
 | zeus-mesh-9.1 | 8 ott | Gemini rifiuta → altre 2 varianti del prompt ("personaggio illustrato originale"), poi deformazione senza AI | Avvocato: "Nessuna immagine nella risposta Gemini (IMAGE_OTHER)" | G1b |
 | zeus-mesh-9 | 8 ott | **Sorriso ridisegnato con Gemini** (bocca chiusa / con i denti): ritaglio del viso → Gemini → riallineamento → colori → pezzo sfumato in dissolvenza | Il sorriso deformato non andava bene: "bisogna utilizzare Gemini per creare la parte" | G1–G4 |
