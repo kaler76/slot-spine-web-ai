@@ -13,18 +13,35 @@
 
 const deg = (d) => (d * Math.PI) / 180;
 
-/** Valore di una timeline a tempo t (interpolazione lineare; le nostre chiavi sono fitte). */
+/**
+ * Valore di una timeline a tempo t, come il runtime Spine 4.1: lineare, "stepped", o curva di
+ * Bézier della chiave ("curve": [cx1, cy1, cx2, cy2] per valore; per x/y la seconda quaterna è y).
+ */
 function sample(keys, t, field, dflt) {
   if (!keys || !keys.length) return dflt;
-  if (t <= keys[0].time) return keys[0][field] ?? dflt;
+  if (t <= (keys[0].time || 0)) return keys[0][field] ?? dflt;
   for (let i = 1; i < keys.length; i++) {
     if (t <= keys[i].time) {
       const a = keys[i - 1], b = keys[i];
-      const f = (t - a.time) / (b.time - a.time || 1);
-      return (a[field] ?? dflt) + ((b[field] ?? dflt) - (a[field] ?? dflt)) * f;
+      const ta = a.time || 0, va = a[field] ?? dflt, vb = b[field] ?? dflt;
+      if (a.curve === "stepped") return va;
+      if (Array.isArray(a.curve)) {
+        const o = field === "y" ? 4 : 0;
+        if (a.curve.length >= o + 4) return bezierAt(t, ta, va, a.curve[o], a.curve[o + 1], a.curve[o + 2], a.curve[o + 3], b.time, vb);
+      }
+      const f = (t - ta) / (b.time - ta || 1);
+      return va + (vb - va) * f;
     }
   }
   return keys[keys.length - 1][field] ?? dflt;
+}
+
+/** Bézier cubica (tempo, valore): si cerca il parametro con tempo t, si restituisce il valore. */
+function bezierAt(t, t0, v0, cx1, cy1, cx2, cy2, t1, v1) {
+  const B = (p0, p1, p2, p3, s) => { const u = 1 - s; return u * u * u * p0 + 3 * u * u * s * p1 + 3 * u * s * s * p2 + s * s * s * p3; };
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 30; k++) { const m = (lo + hi) / 2; if (B(t0, cx1, cx2, t1, m) < t) lo = m; else hi = m; }
+  return B(v0, cy1, cy2, v1, (lo + hi) / 2);
 }
 
 /** Matrici mondo [a, b, c, d, tx, ty] di tutte le ossa al tempo t (y verso l'alto). */

@@ -1,5 +1,5 @@
 // Prova "zeus mesh": Zeus in mesh pesata con tagli automatici (src/lib/meshRig.js).
-// Uso: node scripts/zeusMesh.mjs [cartella] [moltiplicatore ampiezze]
+// Uso: node scripts/zeusMesh.mjs [cartella] [moltiplicatore ampiezze] [fotogrammi]
 // Scrive zeus_mesh.json / .atlas / <pezzo>.png (Spine 4.1) e i fotogrammi di controllo _frame_NN.png.
 // Versione 1 (tutto mesh): git checkout zeus-mesh-1.
 import fs from "node:fs";
@@ -9,7 +9,8 @@ import { recognizeParts, foregroundFromUniformBorder } from "../src/lib/partReco
 import { buildMeshRig, atlasFor, MESH_RIG_RULES } from "../src/lib/meshRig.js";
 import { poseAt, attachmentGeometry, simulateLoop } from "../src/lib/animationSim.js";
 
-const OUT = process.argv[2] || "prototipi/zeus_mesh_2";
+const OUT = process.argv[2] || "prototipi/zeus_mesh_3";
+const FRAMES = Number(process.argv[4] || 60); // fotogrammi di controllo sul loop (60 = 10 al secondo)
 const BOOST = Number(process.argv[3] || 1);
 const D = "tests/fixtures/exploded/zeus/";
 const o = PNG.sync.read(fs.readFileSync(D + "original.png")), W = o.width, H = o.height, rgba = o.data;
@@ -34,10 +35,10 @@ for (const [n, im] of Object.entries(images)) {
 const sim = simulateLoop(json, { fps: 15, images });
 console.log(JSON.stringify(report, null, 1), "\nsimulazione:", sim.ok ? "OK" : sim.problems.join(" | "));
 
-// fotogrammi: tutti gli slot nell'ordine di disegno (12 del loop + 1 a occhi chiusi)
+// fotogrammi: tutti gli slot nell'ordine di disegno (FRAMES sul loop + 1 a occhi chiusi)
 const sk = json.skeleton, sc = 0.5;
 const fw = Math.round(sk.width * sc), fh = Math.round(sk.height * sc), off = { x: sk.width / 2, y: sk.height };
-const times = [...Array.from({ length: 12 }, (_, f) => (f / 12) * MESH_RIG_RULES.loopSeconds), MESH_RIG_RULES.blinkAt + 0.133];
+const times = [...Array.from({ length: FRAMES }, (_, f) => (f / FRAMES) * MESH_RIG_RULES.loopSeconds), MESH_RIG_RULES.blinkAt + 0.133];
 times.forEach((t, f) => {
   const world = poseAt(json, t, "ambient");
   const out = new PNG({ width: fw, height: fh });

@@ -12,7 +12,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-2";
+export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-3";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -390,9 +390,18 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     images[name] = { width: bw, height: bh, rgba: px };
     attachments[name] = gridMesh(name, a, b, bw, bh, cells, map);
   };
+  // vertici del pezzo fuori dalla sua sagoma: etichetta del pixel DEL PEZZO più vicino (prima il
+  // ripiego era "braccio": la punta del fulmine si stirava tra mano e omero)
+  const nearIn = (mask) => {
+    const m = new Int8Array(W * H).fill(-1), q = [];
+    for (let i = 0; i < W * H; i++) if (mask[i]) { m[i] = lab[i]; q.push(i); }
+    for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (m[j] < 0) { m[j] = m[i]; q.push(j); } } }
+    return (px, py) => LABELS[m[Math.min(H - 1, Math.max(0, Math.round(py))) * W + Math.min(W - 1, Math.max(0, Math.round(px)))]];
+  };
   for (const s of decision.arms) {
     const own = (k) => k === L_[`braccio_${s}`] || k === L_[`oggetto_${s}`];
-    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, () => `braccio_${s}`)(px, py, step), rules.pieceCells);
+    const fallback = nearIn(armMask);
+    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells);
   }
   if (decision.hair) pieceOf(hair, "capelli_dietro", () => "capelli", 8);
 
@@ -447,19 +456,50 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   };
 }
 
+/**
+ * Chiavi POCHE e MORBIDE come nel rig della Domatrice: una chiave sui massimi, sui minimi e sui
+ * flessi della curva (più inizio e fine), con curve di Bézier che seguono la tangente (Hermite).
+ * In Spine si vedono fluide e si possono ritoccare a mano. fns: una funzione per canale (x[, y]).
+ */
+export function smoothKeys(T, fns, fields) {
+  const N = 600, dt = T / N;
+  const times = new Set([0, T]);
+  for (const f of fns) {
+    const v = Array.from({ length: N + 1 }, (_, i) => f(i * dt));
+    for (let i = 1; i < N; i++) {
+      const d1 = v[i] - v[i - 1], d2 = v[i + 1] - v[i];
+      const c1 = v[i + 1] - 2 * v[i] + v[i - 1], c0 = i > 1 ? v[i] - 2 * v[i - 1] + v[i - 2] : c1;
+      if (d1 * d2 < 0 || (d1 === 0) !== (d2 === 0) || c0 * c1 < 0) times.add(+(i * dt).toFixed(3));
+    }
+  }
+  const ts = [...times].sort((p, q) => p - q).filter((t, i, arr) => i === 0 || t - arr[i - 1] > 0.05 || t === T);
+  const r = (x) => +x.toFixed(3);
+  const der = (f, t) => (f(Math.min(T, t + 1e-3)) - f(Math.max(0, t - 1e-3))) / (Math.min(T, t + 1e-3) - Math.max(0, t - 1e-3));
+  return ts.map((t, i) => {
+    const k = { time: r(t) };
+    fns.forEach((f, j) => (k[fields[j]] = r(f(t))));
+    if (i < ts.length - 1) {
+      const t1 = ts[i + 1], h = (t1 - t) / 3, curve = [];
+      for (const f of fns) curve.push(r(t + h), r(f(t) + der(f, t) * h), r(t1 - h), r(f(t1) - der(f, t1) * h));
+      k.curve = curve;
+    }
+    return k;
+  });
+}
+
 /** Loop di 6 s sul modello della Domatrice. */
 function loopAnimation(rules, height, decision, eyes, ipd) {
-  const T = rules.loopSeconds, n = Math.round(T * rules.fps), A = rules.amp;
-  const keys = (f) => Array.from({ length: n + 1 }, (_, i) => f((i / n) * T));
-  const r = (v) => +v.toFixed(3);
+  const T = rules.loopSeconds, A = rules.amp;
   const wave = (k, ph = 0) => (t) => Math.sin(2 * Math.PI * (k * t / T + ph));
   const bump = (ph = 0) => (t) => 0.5 * (1 - Math.cos(2 * Math.PI * (t / T + ph)));
-  const rot = (amp, f) => keys((t) => ({ time: r(t), value: r(amp * f(t)) }));
+  const rot = (amp, f) => smoothKeys(T, [(t) => amp * f(t)], ["value"]);
+  const xy = (fx, fy) => smoothKeys(T, [fx, fy], ["x", "y"]);
+  const one = () => 1, zero = () => 0;
   const bones = {
     schiena: { rotate: rot(A.schiena, wave(2)) },
-    petto: { rotate: rot(-A.petto, bump()), scale: keys((t) => ({ time: r(t), x: r(1 + A.breath * bump(0.25)(t)), y: 1 })) },
-    testa: { rotate: rot(A.testa, wave(1, 0.15)), translate: keys((t) => ({ time: r(t), x: r(A.testaLift * height * bump(0.1)(t)), y: 0 })) },
-    viso: { translate: keys((t) => ({ time: r(t), x: r(-A.visoSlide * height * bump(0.1)(t)), y: 0 })) }
+    petto: { rotate: rot(-A.petto, bump()), scale: xy((t) => 1 + A.breath * bump(0.25)(t), one) },
+    testa: { rotate: rot(A.testa, wave(1, 0.15)), translate: xy((t) => A.testaLift * height * bump(0.1)(t), zero) },
+    viso: { translate: xy((t) => -A.visoSlide * height * bump(0.1)(t), zero) }
   };
   for (const [s, ph] of [["sx", 0], ["dx", 0.3]]) {
     bones[`omero_${s}`] = { rotate: rot(A.omero, wave(1, ph)) };
@@ -474,10 +514,10 @@ function loopAnimation(rules, height, decision, eyes, ipd) {
     // pupille: due sguardi (di lato e un po' in basso), come la Domatrice
     const look = (t) => { const p = t / T; const g = (c) => Math.exp(-((p - c) ** 2) / 0.006); return g(0.22) + g(0.72); };
     for (const e of eyes) {
-      bones[`pupilla_${e.side}`] = { translate: keys((t) => ({ time: r(t), x: r(-A.pupille * ipd * 0.5 * look(t)), y: r(-A.pupille * ipd * 0.25 * look(t)) })) };
-      // battito: 0,13 s chiusura, 0,2 s apertura
+      bones[`pupilla_${e.side}`] = { translate: xy((t) => -A.pupille * ipd * 0.5 * look(t), (t) => -A.pupille * ipd * 0.25 * look(t)) };
+      // battito: 0,13 s chiusura, 0,2 s apertura (chiavi lineari, è uno scatto voluto)
       const t0 = rules.blinkAt;
-      bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 1 }, { time: t0, x: 1, y: 1 }, { time: r(t0 + 0.133), x: 1, y: e.blinkScale }, { time: r(t0 + 0.333), x: 1, y: 1 }, { time: T, x: 1, y: 1 }] };
+      bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 1 }, { time: t0, x: 1, y: 1 }, { time: +(t0 + 0.133).toFixed(3), x: 1, y: e.blinkScale }, { time: +(t0 + 0.333).toFixed(3), x: 1, y: 1 }, { time: T, x: 1, y: 1 }] };
     }
   }
   return { bones };
