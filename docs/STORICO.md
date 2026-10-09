@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-10 | 9 ott | **Oggetto completato**: crescita per colore + filtro lungo l'asse, tutto nel pezzo della mano (arco intero, rigido) | Robin Hood: "l'arco si spezza, non è separato con la mano" | B1–B3 |
 | zeus-mesh-9.3.1 | 9 ott | Robin Hood nei casi di prova (occhi); regola R12 **approvata "perfetto"** | Rendere la regola degli occhi garantita per i casi futuri | O1 (avvocato, Domatrice, Robin) |
 | zeus-mesh-9.3 | 8 ott | Occhi: iride verde, bianco in ombra, buco dalle due parti dell'iride, chiusura per righe, ricerca ricentrata | Robin Hood e avvocato: occhi chiusi male (iride visibile) | M3, O1 + controllo visivo Zeus, Domatrice, avvocato |
 | zeus-mesh-9.2 | 8 ott | Personaggio tagliato dal bordo dell'immagine; oggetto fra le due mani = un solo pezzo | Robin Hood: errore "reading 'length'" | E1, E2 |

@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-08.zeus-mesh-9.3";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-10";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -34,6 +34,10 @@ export const MESH_RIG_RULES = {
   armFrom: "auto", // "auto" | "spalla" | "gomito"
   armDownMaxDeg: 35, // omero entro questo angolo dalla direzione spalla→anca = lungo il fianco
   elbowOverlap: 0.08, // il pezzo dal gomito prende anche questo tratto d'omero (× larghezza spalle)
+  // OGGETTO COMPLETATO (zeus-mesh-10): il riconoscimento nel browser prende spesso solo il tratto d'oggetto vicino
+  // alla mano (arco di Robin Hood: 13709 px); si cresce per colore e si tiene solo ciò che prosegue lungo l'asse
+  objectGrow: true,
+  objectGrowMax: 6, // al massimo 6 volte i pixel riconosciuti
   // BOCCA (zeus-mesh-8): "no" | "loop" (sorride una volta nel loop) | "sempre" (sorriso tenuto per tutto il loop).
   // Gli angoli della bocca salgono di smileUp × larghezza bocca e si allargano di smileOut ×; nel setup la
   // bocca resta quella del disegno.
@@ -277,6 +281,47 @@ function findEyeOnce(center, ipd, W, H, rgba, fg) {
   return { x0, y0, w, h, hole, iris, skin, white: sn > 10 ? [sr / sn, sg / sn, sb / sn] : [240, 238, 232], box: { x0: x0 + hx0, y0: y0 + hy0, x1: x0 + hx1, y1: y0 + hy1 } };
 }
 
+/** Filtro "a binario" dell'oggetto completato (zeus-mesh-10, arco di Robin Hood). */
+function trackAlongAxis(seedIdx, addIdx, W, maxWidth = Infinity) {
+  // asse principale (PCA) dei pixel; t = lungo l'asse, u = di traverso
+  const all = seedIdx.concat(addIdx);
+  let mx = 0, my = 0; for (const i of all) { mx += i % W; my += (i / W) | 0; } mx /= all.length; my /= all.length;
+  let sxx = 0, syy = 0, sxy = 0; for (const i of all) { const dx = (i % W) - mx, dy = ((i / W) | 0) - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+  const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy), ax = Math.cos(ang), ay = Math.sin(ang);
+  const T = (i) => Math.round(((i % W) - mx) * ax + (((i / W) | 0) - my) * ay), U = (i) => Math.round(-((i % W) - mx) * ay + (((i / W) | 0) - my) * ax);
+  const sb = new Map(); for (const i of seedIdx) { const t = T(i), u = U(i); const b = sb.get(t) || [Infinity, -Infinity]; b[0] = Math.min(b[0], u); b[1] = Math.max(b[1], u); sb.set(t, b); }
+  const tMin = Math.min(...sb.keys()), tMax = Math.max(...sb.keys());
+  const widths = [...sb.values()].map(([a, b]) => b - a + 1).sort((p, q) => p - q), wMed = Math.min(widths[widths.length >> 1] || 4, maxWidth);
+  const ab = new Map(); for (const i of addIdx) { const t = T(i); (ab.get(t) || ab.set(t, []).get(t)).push(i); }
+  const keep = new Set();
+  // dentro il tratto del seme: solo vicino alla larghezza del seme
+  for (let t = tMin; t <= tMax; t++) { const b = sb.get(t); for (const i of ab.get(t) || []) { const u = U(i); if (b && u >= b[0] - wMed && u <= b[1] + wMed) keep.add(i); } }
+  // oltre il seme: si segue l'oggetto tratto per tratto in un CORRIDOIO previsto (centro che prosegue con la sua
+  // direzione, larghezza media degli ultimi tratti + 4 px). Così si seguono le curve (arco) ma non si entra in una
+  // parte toccata di lato (bordo dello stivale), che sta fuori dal corridoio.
+  for (const dir of [1, -1]) {
+    const t0 = dir > 0 ? tMax : tMin, s0 = sb.get(t0);
+    if (!s0) continue;
+    const hist = [[(s0[0] + s0[1]) / 2, Math.min(s0[1] - s0[0] + 1, maxWidth)]];
+    let miss = 0;
+    for (let t = t0 + dir; miss < 3; t += dir) {
+      const px = ab.get(t);
+      if (!px || !px.length) { miss++; continue; }
+      const n = hist.length, last = hist[n - 1], back = hist[Math.max(0, n - 6)];
+      const slope = n > 1 ? (last[0] - back[0]) / (n - 1 - Math.max(0, n - 6)) : 0;
+      const wAvg = hist.slice(-6).reduce((a, h) => a + h[1], 0) / Math.min(6, n);
+      const c = last[0] + slope, half = wAvg / 2 + 4;
+      let lo = Infinity, hi = -Infinity;
+      const inside = px.filter((i) => { const u = U(i); return u >= c - half && u <= c + half; });
+      if (!inside.length) { miss++; continue; }
+      miss = 0;
+      for (const i of inside) { const u = U(i); lo = Math.min(lo, u); hi = Math.max(hi, u); keep.add(i); }
+      hist.push([(lo + hi) / 2, Math.min(hi - lo + 1, maxWidth)]);
+    }
+  }
+  return keep;
+}
+
 /**
  * Bocca: angoli dai pixel, non solo dalla posa (i punti 9-10 di MediaPipe stanno spesso sopra la bocca:
  * avvocato). Nel riquadro attorno ai punti della posa si cercano i pixel della bocca, più scuri della pelle
@@ -460,6 +505,56 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const boneIndex = Object.fromEntries(jsonBones.map((b, i) => [b.name, i]));
   const C = chainsOf(bones);
   const face = by.viso.head, faceR = rules.faceRadius * shoulderW;
+
+  // oggetto in mano COMPLETATO: crescita per colore (tavolozza dei pixel riconosciuti) sui pixel del personaggio
+  // collegati, poi filtro "a binario" lungo l'asse dell'oggetto (si ferma dove si allarga: bordo dello stivale)
+  if (rules.objectGrow) for (const s of decision.arms) {
+    const L = L_[`oggetto_${s}`], seedIdx = [];
+    for (let i = 0; i < W * H; i++) if (lab[i] === L) seedIdx.push(i);
+    if (seedIdx.length < 50) continue;
+    const key = (i) => ((rgba[i * 4] >> 5) << 6) | ((rgba[i * 4 + 1] >> 5) << 3) | (rgba[i * 4 + 2] >> 5);
+    // tavolozza dai pixel dell'oggetto lontani dalla mano (vicino alla mano il riconoscimento prende anche dita e polsino)
+    const hd = by[`mano_${s}`].tail, hr = 0.25 * shoulderW;
+    const pal = seedIdx.filter((i) => Math.hypot((i % W) - hd.x, ((i / W) | 0) - hd.y) > hr);
+    const src = pal.length >= 0.3 * seedIdx.length ? pal : seedIdx;
+    const hist = new Uint32Array(512);
+    for (const i of src) hist[key(i)]++;
+    const okBin = new Uint8Array(512);
+    for (let k = 0; k < 512; k++) if (hist[k] >= 0.01 * src.length) okBin[k] = 1;
+    // categoria del segmentatore: se l'oggetto è quasi tutto di una categoria che non è "vestiti" (es. accessori),
+    // si cresce solo dentro quella categoria (lo stivale e la cintura sono "vestiti")
+    let catOnly = -1;
+    if (categories) {
+      const cc = new Map(); for (const i of seedIdx) cc.set(categories[i], (cc.get(categories[i]) || 0) + 1);
+      const [c0, n0] = [...cc.entries()].sort((a, b) => b[1] - a[1])[0];
+      if (n0 >= 0.6 * seedIdx.length && c0 !== SEG.clothes && c0 !== SEG.background) catOnly = c0;
+    }
+    const seen = new Uint8Array(W * H), q = seedIdx.slice(), addIdx = [];
+    for (const i of seedIdx) seen[i] = 1;
+    const cap = (rules.objectGrowMax ?? 6) * seedIdx.length;
+    for (let k = 0; k < q.length && addIdx.length < cap; k++) {
+      const i = q[k], x = i % W, y = (i / W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (seen[j] || !fg[j] || lab[j] === L_.testa || lab[j] === L || !okBin[key(j)] || (catOnly >= 0 && categories[j] !== catOnly)) continue;
+        seen[j] = 1; q.push(j); addIdx.push(j);
+      }
+    }
+    // larghezza massima di un oggetto tenuto in mano (arco, spada, freccia): 0,3 × larghezza spalle
+    const keep = addIdx.length ? trackAlongAxis(seedIdx, addIdx, W, 0.3 * shoulderW) : new Set();
+    for (const i of keep) if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L;
+    // contorno e ombre dell'oggetto (pixel scuri fino a 4 px attorno): fanno parte dell'oggetto
+    if (keep.size) {
+      let ring = [...keep];
+      for (let pass = 0; pass < 4; pass++) {
+        const next = [];
+        for (const i of ring) { const x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (fg[j] && lab[j] !== L && lab[j] !== L_.testa && lab[j] !== L_[`braccio_${s}`] && luma(rgba[j * 4], rgba[j * 4 + 1], rgba[j * 4 + 2]) < 90) { lab[j] = L; next.push(j); keep.add(j); } } }
+        ring = next;
+      }
+    }
+    if (keep.size) decision.reasons.push(`oggetto_${s}: completato per colore lungo l'asse (+${keep.size} px ai ${seedIdx.length} riconosciuti)`);
+  }
 
   // ---- immagini ----
   const armMask = new Uint8Array(W * H);

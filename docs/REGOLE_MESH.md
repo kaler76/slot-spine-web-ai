@@ -1,7 +1,7 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-9.3, 8 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-10, 9 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
-("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato).
+("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato), `tests/meshRigOcchi.test.mjs` (O1, occhi), `tests/meshRigOggetto.test.mjs` (B1–B3, oggetto completato).
 
 ## Principio
 L'immagine ORIGINALE è il corpo. Non si ridisegna il personaggio: si deforma con una mesh legata alle ossa e si
@@ -112,6 +112,24 @@ chiuso.
 - Garanzia per i casi futuri: `tests/meshRigOcchi.test.mjs` (O1) su avvocato, Domatrice e **Robin Hood**
   (`tests/fixtures/recognition/robin/`, ricostruito dal suo pacchetto: occhi di lato all'iride verde, come il caso che
   falliva). Ogni modifica futura alla ricerca degli occhi deve tenerli tutti e tre verdi.
+
+## R13 — Oggetto in mano COMPLETATO (B1–B3), zeus-mesh-10
+Robin Hood (9 ott, "l'arco si spezza, non è separato con la mano"): nel browser il riconoscimento dell'oggetto (rifinitura
+col segmentatore a punto, limitata a un riquadro attorno alla mano) aveva preso solo 13709 px d'arco vicino alla mano;
+il resto dell'arco restava nel corpo e si piegava con la mesh, staccandosi dal tratto tagliato.
+- Per ogni braccio tagliato: TAVOLOZZA dei colori dell'oggetto riconosciuto (pixel lontani dalla mano, colori RGB a
+  8 livelli presenti in ≥ 1% dei pixel), CRESCITA sui pixel del personaggio collegati con quei colori (non sulla testa,
+  al massimo 6 volte l'oggetto riconosciuto), e se l'oggetto è quasi tutto di una categoria del segmentatore diversa
+  da "vestiti" (es. accessori) solo dentro quella categoria.
+- FILTRO "a binario": si tiene solo ciò che PROSEGUE l'oggetto lungo il suo asse, tratto per tratto, in un corridoio
+  previsto (centro che continua con la sua direzione, larghezza media degli ultimi tratti + 4 px, al massimo 0,3 ×
+  spalle): segue le curve dell'arco, non entra nelle parti toccate di lato.
+- Contorno e ombre scure dell'oggetto (fino a 4 px attorno) fanno parte dell'oggetto.
+- Tutto va nel pezzo del braccio tagliato, rigido sulla mano. Tabella: "oggetto_dx: completato per colore lungo
+  l'asse (+N px ai M riconosciuti)". Spegnibile con `objectGrow: false`.
+- Limiti noti: la corda dell'arco resta nel corpo; dove la punta dell'arco tocca una parte dello stesso colore (risvolto
+  dello stivale) un pezzetto può entrare nel pezzo se le categorie non le distinguono.
+- Zeus identico a zeus-mesh-9.3.1 (fulmine già intero).
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
