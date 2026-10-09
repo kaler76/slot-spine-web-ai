@@ -95,7 +95,7 @@ Il sorriso deformato (R9) non convince ("bisogna utilizzare Gemini per creare la
   che ne ha di più, invece di essere spezzato sulla verticale del collo (due metà che si muovono ognuna col suo braccio).
   Limite: l'altra mano non tiene l'oggetto (la freccia segue la mano dell'arco).
 
-## R12 — Occhi trovati meglio (zeus-mesh-9.3)
+## R12 — Occhi trovati meglio (zeus-mesh-9.3) — APPROVATA dall'utente il 9 ott ("perfetto", Robin Hood)
 Robin Hood (8 ott, "anche gli occhi vengono chiusi male"): il buco dell'occhio era solo il bianco a destra dell'iride
 VERDE (l'iride valeva solo se blu) e il punto della posa stava di lato all'occhio: la palpebra chiudeva solo quella
 striscia e l'iride restava aperta. Avvocato: iride castana e bianco in ombra fuori dal buco, pupilla visibile a occhio
@@ -109,6 +109,9 @@ chiuso.
   (le finestre più alte salivano su sopracciglia e trucco della Domatrice: provato e scartato).
 - Riflessi bianchi dentro l'iride (fra pixel d'iride su riga e colonna) vanno nella pupilla e si muovono con lei.
 - Zeus: buco più completo, occhio chiuso più pulito (json diverso da zeus-mesh-9.2 solo negli occhi); M1–M7 verdi.
+- Garanzia per i casi futuri: `tests/meshRigOcchi.test.mjs` (O1) su avvocato, Domatrice e **Robin Hood**
+  (`tests/fixtures/recognition/robin/`, ricostruito dal suo pacchetto: occhi di lato all'iride verde, come il caso che
+  falliva). Ogni modifica futura alla ricerca degli occhi deve tenerli tutti e tre verdi.
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
