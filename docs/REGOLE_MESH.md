@@ -168,10 +168,9 @@ pezzo (oro e bianco del fulmine sono anche su tunica e cintura). Senza completam
 ## R16 — Mesh sulla SAGOMA (H1–H5), zeus-mesh-13
 Difetto (9 ott, vista mesh di Spine su Zeus): ogni mesh era una griglia regolare sul riquadro intero, vertici anche sullo
 sfondo trasparente. Ora (`src/lib/silhouetteMesh.js`, regola `meshShape: "sagoma"`; `"griglia"` = prima):
-- contorno (hull) sui pixel visibili allargati di 2 px, semplificato (Douglas-Peucker 1,5 px), lati ≤ un passo;
+- contorno (hull) sui pixel visibili allargati di 3 px, semplificato (Douglas-Peucker 2,4 px), lati ≤ 1,5 passi (R18);
 - puntini staccati (< 0,05% dei pixel, max 200) fuori dalla mesh; parti staccate unite da un corridoio di 5 px;
-- buchi grandi (≥ 2 passi², es. dentro il cerchio della Domatrice) restano VUOTI: anello di vertici, nessun triangolo;
-  buchi piccoli riempiti; i lati di contorno e buchi sono anche in `edges` (l'editor li conserva);
+- buchi: riempiti (R18: l'editor di Spine non ammette buchi); i lati del contorno sono anche in `edges`;
 - vertici interni solo dentro, griglia sfalsata al passo base (lato lungo / `cells`), più fitta (× `denseStep` 0,55)
   entro 0,2 spalle da collo, testa, spalle, gomiti, polsi e nel raggio del viso;
 - Delaunay che rispetta i contorni (lati mancanti divisi a metà); controllo: area dei triangoli = area del contorno
@@ -185,6 +184,19 @@ la media corre DENTRO la mesh, quindi due parti vicine ma staccate (braccio e fi
 scambiano pesi. Restano fissi: oggetto in mano (solo osso della mano, M4) e zona bloccata al 100% (R14).
 Poi al massimo 4 ossa per vertice, pesi < 2% tolti, somma esattamente 1. W1: salti > 0,6 fra vertici vicini
 ridotti di oltre 3 volte, nessun vertice con più di 4 ossa.
+
+## R18 — Regole dalla guida ufficiale di Spine (Spine Academy, 9 ott), zeus-mesh-13.2
+Studio di esotericsoftware.com/spine-meshes e /spine-weights, applicato:
+- **Niente buchi nelle mesh**: "Meshes can be concave but cannot have holes" — il vuoto del cerchio della Domatrice
+  resta coperto dalla mesh (pixel trasparenti); `holes: true` di silhouetteMesh solo su richiesta (H3).
+- **Pochi vertici** ("the CPU computes every vertex each frame"): contorno come il Trace di Spine (margine 3 px,
+  dettaglio 2,4 px, lati del contorno fino a 1,5 passi), passo del corpo lato lungo / 26 (prima 34).
+  Zeus: corpo 506 vertici (13: 851; 12: griglia sul riquadro).
+- **Smooth poi Prune** (R17): media coi vicini, poi max 4 ossa e pesi < 2% tolti.
+- **Weld** (mesh che devono muoversi come un'immagine sola): l'anello esterno della palpebra prende i pesi del corpo in
+  quel punto; attorno a ogni occhio il corpo è viso al 100% fino all'anello esterno, poi sfuma in 1,5 passi.
+  La palpebra (sempre disegnata sopra il corpo) non scivola più: Zeus da 1445 a ≤ 230 pixel diversi (M9).
+  Un nucleo più largo dava varchi fra i riccioli della Domatrice nel movimento (D5).
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

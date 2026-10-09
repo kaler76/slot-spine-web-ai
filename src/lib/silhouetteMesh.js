@@ -226,7 +226,7 @@ function bigHoles(sm, minArea) {
     if (px.length < minArea) continue;
     // stretto di 2 px
     let hm = new Uint8Array(W * H); for (const i of px) hm[i] = 1;
-    for (let k = 0; k < 2; k++) { const src = hm.slice(); for (const i of px) { if (!src[i]) continue; const x = i % W, y = (i / W) | 0; let ok = 1; for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!src[(y + dy) * W + x + dx]) { ok = 0; break; } hm[i] = ok; } }
+    for (let k = 0; k < 4; k++) { const src = hm.slice(); for (const i of px) { if (!src[i]) continue; const x = i % W, y = (i / W) | 0; let ok = 1; for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (!src[(y + dy) * W + x + dx]) { ok = 0; break; } hm[i] = ok; } }
     for (let it = 0; it < 4; it++) {
       let ch = 0;
       for (let y = 0; y < H - 1; y++) for (let x = 0; x < W - 1; x++) {
@@ -272,22 +272,25 @@ const ringsSimple = (R) => {
  * @returns {{ points: number[][], hull: number, triangles: number[], holes: number } | null}
  *   points: prima il contorno (hull), poi i contorni dei buchi, poi i punti interni
  */
-export function silhouetteMesh(alpha, w, h, step, stepAt = null) {
-  const sm = silhouetteMask(alpha, w, h, 2, 2 * step * step);
+export function silhouetteMesh(alpha, w, h, step, stepAt = null, opt = {}) {
+  // come il Trace di Spine: margine (padding) e dettaglio; buchi solo se richiesti (l'editor di Spine NON ammette
+  // buchi nelle mesh: "Meshes can be concave but cannot have holes" — i pixel trasparenti bastano)
+  const { pad = 3, eps = 2.4, hullStep = 1.5, holes = false } = opt;
+  const sm = silhouetteMask(alpha, w, h, pad, holes ? 2 * step * step : Infinity);
   if (!sm) return null;
-  const holeRings = bigHoles(sm, 2 * step * step);
+  const holeRings = holes ? bigHoles(sm, 2 * step * step) : [];
   const filled = { ...sm, m: sm.m.slice() };
   fillHoles(filled.m, sm.W, sm.H);
   const corners = traceContour(filled);
   if (!corners || corners.length < 3) return null;
-  const simplify = (c) => { for (const eps of [1.5, 1, 0.6]) { const s = dp(c, eps); if (s.length >= 3 && isSimple(s)) return s; } return c; };
+  const simplify = (c) => { for (const e of [eps, eps * 0.66, eps * 0.4]) { const s = dp(c, e); if (s.length >= 3 && isSimple(s)) return s; } return c; };
   const loc = (x, y) => (stepAt ? Math.min(step, stepAt(x, y)) : step);
   // lati non più lunghi di un passo locale (punti interi)
   const densify = (P) => {
     const B = [];
     for (let i = 0; i < P.length; i++) {
       const a = P[i], b = P[(i + 1) % P.length], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const n = Math.max(1, Math.ceil(L / loc((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)));
+      const n = Math.max(1, Math.ceil(L / (hullStep * loc((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))));
       B.push(a);
       for (let k = 1; k < n; k++) {
         const q = [Math.round(a[0] + ((b[0] - a[0]) * k) / n), Math.round(a[1] + ((b[1] - a[1]) * k) / n)];

@@ -17,10 +17,10 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13.1";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13.2";
 
 export const MESH_RIG_RULES = {
-  cells: 34, // celle della griglia del corpo sul lato lungo
+  cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
   pieceCells: 14, // celle della griglia dei pezzi tagliati
   meshShape: "sagoma", // "sagoma": contorno sulla sagoma, vertici solo dentro (R16); "griglia": riquadro intero (prima del 13)
   denseStep: 0.55, // passo dei vertici vicino ad articolazioni e viso (× passo base)
@@ -697,6 +697,15 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // zone fitte (R16): articolazioni e viso, dove la mesh si piega di più
   const denseAt = [face, by.collo.head, by.testa.head, ...["sx", "dx"].flatMap((s) => [by[`omero_${s}`].head, by[`avambraccio_${s}`].head, by[`mano_${s}`].head])];
   const denseR = [faceR, ...denseAt.slice(1).map(() => 0.2 * shoulderW)];
+  // attorno a ogni OCCHIO il corpo è viso al 100% (palpebra, bianco e pupilla stanno sulle ossa dell'occhio, figlie
+  // di viso): nucleo fino all'anello esterno della palpebra, poi sfuma in 1,5 passi verso il peso normale (R18)
+  const eyeRing = (decision.eyes ? eyes : []).map((e) => { const b = e.box, ew = b.x1 - b.x0 + 1, eh = b.y1 - b.y0 + 1; return { x: (b.x0 + b.x1 + 1) / 2, y: (b.y0 + b.y1 + 1) / 2, r: Math.max(ew / 2 + 0.55 * eh, eh / 2 + 0.9 * eh) }; });
+  const faceF = (px, py, step = 0) => {
+    let f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
+    for (const e of eyeRing) { const d = Math.hypot(px - e.x, py - e.y) - e.r; f = Math.max(f, d <= 0 ? 1 : smooth(1 - d / Math.max(1, 1.5 * step))); }
+    return f;
+  };
+  const meshW = {}; // pesi finali per mesh (per saldare le palpebre al corpo)
   function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
     let order, hull, triangles = null, U, V, edges = null;
@@ -735,10 +744,10 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       const w = chainWeights({ x: px, y: py }, C[label] || C.busto);
       LB.push(label);
       if (label === "testa") {
-        const f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
+        const f = faceF(px, py, step);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
       }
-      let fixed = String(label).startsWith("oggetto_"); // oggetto rigido (M4): solo l'osso della mano
+      let fixed = String(label).startsWith("oggetto_") || (label === "testa" && w.viso >= 0.999); // oggetto rigido (M4); pelle attorno agli occhi
       if (lockF && lockF(px, py) >= 0.999) fixed = true;
       WS.push(w); pin.push(fixed); XY.push(toS({ x: px, y: py })); PX.push({ x: px, y: py });
     }
@@ -766,12 +775,14 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       });
       for (let i = 0; i < WS.length; i++) WS[i] = next[i];
     }
+    const FW = [];
     for (let i = 0; i < order.length; i++) {
       // al massimo 4 ossa, pesi < 2% tolti, somma esattamente 1
       const ws = Object.entries(WS[i]).filter(([, v]) => v > 0.02).sort((a, b) => b[1] - a[1]).slice(0, 4);
       const tot = ws.reduce((a, [, v]) => a + v, 0);
       const r = ws.map(([, v]) => +(v / tot).toFixed(4));
       r[0] = +(1 - r.slice(1).reduce((a, v) => a + v, 0)).toFixed(4);
+      FW.push(Object.fromEntries(ws.map(([bn], k) => [bn, r[k]])));
       const sp = XY[i];
       vertices.push(ws.length);
       ws.forEach(([bn], k) => {
@@ -779,8 +790,25 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
         vertices.push(boneIndex[bn], +(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2), r[k]);
       });
     }
+    meshW[name] = { P: PX, W: FW, T: triangles };
     return { type: "mesh", path: name, uvs, triangles, vertices, hull, ...(edges ? { edges } : {}), width: bw, height: bh };
   }
+  // pesi del corpo in un punto qualsiasi (triangolo che lo contiene, coordinate baricentriche)
+  const weightsAt = (name, p) => {
+    const m = meshW[name]; if (!m) return null;
+    let best = null, bd = Infinity;
+    for (let t = 0; t < m.T.length; t += 3) {
+      const A = m.P[m.T[t]], B = m.P[m.T[t + 1]], Cc = m.P[m.T[t + 2]];
+      const d = (B.y - Cc.y) * (A.x - Cc.x) + (Cc.x - B.x) * (A.y - Cc.y); if (!d) continue;
+      const u = ((B.y - Cc.y) * (p.x - Cc.x) + (Cc.x - B.x) * (p.y - Cc.y)) / d, v = ((Cc.y - A.y) * (p.x - Cc.x) + (A.x - Cc.x) * (p.y - Cc.y)) / d, w = 1 - u - v;
+      const out = -Math.min(0, u, v, w);
+      if (out < bd) { bd = out; best = [[m.T[t], u], [m.T[t + 1], v], [m.T[t + 2], w]]; if (!out) break; }
+    }
+    const acc = {};
+    for (const [i, c] of best) { const cc = Math.max(0, c); for (const k in m.W[i]) acc[k] = (acc[k] || 0) + cc * m.W[i][k]; }
+    const ws = Object.entries(acc).filter(([, v]) => v > 0.02).sort((a, b) => b[1] - a[1]).slice(0, 3), tot = ws.reduce((a, [, v]) => a + v, 0);
+    return ws.map(([k, v]) => [k, +(v / tot).toFixed(4)]);
+  };
   // etichetta di un vertice: maggioranza nella cella (pixel del personaggio); oggetto se ≥ 15%
   const majority = (allowed, fallback) => (px, py, step) => {
     const cnt = new Map();
@@ -881,18 +909,21 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const name = `palpebra_${e.side}`;
     images[name] = { width: bw, height: bh, rgba: px };
     // vertici: contorno = anello esterno (hull), poi interno, poi mezzo
-    const occ = world[`occhio_${e.side}`], pal = world[name];
     const local = (bb, sp) => { const dx = sp.x - bb.x, dy = sp.y - bb.y, co = Math.cos(-bb.a), si = Math.sin(-bb.a); return [+(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2)]; };
     const uvs = [], vertices = [];
     const push = (p, ws) => {
       uvs.push(+((p.x - bx0) / bw).toFixed(5), +((p.y - by0) / bh).toFixed(5));
       const sp = toS(p);
       vertices.push(ws.length);
-      for (const [bn, w] of ws) vertices.push(boneIndex[bn], ...local(bn === name ? pal : occ, sp), w);
+      for (const [bn, w] of ws) vertices.push(boneIndex[bn], ...local(world[bn], sp), w);
     };
-    outer.forEach((p) => push(p, [[`occhio_${e.side}`, 1]]));
+    // SALDATURA (R18, come "Weld" di Spine): l'anello esterno ha i pesi del CORPO in quel punto (prima: osso
+    // dell'occhio al 100%; la pelle del corpo attorno all'occhio è viso solo in parte e la palpebra, sempre
+    // disegnata sopra, scivolava di 1–2 px quando la testa ruota: Zeus fino a 1445 pixel diversi)
+    const bodyW = (p) => weightsAt("corpo", p) || [[`occhio_${e.side}`, 1]];
+    outer.forEach((p) => push(p, bodyW(p)));
     inner.forEach((p) => push(p, [[name, 1]]));
-    midR.forEach((p) => push(p, [[`occhio_${e.side}`, 0.5], [name, 0.5]]));
+    midR.forEach((p) => { const h = bodyW(p).map(([k, v]) => [k, +(v * 0.5).toFixed(4)]); h[0][1] = +(0.5 - h.slice(1).reduce((a, [, v]) => a + v, 0)).toFixed(4); push(p, [...h, [name, 0.5]]); });
     const O = (i) => i % N, I = (i) => N + (i % N), M = (i) => 2 * N + (i % N);
     const triangles = [];
     for (let i = 0; i < N; i++) triangles.push(O(i), O(i + 1), M(i + 1), O(i), M(i + 1), M(i), M(i), M(i + 1), I(i + 1), M(i), I(i + 1), I(i));

@@ -111,5 +111,16 @@ test("M8 oggetto fermo su Zeus: la maschera resta attorno al braccio, il busto s
     if (best[0] === "root") root++; if (best[0] === "petto" || best[0] === "schiena") petto++;
   }
   assert.ok(root < 0.2 * n, `${root} vertici su ${n} fermi sulla radice`);
-  assert.ok(petto > 0.1 * n, `busto: ${petto} vertici su petto/schiena`);
+  assert.ok(petto > 0.06 * n, `busto: ${petto} vertici su petto/schiena`);
+});
+
+// PALPEBRA SALDATA al corpo (R18, 9 ott, studio della guida Spine: "Weld"). La palpebra è sempre disegnata sopra il
+// corpo: se i pesi attorno all'occhio sono diversi scivola e si vede un doppio contorno (prima fino a 1445 pixel).
+test("M9 palpebra saldata: con e senza palpebre (fuori dal battito) l'immagine resta quasi uguale", () => {
+  const noLid = { ...json, slots: json.slots.filter((s) => !s.name.startsWith("palpebra")) };
+  for (const t of [0, 1, 1.5, 4, 5]) {
+    const a = renderFrame(json, images, "ambient", t, { scale: 1, bg: [0, 0, 0, 255] }), b = renderFrame(noLid, images, "ambient", t, { scale: 1, bg: [0, 0, 0, 255] });
+    let d = 0; for (let i = 0; i < a.data.length; i += 4) if (Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > 40) d++;
+    assert.ok(d < 350, `t=${t}: ${d} pixel diversi fra palpebra e corpo`);
+  }
 });

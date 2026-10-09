@@ -50,34 +50,26 @@ test("H1 contorno sulla sagoma: nessun pixel visibile scoperto, mesh molto più 
   }
 });
 
-test("H2 vertici del contorno vicini alla sagoma (≤ 4 px da un pixel visibile), mai sullo sfondo lontano", () => {
+test("H2 vertici del contorno vicini alla sagoma (≤ 7 px da un pixel visibile: margine 3 + semplificazione 2,4), mai sullo sfondo lontano", () => {
   for (const [name, a] of meshes) {
     const im = images[name], { P, w, h } = check(name, a);
     for (let i = 0; i < a.hull; i++) {
       const [x, y] = P(i); let ok = false;
-      for (let dy = -5; dy <= 4 && !ok; dy++) for (let dx = -5; dx <= 4; dx++) { const X = Math.round(x) + dx, Y = Math.round(y) + dy; if (X >= 0 && Y >= 0 && X < w && Y < h && im.rgba[(Y * w + X) * 4 + 3]) { ok = true; break; } }
+      for (let dy = -7; dy <= 7 && !ok; dy++) for (let dx = -7; dx <= 7; dx++) { const X = Math.round(x) + dx, Y = Math.round(y) + dy; if (X >= 0 && Y >= 0 && X < w && Y < h && im.rgba[(Y * w + X) * 4 + 3]) { ok = true; break; } }
       assert.ok(ok, `${name}: vertice del contorno ${i} (${x}, ${y}) lontano dalla sagoma`);
     }
   }
 });
 
-test("H3 buco grande vuoto: il centro del cerchio della Domatrice non è nella mesh del braccio", () => {
-  const [name, a] = meshes.find(([n]) => n.startsWith("braccio_"));
-  const c = check(name, a), im = images[name];
-  // centro del cerchio: pixel trasparente più lontano dai pixel visibili, dentro il pezzo
-  let best = -1, bx = 0, by = 0;
-  for (let y = 0; y < c.h; y += 4) for (let x = 0; x < c.w; x += 4) {
-    if (im.rgba[(y * c.w + x) * 4 + 3]) continue;
-    let d = 0; while (d < 400) { d += 4; let hit = false; for (const [dx, dy] of [[d, 0], [-d, 0], [0, d], [0, -d]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= c.w || Y >= c.h) { hit = "fuori"; break; } if (im.rgba[(Y * c.w + X) * 4 + 3]) hit = true; } if (hit) { if (hit === "fuori") d = -1; break; } }
-    if (d > best) { best = d; bx = x; by = y; }
-  }
-  assert.ok(best > 100, `vuoto del cerchio trovato (raggio ${best})`);
-  const U = a.uvs, T = a.triangles, P = (i) => [U[2 * i] * c.w, U[2 * i + 1] * c.h];
-  for (let t = 0; t < T.length; t += 3) {
-    const [p, q, r] = [T[t], T[t + 1], T[t + 2]].map(P), d = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]);
-    const u = ((q[1] - r[1]) * (bx - r[0]) + (r[0] - q[0]) * (by - r[1])) / d, v = ((r[1] - p[1]) * (bx - r[0]) + (p[0] - r[0]) * (by - r[1])) / d;
-    assert.ok(!(u > 0 && v > 0 && 1 - u - v > 0), "il centro del cerchio è coperto da un triangolo");
-  }
+test("H3 nessun buco nella mesh (l'editor di Spine non li ammette): un solo contorno; buchi solo su richiesta", () => {
+  for (const [name, a] of meshes) assert.equal(a.edges.length, 2 * a.hull, `${name}: lati solo del contorno`);
+  // anello: con holes il vuoto centrale resta fuori, senza è coperto (trasparente nell'immagine)
+  const w = 160, h = 160, al = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const r = Math.hypot(x - 80, y - 80); if (r > 50 && r < 70) al[y * w + x] = 255; }
+  const centerIn = (m) => { const T = m.triangles, P = m.points; for (let t = 0; t < T.length; t += 3) { const [p, q, r] = [T[t], T[t + 1], T[t + 2]].map((i) => P[i]); const d = (q[1] - r[1]) * (p[0] - r[0]) + (r[0] - q[0]) * (p[1] - r[1]); const u = ((q[1] - r[1]) * (80 - r[0]) + (r[0] - q[0]) * (80 - r[1])) / d, v = ((r[1] - p[1]) * (80 - r[0]) + (p[0] - r[0]) * (80 - r[1])) / d; if (u > 0 && v > 0 && 1 - u - v > 0) return true; } return false; };
+  const plain = silhouetteMesh(al, w, h, 12), holed = silhouetteMesh(al, w, h, 12, null, { holes: true });
+  assert.ok(plain.holes === 0 && centerIn(plain));
+  assert.ok(holed.holes === 1 && !centerIn(holed));
 });
 
 test("H4 più fitta nelle zone indicate (articolazioni, viso), parti staccate unite in UN contorno", () => {

@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.2 | 9 ott | Regole dalla guida di Spine: niente buchi nelle mesh, meno vertici (Trace), palpebra saldata ai pesi del corpo (Weld) | Studio di Spine Academy (link inviato) | H3, M9, D5 |
 | zeus-mesh-13.1 | 9 ott | Maschera "oggetto fermo": crescita per colore limitata vicino al pezzo | Zeus nella vista pesi di Spine: busto quasi tutto sulla radice ("i pesi sono messi male?") | M8 |
 | zeus-mesh-13 | 9 ott | **Mesh sulla sagoma** (contorno sui pixel, vertici solo dentro, buchi grandi vuoti, più fitta su articolazioni e viso) e **pesi morbidi** (media coi vicini dentro la mesh) | Vista mesh di Zeus: griglia su tutto il riquadro, anche sullo sfondo; "gestisci i pesi in maniera ottimale" | H1–H5, W1 |
 | zeus-mesh-12.3 | 9 ott | Pagina rinominata "Crea character" (anche in Home); mappa dell'analisi in un riquadro chiuso "Controllo analisi" | "dobbiamo tenerlo a vista? non serve ai fini del prodotto finale" | build |
