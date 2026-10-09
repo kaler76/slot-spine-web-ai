@@ -5,6 +5,7 @@ import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { buildMeshRig, packAtlas, findMouth, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
 import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
+import { poseAt } from "../lib/animationSim.js";
 
 // Gemini (gemini-3-pro-image-preview) tramite la funzione edge già in produzione: prompt personalizzato +
 // immagine di riferimento; nessuna nuova funzione da pubblicare. Formato di uscita della funzione: 16:9, 1K.
@@ -57,11 +58,13 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const playerBox = useRef(null);
+  // INQUADRATURA dell'anteprima: solo la porzione d'interesse (coordinate dello skeleton, y in alto); null = tutto
+  const [frame, setFrame] = useState(null);
   const playerRef = useRef(null);
   const base = (fileName || "character").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase() || "character";
 
   // a nuova analisi il pacchetto precedente non vale più
-  useEffect(() => { setPkg(null); setGem(null); }, [original, parts]);
+  useEffect(() => { setPkg(null); setGem(null); setFrame(null); }, [original, parts]);
 
   /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
   async function makeGeminiSmile(fg) {
@@ -167,6 +170,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         premultipliedAlpha: false,
         backgroundColor: "#2a2b31",
         showControls: true,
+        ...(frame ? { viewport: { ...frame, padLeft: "2%", padRight: "2%", padTop: "2%", padBottom: "2%", transitionTime: 0 } } : {}),
         error: (_p, msg) => setStatus(`❌ Anteprima: ${msg}`)
       });
     })();
@@ -175,7 +179,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       try { playerRef.current?.dispose(); } catch { /* già chiuso */ }
       playerRef.current = null;
     };
-  }, [pkg, base]);
+  }, [pkg, base, frame]);
 
   async function download() {
     const zip = new JSZip();
@@ -287,7 +291,10 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
               })}
             </tbody>
           </table>
-          <div ref={playerBox} style={{ width: "100%", maxWidth: 640, height: 640, borderRadius: 6, overflow: "hidden" }} />
+          <div className="row" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div ref={playerBox} style={{ flex: "1 1 420px", maxWidth: 640, height: 640, borderRadius: 6, overflow: "hidden" }} />
+            <FrameTool pkg={pkg} frame={frame} onChange={setFrame} />
+          </div>
         </>
       )}
     </div>
@@ -310,4 +317,65 @@ function blobToDataUrl(blob) {
     r.onerror = rej;
     r.readAsDataURL(blob);
   });
+}
+
+/**
+ * Strumento INQUADRATURA: miniatura del personaggio su cui si trascina un rettangolo; l'anteprima mostra solo quella
+ * porzione (viewport del player Spine). Preimpostati: Tutto, Viso, Busto. Non cambia il pacchetto scaricato.
+ */
+function FrameTool({ pkg, frame, onChange }) {
+  const sk = pkg.json.skeleton, cw = sk.width, ch = sk.height;
+  const TW = 200, sc = TW / cw, TH = Math.round(ch * sc);
+  const [url, setUrl] = useState(null);
+  const [drag, setDrag] = useState(null); // { x0, y0, x1, y1 } in pixel della miniatura
+  useEffect(() => {
+    const u = URL.createObjectURL(pkg.pngs.corpo);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [pkg]);
+  // pixel miniatura <-> skeleton (la miniatura è l'immagine del corpo = riquadro dello skeleton)
+  const toSk = (px, py) => ({ x: px / sc + sk.x, y: sk.y + ch - py / sc });
+  const fromSk = (f) => ({ left: (f.x - sk.x) * sc, top: (sk.y + ch - (f.y + f.height)) * sc, width: f.width * sc, height: f.height * sc });
+  const preset = (kind) => {
+    if (kind === "tutto") return onChange(null);
+    const w = poseAt(pkg.json, 0, "ambient"), v = w.viso, n = w.collo, a = w.anca;
+    const sw = Math.hypot(w.omero_sx.tx - w.omero_dx.tx, w.omero_sx.ty - w.omero_dx.ty);
+    if (kind === "viso") { const r = 0.75 * sw; return onChange({ x: v.tx - r, y: v.ty - r * 0.9, width: 2 * r, height: 2 * r }); }
+    // busto: dalla vita a sopra la testa, larghezza 2,2 spalle
+    const top = v.ty + 0.9 * sw, bot = a.ty + 0.1 * sw, cx = n.tx;
+    return onChange({ x: cx - 1.1 * sw, y: bot, width: 2.2 * sw, height: top - bot });
+  };
+  const pos = (e) => { const r = e.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(TW, e.clientX - r.left)), y: Math.max(0, Math.min(TH, e.clientY - r.top)) }; };
+  const onDown = (e) => { const p = pos(e); setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); };
+  const onMove = (e) => { if (drag) { const p = pos(e); setDrag({ ...drag, x1: p.x, y1: p.y }); } };
+  const onUp = () => {
+    if (!drag) return;
+    const l = Math.min(drag.x0, drag.x1), r = Math.max(drag.x0, drag.x1), t = Math.min(drag.y0, drag.y1), b = Math.max(drag.y0, drag.y1);
+    setDrag(null);
+    if (r - l < 6 || b - t < 6) return; // clic senza trascinare: nessun cambio
+    const a = toSk(l, b), c = toSk(r, t);
+    onChange({ x: a.x, y: a.y, width: c.x - a.x, height: c.y - a.y });
+  };
+  const box = drag
+    ? { left: Math.min(drag.x0, drag.x1), top: Math.min(drag.y0, drag.y1), width: Math.abs(drag.x1 - drag.x0), height: Math.abs(drag.y1 - drag.y0) }
+    : frame ? fromSk(frame) : null;
+  return (
+    <div style={{ width: TW, fontSize: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>🔍 Inquadratura</div>
+      <div style={{ opacity: 0.75, marginBottom: 6 }}>Trascina un rettangolo per mostrare solo quella porzione.</div>
+      <div
+        onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+        style={{ position: "relative", width: TW, height: TH, cursor: "crosshair", userSelect: "none", background: "#2a2b31", borderRadius: 4, overflow: "hidden" }}
+      >
+        {url && <img src={url} alt="" draggable={false} style={{ width: TW, height: TH, display: "block", pointerEvents: "none" }} />}
+        {box && <div style={{ position: "absolute", ...box, border: "2px solid #ffb347", background: "rgba(255,179,71,0.12)", pointerEvents: "none" }} />}
+      </div>
+      <div className="row" style={{ gap: 4, marginTop: 6, flexWrap: "wrap" }}>
+        {[["tutto", "Tutto"], ["viso", "Viso"], ["busto", "Busto"]].map(([k, l]) => (
+          <button key={k} type="button" className="btn secondary" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => preset(k)}>{l}</button>
+        ))}
+      </div>
+      <div style={{ opacity: 0.6, marginTop: 6 }}>Solo per l'anteprima: il pacchetto Spine resta intero.</div>
+    </div>
+  );
 }
