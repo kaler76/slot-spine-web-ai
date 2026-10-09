@@ -27,6 +27,7 @@ import { PART_ROLES, ROLE_LABELS, RULES_VERSION, guessRoles, planRig, loadPartMa
 import { addTorsoBreathMesh, addHeadMesh, isRigidMaterial, metalShare } from "../lib/torsoMesh.js";
 import { verifyExportSkeleton } from "../lib/exportCheck.js";
 import { toSpine41 } from "../lib/spineFormat.js";
+import { applyFrameClip } from "../lib/meshRig.js";
 
 const ANIM_LABELS = {
   static: "⏸️ Fermo",
@@ -234,6 +235,12 @@ export default function CharacterPage() {
   });
   const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   const stageWrapRef = useRef(null);
+  // INQUADRATURA (R15): rettangolo in coordinate dello skeleton (y in alto); con "ritaglia" va nel pacchetto come
+  // maschera di ritaglio Spine (slot "inquadratura")
+  const [frame, setFrame] = useState(null);
+  const [frameMode, setFrameMode] = useState(false);
+  const [frameDrag, setFrameDrag] = useState(null);
+  const [clipPkg, setClipPkg] = useState(true);
   useEffect(() => {
     try {
       localStorage.setItem("spine.stageZoom", String(stageZoom));
@@ -990,11 +997,11 @@ export default function CharacterPage() {
     try {
       await downloadCharacterPackage({
         characterName: character.name,
-        skeletonJson: character.export.skeleton_json,
+        skeletonJson: frame && clipPkg ? applyFrameClip(character.export.skeleton_json, frame) : character.export.skeleton_json,
         atlasText: character.export.atlas_text,
         parts: character.parts
       });
-      setStatus("✅ Download avviato.");
+      setStatus(frame && clipPkg ? "✅ Download avviato (con l'inquadratura: slot \"inquadratura\" nel pacchetto)." : "✅ Download avviato.");
     } catch (err) {
       setStatus(`❌ Errore download: ${err.message}`);
     }
@@ -1554,6 +1561,34 @@ export default function CharacterPage() {
               >
                 {expandedOrderedKeys.map((key) => renderPart(key))}
               </div>
+              {(frameMode || frame) && (() => {
+                // stage (pixel non scalati) <-> skeleton: x = px - centroX, y = centroY - py
+                const toSk = (px, py) => ({ x: px / stageScale - stageCenterX, y: stageCenterY - py / stageScale });
+                const pos = (e) => { const r = e.currentTarget.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+                const box = frameDrag
+                  ? { left: Math.min(frameDrag.x0, frameDrag.x1), top: Math.min(frameDrag.y0, frameDrag.y1), width: Math.abs(frameDrag.x1 - frameDrag.x0), height: Math.abs(frameDrag.y1 - frameDrag.y0) }
+                  : frame
+                    ? { left: (frame.x + stageCenterX) * stageScale, top: (stageCenterY - frame.y - frame.height) * stageScale, width: frame.width * stageScale, height: frame.height * stageScale }
+                    : null;
+                return (
+                  <div
+                    style={{ position: "absolute", inset: 0, zIndex: 100000, cursor: frameMode ? "crosshair" : "default", pointerEvents: frameMode ? "auto" : "none", overflow: "hidden" }}
+                    onMouseDown={(e) => { if (!frameMode) return; const p = pos(e); setFrameDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); }}
+                    onMouseMove={(e) => { if (frameDrag) { const p = pos(e); setFrameDrag({ ...frameDrag, x1: p.x, y1: p.y }); } }}
+                    onMouseUp={() => {
+                      if (!frameDrag) return;
+                      const l = Math.min(frameDrag.x0, frameDrag.x1), r = Math.max(frameDrag.x0, frameDrag.x1), t = Math.min(frameDrag.y0, frameDrag.y1), b = Math.max(frameDrag.y0, frameDrag.y1);
+                      setFrameDrag(null);
+                      if (r - l < 6 || b - t < 6) return;
+                      const a = toSk(l, b), c = toSk(r, t);
+                      setFrame({ x: a.x, y: a.y, width: c.x - a.x, height: c.y - a.y });
+                      setFrameMode(false);
+                    }}
+                  >
+                    {box && <div style={{ position: "absolute", ...box, border: "2px solid #ffb347", boxShadow: "0 0 0 9999px rgba(0,0,0,0.55)", pointerEvents: "none" }} />}
+                  </div>
+                );
+              })()}
             </div>
           </div>
           {workingBlob && (
@@ -1585,6 +1620,19 @@ export default function CharacterPage() {
             />{" "}
             🫁 Mesh automatiche nell'export: busto che respira, cappello e barba che ondeggiano; le parti di metallo restano rigide (richiede Spine Professional — togli la spunta per Spine Essential)
           </label>
+          <div className="btn-row" style={{ alignItems: "center", flexWrap: "wrap" }}>
+            <button type="button" className={`btn secondary${frameMode ? " active" : ""}`} onClick={() => setFrameMode((m) => !m)}>
+              🔍 {frameMode ? "Trascina un rettangolo sull'anteprima…" : "Inquadratura"}
+            </button>
+            {frame && (
+              <button type="button" className="btn secondary" onClick={() => { setFrame(null); setFrameMode(false); }}>
+                Tutto (togli inquadratura)
+              </button>
+            )}
+            <label className="field-label-inline">
+              <input type="checkbox" checked={clipPkg} disabled={!frame} onChange={(e) => setClipPkg(e.target.checked)} /> ✂️ Ritaglia anche il pacchetto Spine
+            </label>
+          </div>
           <div className="btn-row">
             <button type="button" className="btn secondary" onClick={handleDownload}>
               ⬇ Scarica pacchetto

@@ -156,6 +156,10 @@ Casella nell'app **🔒 Oggetto fermo** (attiva di serie; regola `lockObject`, d
   ritaglia tutti gli slot fino all'ultimo; il riquadro dello skeleton diventa quello dell'inquadratura. Zip
   "…_inquadrato.zip"; il LEGGIMI riporta il riquadro. Per tornare al personaggio intero: nascondere o eliminare lo slot
   "inquadratura" in Spine. Letta dal runtime ufficiale 4.1 (F2). Nel gioco una maschera rettangolare costa poca CPU.
+- Anche nella pagina del personaggio del METODO VECCHIO (`/character/:id`, pezzi e z-index; zeus-mesh-12.2): pulsante
+  "🔍 Inquadratura" sotto l'anteprima composita → si trascina il rettangolo sull'anteprima (fuori resta scurito);
+  "✂️ Ritaglia anche il pacchetto Spine" → "Scarica pacchetto" aggiunge la stessa maschera (`applyFrameClip`).
+  Conversione anteprima → skeleton: x = px/zoom − centroX, y = centroY − py/zoom (y in alto, come gli offset delle parti).
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
