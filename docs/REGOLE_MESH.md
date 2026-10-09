@@ -161,6 +161,27 @@ Casella nell'app **🔒 Oggetto fermo** (attiva di serie; regola `lockObject`, d
   "✂️ Ritaglia anche il pacchetto Spine" → "Scarica pacchetto" aggiunge la stessa maschera (`applyFrameClip`).
   Conversione anteprima → skeleton: x = px/zoom − centroX, y = centroY − py/zoom (y in alto, come gli offset delle parti).
 
+## R16 — Mesh sulla SAGOMA (H1–H5), zeus-mesh-13
+Difetto (9 ott, vista mesh di Spine su Zeus): ogni mesh era una griglia regolare sul riquadro intero, vertici anche sullo
+sfondo trasparente. Ora (`src/lib/silhouetteMesh.js`, regola `meshShape: "sagoma"`; `"griglia"` = prima):
+- contorno (hull) sui pixel visibili allargati di 2 px, semplificato (Douglas-Peucker 1,5 px), lati ≤ un passo;
+- puntini staccati (< 0,05% dei pixel, max 200) fuori dalla mesh; parti staccate unite da un corridoio di 5 px;
+- buchi grandi (≥ 2 passi², es. dentro il cerchio della Domatrice) restano VUOTI: anello di vertici, nessun triangolo;
+  buchi piccoli riempiti; i lati di contorno e buchi sono anche in `edges` (l'editor li conserva);
+- vertici interni solo dentro, griglia sfalsata al passo base (lato lungo / `cells`), più fitta (× `denseStep` 0,55)
+  entro 0,2 spalle da collo, testa, spalle, gomiti, polsi e nel raggio del viso;
+- Delaunay che rispetta i contorni (lati mancanti divisi a metà); controllo: area dei triangoli = area del contorno
+  meno i buchi, altrimenti si torna alla griglia. Coordinate intere sugli spigoli dei pixel → UV esatte, riposo identico.
+Zeus: corpo 920 vertici (prima 35×~41 su tutto il riquadro), Domatrice: cerchio vuoto. Vista: `node scripts/meshView.mjs`.
+
+## R17 — Pesi MORBIDI (W1), zeus-mesh-13
+Richiesta (9 ott): "gestisci i pesi in maniera ottimale" (vista Weights a gradini). Dopo i pesi da catena/viso/blocco,
+4 passate di media coi vicini (`weightSmooth`; metà peso proprio, metà media dei vicini) lungo i lati dei triangoli:
+la media corre DENTRO la mesh, quindi due parti vicine ma staccate (braccio e fianco con lo sfondo in mezzo) non si
+scambiano pesi. Restano fissi: oggetto in mano (solo osso della mano, M4) e zona bloccata al 100% (R14).
+Poi al massimo 4 ossa per vertice, pesi < 2% tolti, somma esattamente 1. W1: salti > 0,6 fra vertici vicini
+ridotti di oltre 3 volte, nessun vertice con più di 4 ossa.
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.
@@ -191,6 +212,8 @@ Comando: `node scripts/verifySpineRuntime.mjs <cartella con spine-core> <json> <
 - `scripts/zeusMesh.mjs [cartella] [ampiezze×] [fotogrammi]`: genera Zeus + fotogrammi di controllo.
 - `scripts/meshCase.mjs <nome> [cartella] [fotogrammi]`: stesso metodo su un caso di `tests/fixtures/recognition/<nome>/`
   (come Riconosci parti → Crea character).
+- `scripts/meshView.mjs <cartella> <nome.json> [uscita] [scala] [pesi]`: vista mesh come in Spine (lati, vertici,
+  contorno arancione); con `pesi` i colori delle ossa mescolati come nella vista Weights.
 - `scripts/renderSpine.mjs <json> <cartella png> <animazione> <uscita>`: rende qualsiasi JSON Spine (anche la Domatrice).
 - I controlli dei raccordi di `simulateLoop` valgono per i pezzi rigidi della tavola esplosa, non per questo metodo:
   qui valgono M1–M7.

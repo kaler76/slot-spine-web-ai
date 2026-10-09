@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13 | 9 ott | **Mesh sulla sagoma** (contorno sui pixel, vertici solo dentro, buchi grandi vuoti, più fitta su articolazioni e viso) e **pesi morbidi** (media coi vicini dentro la mesh) | Vista mesh di Zeus: griglia su tutto il riquadro, anche sullo sfondo; "gestisci i pesi in maniera ottimale" | H1–H5, W1 |
 | zeus-mesh-12.3 | 9 ott | Pagina rinominata "Crea character" (anche in Home); mappa dell'analisi in un riquadro chiuso "Controllo analisi" | "dobbiamo tenerlo a vista? non serve ai fini del prodotto finale" | build |
 | zeus-mesh-12.2 | 9 ott | Inquadratura e ritaglio del pacchetto anche nella pagina del personaggio del metodo vecchio (pezzi, z-index, animazioni) | "metodo vecchio, non cancelliamo nulla; aggiungi qui il discorso ritaglio" | build |
 | zeus-mesh-12.1 | 9 ott | Pagina: avviso "carica l'immagine → compare Crea character"; tavola esplosa nascosta in un riquadro chiuso "Metodo vecchio" (codice e test invariati) | "qui non c'è più crea character… la tavola esplosa la teniamo?" | build |

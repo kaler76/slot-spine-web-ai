@@ -9,17 +9,22 @@
 // Versioni (tag git): zeus-mesh-1 tutto mesh; -2 tagli; -3 fulmine rigido + chiavi Bézier;
 // -4 testa non più stirata in alto, palpebra chiusa disegnata; -5 palpebra "pelle" come la
 // Domatrice (anello sul contorno dell'occhio schiacciato sulla linea di mezzo); -7 braccio lungo il
-// fianco tagliato dal GOMITO, isole del corpo che toccano il braccio nel pezzo (questo file).
+// fianco tagliato dal GOMITO, isole del corpo che toccano il braccio nel pezzo; -13 mesh sulla sagoma
+// (silhouetteMesh.js) e pesi morbidi (questo file).
 // Puro: nessun DOM.
 
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
+import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-12";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
   pieceCells: 14, // celle della griglia dei pezzi tagliati
+  meshShape: "sagoma", // "sagoma": contorno sulla sagoma, vertici solo dentro (R16); "griglia": riquadro intero (prima del 13)
+  denseStep: 0.55, // passo dei vertici vicino ad articolazioni e viso (× passo base)
+  weightSmooth: 4, // passate di media dei pesi coi vertici vicini (R17); 0 = pesi a gradini di prima
   pad: 6,
   loopSeconds: 6,
   fps: 15,
@@ -685,47 +690,86 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   }
 
   // ---- mesh generica su un riquadro ----
+  // zone fitte (R16): articolazioni e viso, dove la mesh si piega di più
+  const denseAt = [face, by.collo.head, by.testa.head, ...["sx", "dx"].flatMap((s) => [by[`omero_${s}`].head, by[`avambraccio_${s}`].head, by[`mano_${s}`].head])];
+  const denseR = [faceR, ...denseAt.slice(1).map(() => 0.2 * shoulderW)];
   function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
-    const cols = Math.max(2, Math.round(bw / step)), rows = Math.max(2, Math.round(bh / step));
-    const order = [];
-    for (let c = 0; c <= cols; c++) order.push([c, 0]);
-    for (let r = 1; r <= rows; r++) order.push([cols, r]);
-    for (let c = cols - 1; c >= 0; c--) order.push([c, rows]);
-    for (let r = rows - 1; r >= 1; r--) order.push([0, r]);
-    const hull = order.length;
-    for (let r = 1; r < rows; r++) for (let c = 1; c < cols; c++) order.push([c, r]);
-    const idx = new Map(order.map(([c, r], i) => [`${c},${r}`, i]));
-    const uvs = [], vertices = [];
-    for (const [c, r] of order) {
+    let order, hull, triangles = null, U, V, edges = null;
+    const img = rules.meshShape !== "griglia" && images[name];
+    const sil = img && img.width === bw && img.height === bh
+      ? silhouetteMesh(Uint8Array.from({ length: bw * bh }, (_, i) => img.rgba[i * 4 + 3]), bw, bh, step,
+          (x, y) => (denseAt.some((p, k) => Math.hypot(bx0 + x - p.x, by0 + y - p.y) < denseR[k]) ? rules.denseStep * step : step))
+      : null;
+    if (sil) {
+      // MESH SULLA SAGOMA: contorno sui pixel visibili, vertici solo dentro
+      order = sil.points; hull = sil.hull; triangles = sil.triangles; edges = sil.edges;
+      U = (p) => p[0] / bw; V = (p) => p[1] / bh;
+    } else {
+      const cols = Math.max(2, Math.round(bw / step)), rows = Math.max(2, Math.round(bh / step));
+      order = [];
+      for (let c = 0; c <= cols; c++) order.push([c, 0]);
+      for (let r = 1; r <= rows; r++) order.push([cols, r]);
+      for (let c = cols - 1; c >= 0; c--) order.push([c, rows]);
+      for (let r = rows - 1; r >= 1; r--) order.push([0, r]);
+      hull = order.length;
+      for (let r = 1; r < rows; r++) for (let c = 1; c < cols; c++) order.push([c, r]);
+      const idx = new Map(order.map(([c, r], i) => [`${c},${r}`, i]));
+      triangles = [];
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const a = idx.get(`${c},${r}`), b = idx.get(`${c + 1},${r}`), d = idx.get(`${c},${r + 1}`), e = idx.get(`${c + 1},${r + 1}`);
+        triangles.push(a, b, e, a, e, d);
+      }
+      U = (p) => p[0] / cols; V = (p) => p[1] / rows;
+    }
+    const uvs = [], vertices = [], WS = [], pin = [], XY = [];
+    for (const p of order) {
       // coordinate sui BORDI dei pixel, come le UV di Spine (u = 0 bordo sinistro, u = 1 bordo destro)
-      const px = bx0 + (c / cols) * bw, py = by0 + (r / rows) * bh;
-      uvs.push(+(c / cols).toFixed(5), +(r / rows).toFixed(5));
+      const px = bx0 + U(p) * bw, py = by0 + V(p) * bh;
+      uvs.push(+U(p).toFixed(5), +V(p).toFixed(5));
       const label = labelAt(px, py, step);
       let w = chainWeights({ x: px, y: py }, C[label] || C.busto);
       if (label === "testa") {
         const f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
       }
+      let fixed = String(label).startsWith("oggetto_"); // oggetto rigido (M4): solo l'osso della mano
       if (lockF) {
         const f = lockF(px, py);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.root = (w.root || 0) + f; }
+        if (f >= 0.999) fixed = true;
       }
-      const ws = Object.entries(w).filter(([, v]) => v > 0.01).sort((a, b) => b[1] - a[1]).slice(0, 4);
+      WS.push(w); pin.push(fixed); XY.push(toS({ x: px, y: py }));
+    }
+    // PESI MORBIDI (R17): media coi vicini lungo i lati dei triangoli (solo DENTRO la mesh: due parti vicine ma
+    // staccate non si scambiano pesi), più passate; oggetto rigido e zona bloccata restano come sono
+    const nb = order.map(() => new Set());
+    for (let t = 0; t < triangles.length; t += 3) for (let e = 0; e < 3; e++) { const a = triangles[t + e], b = triangles[t + ((e + 1) % 3)]; nb[a].add(b); nb[b].add(a); }
+    for (let it = 0; it < (rules.weightSmooth ?? 0); it++) {
+      const next = WS.map((w, i) => {
+        if (pin[i] || !nb[i].size) return w;
+        const acc = {};
+        for (const k in w) acc[k] = 0.5 * w[k];
+        const share = 0.5 / nb[i].size;
+        for (const j of nb[i]) for (const k in WS[j]) acc[k] = (acc[k] || 0) + share * WS[j][k];
+        return acc;
+      });
+      for (let i = 0; i < WS.length; i++) WS[i] = next[i];
+    }
+    for (let i = 0; i < order.length; i++) {
+      // al massimo 4 ossa, pesi < 2% tolti, somma esattamente 1
+      const ws = Object.entries(WS[i]).filter(([, v]) => v > 0.02).sort((a, b) => b[1] - a[1]).slice(0, 4);
       const tot = ws.reduce((a, [, v]) => a + v, 0);
-      const sp = toS({ x: px, y: py });
+      const r = ws.map(([, v]) => +(v / tot).toFixed(4));
+      r[0] = +(1 - r.slice(1).reduce((a, v) => a + v, 0)).toFixed(4);
+      const sp = XY[i];
       vertices.push(ws.length);
-      for (const [bn, v] of ws) {
+      ws.forEach(([bn], k) => {
         const b = world[bn], dx = sp.x - b.x, dy = sp.y - b.y, co = Math.cos(-b.a), si = Math.sin(-b.a);
-        vertices.push(boneIndex[bn], +(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2), +(v / tot).toFixed(4));
-      }
+        vertices.push(boneIndex[bn], +(dx * co - dy * si).toFixed(2), +(dx * si + dy * co).toFixed(2), r[k]);
+      });
     }
-    const triangles = [];
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-      const a = idx.get(`${c},${r}`), b = idx.get(`${c + 1},${r}`), d = idx.get(`${c},${r + 1}`), e = idx.get(`${c + 1},${r + 1}`);
-      triangles.push(a, b, e, a, e, d);
-    }
-    return { type: "mesh", path: name, uvs, triangles, vertices, hull, width: bw, height: bh };
+    return { type: "mesh", path: name, uvs, triangles, vertices, hull, ...(edges ? { edges } : {}), width: bw, height: bh };
   }
   // etichetta di un vertice: maggioranza nella cella (pixel del personaggio); oggetto se ≥ 15%
   const majority = (allowed, fallback) => (px, py, step) => {
