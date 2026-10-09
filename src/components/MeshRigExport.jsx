@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import { SpinePlayer } from "@esotericsoftware/spine-player";
 import "@esotericsoftware/spine-player/dist/spine-player.css";
-import { buildMeshRig, packAtlas, findMouth, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
+import { buildMeshRig, packAtlas, findMouth, applyFrameClip, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
 import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { poseAt } from "../lib/animationSim.js";
@@ -60,6 +60,8 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const playerBox = useRef(null);
   // INQUADRATURA dell'anteprima: solo la porzione d'interesse (coordinate dello skeleton, y in alto); null = tutto
   const [frame, setFrame] = useState(null);
+  const [clipPkg, setClipPkg] = useState(true); // inquadratura anche nel pacchetto (maschera di ritaglio Spine)
+  const outJson = () => (frame && clipPkg ? applyFrameClip(pkg.json, frame) : pkg.json);
   const playerRef = useRef(null);
   const base = (fileName || "character").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase() || "character";
 
@@ -156,7 +158,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     let cancelled = false;
     (async () => {
       const uris = {
-        [`${base}.json`]: "data:application/json;base64," + btoa(unescape(encodeURIComponent(JSON.stringify(pkg.json)))),
+        [`${base}.json`]: "data:application/json;base64," + btoa(unescape(encodeURIComponent(JSON.stringify(outJson())))),
         [`${base}.atlas`]: "data:text/plain;base64," + btoa(pkg.atlas),
         [`${base}.png`]: await blobToDataUrl(pkg.pagePng)
       };
@@ -179,11 +181,11 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       try { playerRef.current?.dispose(); } catch { /* già chiuso */ }
       playerRef.current = null;
     };
-  }, [pkg, base, frame]);
+  }, [pkg, base, frame, clipPkg]);
 
   async function download() {
     const zip = new JSZip();
-    zip.file(`${base}.json`, JSON.stringify(pkg.json, null, 1));
+    zip.file(`${base}.json`, JSON.stringify(outJson(), null, 1));
     zip.file(`${base}.atlas`, pkg.atlas);
     zip.file(`${base}.png`, pkg.pagePng);
     for (const [n, b] of Object.entries(pkg.pngs)) zip.file(`images/${n}.png`, b);
@@ -193,12 +195,13 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         `Runtime/gioco: ${base}.json + ${base}.atlas + ${base}.png\n` +
         `Editor Spine 4.1.x: Spine > Importa dati > ${base}.json (immagini in ./images/)\n` +
         `Nota: Spine Trial gira sempre sull'ultima versione e non apre file 4.1: serve l'editor 4.1 con licenza.\n\n` +
-        `Scelte automatiche:\n${pkg.report.decision.map((r) => " - " + r).join("\n")}\n`
+        `Scelte automatiche:\n${pkg.report.decision.map((r) => " - " + r).join("\n")}\n` +
+        (frame && clipPkg ? `\nInquadratura: maschera di ritaglio "inquadratura" (x ${Math.round(frame.x)}, y ${Math.round(frame.y)}, ${Math.round(frame.width)}×${Math.round(frame.height)}); per il personaggio intero nascondi o elimina lo slot "inquadratura".\n` : "")
     );
     const blob = await zip.generateAsync({ type: "blob" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${base}_mesh_spine41.zip`;
+    a.download = `${base}_mesh_spine41${frame && clipPkg ? "_inquadrato" : ""}.zip`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
@@ -293,7 +296,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
           </table>
           <div className="row" style={{ gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
             <div ref={playerBox} style={{ flex: "1 1 420px", maxWidth: 640, height: 640, borderRadius: 6, overflow: "hidden" }} />
-            <FrameTool pkg={pkg} frame={frame} onChange={setFrame} />
+            <FrameTool pkg={pkg} frame={frame} onChange={setFrame} clipPkg={clipPkg} onClipPkg={setClipPkg} />
           </div>
         </>
       )}
@@ -323,7 +326,7 @@ function blobToDataUrl(blob) {
  * Strumento INQUADRATURA: miniatura del personaggio su cui si trascina un rettangolo; l'anteprima mostra solo quella
  * porzione (viewport del player Spine). Preimpostati: Tutto, Viso, Busto. Non cambia il pacchetto scaricato.
  */
-function FrameTool({ pkg, frame, onChange }) {
+function FrameTool({ pkg, frame, onChange, clipPkg, onClipPkg }) {
   const sk = pkg.json.skeleton, cw = sk.width, ch = sk.height;
   const TW = 200, sc = TW / cw, TH = Math.round(ch * sc);
   const [url, setUrl] = useState(null);
@@ -375,7 +378,12 @@ function FrameTool({ pkg, frame, onChange }) {
           <button key={k} type="button" className="btn secondary" style={{ padding: "2px 8px", fontSize: 12 }} onClick={() => preset(k)}>{l}</button>
         ))}
       </div>
-      <div style={{ opacity: 0.6, marginTop: 6 }}>Solo per l'anteprima: il pacchetto Spine resta intero.</div>
+      <label className="field-label-inline" style={{ display: "block", marginTop: 8 }}>
+        <input type="checkbox" checked={clipPkg} disabled={!frame} onChange={(e) => onClipPkg(e.target.checked)} /> ✂️ Ritaglia anche il pacchetto Spine
+      </label>
+      <div style={{ opacity: 0.6, marginTop: 4 }}>
+        {frame && clipPkg ? "Lo zip avrà una maschera di ritaglio (slot \"inquadratura\"): si vede solo questa porzione." : "Lo zip resta con il personaggio intero."}
+      </div>
     </div>
   );
 }

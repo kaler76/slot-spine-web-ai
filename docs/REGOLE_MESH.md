@@ -1,4 +1,4 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-11, 9 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-12, 9 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
 ("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato), `tests/meshRigOcchi.test.mjs` (O1, occhi), `tests/meshRigOggetto.test.mjs` (B1–B3, oggetto completato).
@@ -145,6 +145,17 @@ Casella nell'app **🔒 Oggetto fermo** (attiva di serie; regola `lockObject`, d
   poi la fermezza sfuma su `lockBand` 0,14 × spalle: niente strappi fra parte ferma e parte che si muove.
 - Così anche le parti d'oggetto che il riconoscimento non ha preso restano ferme e l'oggetto non si spezza.
 - Tabella: "oggetto FERMO: braccio e oggetto bloccati, maschera di N px attorno (+M px d'oggetto rimasti nel corpo)".
+
+## R15 — Inquadratura (F1–F2), zeus-mesh-11.1 / 12
+"Uno strumento per mostrare solo la porzione d'interesse" e "non c'è modo di fare frame nello Spine?".
+- Nell'app, accanto all'anteprima: **🔍 Inquadratura**: rettangolo trascinato sulla miniatura, o Tutto / Viso / Busto
+  (viso: 1,5 × spalle attorno all'osso "viso"; busto: dalla vita a sopra la testa, 2,2 × spalle). L'anteprima (player
+  Spine 4.1) mostra solo quella porzione.
+- **✂️ Ritaglia anche il pacchetto Spine** (attiva di serie quando c'è un'inquadratura): `applyFrameClip` aggiunge una
+  MASCHERA DI RITAGLIO Spine (clipping attachment rettangolare) come primo slot "inquadratura" sull'osso radice, che
+  ritaglia tutti gli slot fino all'ultimo; il riquadro dello skeleton diventa quello dell'inquadratura. Zip
+  "…_inquadrato.zip"; il LEGGIMI riporta il riquadro. Per tornare al personaggio intero: nascondere o eliminare lo slot
+  "inquadratura" in Spine. Letta dal runtime ufficiale 4.1 (F2). Nel gioco una maschera rettangolare costa poca CPU.
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

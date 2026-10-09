@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-11";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-12";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -1092,4 +1092,25 @@ export function packAtlas(images, pageName, { pad = 2, maxWidth = 2048 } = {}) {
   const text = `${pageName}\nsize: ${width},${height}\nformat: RGBA8888\nfilter: Linear,Linear\nrepeat: none\n` +
     items.map(({ name, im, x: px, y: py }) => `${name}\n  rotate: false\n  xy: ${px}, ${py}\n  size: ${im.width}, ${im.height}\n  orig: ${im.width}, ${im.height}\n  offset: 0, 0\n  index: -1\n`).join("");
   return { width, height, rgba, text };
+}
+
+/**
+ * INQUADRATURA nel pacchetto (zeus-mesh-12): maschera di ritaglio Spine (clipping attachment) rettangolare sul
+ * riquadro `frame` (coordinate dello skeleton, y in alto): primo slot dell'ordine di disegno, osso radice, ritaglia
+ * tutti gli slot fino all'ultimo. Il riquadro dello skeleton diventa il riquadro dell'inquadratura.
+ * Nel gioco il ritaglio costa un po' di CPU (una sola maschera rettangolare: poco).
+ * @returns nuovo json (l'originale non cambia)
+ */
+export function applyFrameClip(json, frame) {
+  if (!frame) return json;
+  const out = JSON.parse(JSON.stringify(json));
+  const { x, y, width: w, height: h } = frame;
+  const name = "inquadratura";
+  out.slots = [{ name, bone: "root", attachment: name }, ...out.slots.filter((s) => s.name !== name)];
+  const last = out.slots[out.slots.length - 1].name;
+  out.skins[0].attachments[name] = {
+    [name]: { type: "clipping", end: last, vertexCount: 4, vertices: [x, y, x + w, y, x + w, y + h, x, y + h].map((v) => +v.toFixed(2)), color: "ce3a3aff" }
+  };
+  out.skeleton = { ...out.skeleton, x: +x.toFixed(2), y: +y.toFixed(2), width: +w.toFixed(2), height: +h.toFixed(2) };
+  return out;
 }

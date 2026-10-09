@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-12 | 9 ott | Inquadratura **anche nel pacchetto**: maschera di ritaglio Spine (slot "inquadratura"), casella ✂️ | "non c'è modo di fare frame nello Spine?" | F1–F2 |
 | zeus-mesh-11.1 | 9 ott | **Inquadratura** dell'anteprima: rettangolo trascinato sulla miniatura o preimpostati Tutto / Viso / Busto (solo anteprima, pacchetto intero) | "uno strumento che mi permetta di mostrare solo la porzione di interesse" | build + prova nel browser |
 | zeus-mesh-11 | 9 ott | **Oggetto fermo** (maschera block): mano e oggetto bloccati, corpo attorno sfumato, il resto si muove; casella 🔒 nell'app | Robin: "arco rotto sopra e sotto, piuttosto non muoverlo, fai una maschera block" | B5 |
 | zeus-mesh-10.1 | 9 ott | Niente riempimento sotto l'oggetto fuori dalla sagoma del corpo | Robin: "cos'è quel pezzo vicino alla punta" (macchia accanto alla corda) | B4 |
