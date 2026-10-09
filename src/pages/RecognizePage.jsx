@@ -7,6 +7,7 @@ import { recoverPose } from "../lib/recoverPose.js";
 import ExplodedSheetImport from "../components/ExplodedSheetImport.jsx";
 import ManualPosePicker from "../components/ManualPosePicker.jsx";
 import MeshRigExport from "../components/MeshRigExport.jsx";
+import { MESH_RIG_VERSION } from "../lib/meshRig.js";
 
 // Modelli MediaPipe caricati dal CDN alla prima analisi (nessuna chiave, nessun costo, girano nel browser).
 const WASM_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
@@ -376,6 +377,9 @@ export default function RecognizePage() {
   return (
     <div className="page">
       <Link to="/" className="back-link">← Home</Link>
+      <div style={{ background: "#2d5a2d", color: "#fff", padding: "6px 12px", borderRadius: 6, fontSize: 14, fontWeight: 600, display: "inline-block", marginBottom: 8 }}>
+        Versione metodo mesh: {MESH_RIG_VERSION.split(".").slice(1).join(".")} ({MESH_RIG_VERSION.split(".")[0]})
+      </div>
       <h1>🔍 Riconosci parti (prova)</h1>
       <div className="hint">
         Carica UN'immagine del personaggio intero (anche con lo sfondo). L'app riconosce da sola articolazioni (posa) e

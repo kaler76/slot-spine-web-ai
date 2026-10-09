@@ -199,7 +199,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
 
   return (
     <div className="card" style={{ marginTop: 16, padding: 16 }}>
-      <h2 style={{ marginTop: 0 }}>🦴 Crea character Spine (metodo mesh)</h2>
+      <h2 style={{ marginTop: 0 }}>🦴 Crea character Spine (metodo mesh) <span style={{ fontSize: 13, fontWeight: 400, opacity: 0.75 }}>· {MESH_RIG_VERSION}</span></h2>
       <div className="hint">
         L'originale resta intero e si deforma in mesh pesata sulle ossa della posa. Si tagliano solo: il braccio che tiene
         un oggetto, i capelli lunghi dietro le spalle e gli occhi (bianco, pupilla, palpebra). Animazione "ambient" in loop
