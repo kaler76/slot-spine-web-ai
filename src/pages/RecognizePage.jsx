@@ -380,7 +380,7 @@ export default function RecognizePage() {
       <div style={{ background: "#2d5a2d", color: "#fff", padding: "6px 12px", borderRadius: 6, fontSize: 14, fontWeight: 600, display: "inline-block", marginBottom: 8 }}>
         Versione metodo mesh: {MESH_RIG_VERSION.split(".").slice(1).join(".")} ({MESH_RIG_VERSION.split(".")[0]})
       </div>
-      <h1>🔍 Riconosci parti (prova)</h1>
+      <h1>🦴 Crea character</h1>
       <div className="hint">
         Carica UN'immagine del personaggio intero (anche con lo sfondo). L'app riconosce da sola articolazioni (posa) e
         categorie di pixel (capelli, viso, pelle, vestiti, accessori) e propone le parti per il rig. Analisi locale con recupero automatico sul server quando necessario; in quel caso l’immagine viene inviata al servizio di analisi. Non salva risultati nel database. Con "Scarica risultato" ottieni un JSON + l'immagine da condividere per la verifica.
@@ -421,6 +421,10 @@ export default function RecognizePage() {
       )}
       {result && (
         <>
+          <details style={{ margin: "8px 0" }}>
+          <summary style={{ cursor: "pointer", fontSize: 14, opacity: 0.85 }}>
+            🔎 Controllo analisi (posa e parti riconosciute){result.warnings.length ? ` — ${result.warnings.length} avvis${result.warnings.length > 1 ? "i" : "o"}` : ""}
+          </summary>
           <div className="row" style={{ gap: 12, flexWrap: "wrap", margin: "8px 0" }}>
             {legend.map(([name, col]) => (
               <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -440,6 +444,7 @@ export default function RecognizePage() {
           <div className="hint">
             Pixel per parte: {Object.entries(result.stats).map(([k, v]) => `${k} ${v}`).join(" · ")}
           </div>
+          </details>
           {sourceRef.current && (
             <MeshRigExport
               original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba }}

@@ -115,11 +115,10 @@ export default function Home() {
           )}
         </Link>
         <Link to="/recognize" className="card">
-          <div className="card-icon">🔍</div>
-          <div className="card-title">Riconosci parti</div>
-          <span className="status-badge">Prova</span>
+          <div className="card-icon">🦴</div>
+          <div className="card-title">Crea character (mesh)</div>
           <div className="card-desc">
-            Da un'immagine intera: articolazioni (posa) e parti proposte in automatico. Solo analisi.
+            Da un'immagine intera al pacchetto Spine 4.1 animato: occhi, sorriso, oggetto in mano, inquadratura.
           </div>
         </Link>
         <Link to="/reels" className="card">
