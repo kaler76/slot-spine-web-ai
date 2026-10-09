@@ -17,6 +17,10 @@ for (const b of json.bones) {
 const names = json.bones.map((b) => b.name);
 const WEIGHTS = process.argv[6] === "pesi";
 const PAL = [[255, 60, 60], [60, 200, 255], [255, 200, 40], [150, 80, 255], [60, 230, 120], [255, 120, 220], [255, 140, 40], [40, 120, 255], [200, 255, 60], [0, 220, 200], [255, 255, 255], [180, 120, 60], [120, 255, 255], [255, 80, 140]];
+const NAMED = { root: [255, 255, 255], anca: [40, 120, 255], schiena: [0, 220, 200], petto: [255, 200, 40], collo: [255, 140, 40], testa: [255, 60, 60], viso: [255, 120, 220],
+  omero_sx: [60, 230, 120], avambraccio_sx: [200, 255, 60], mano_sx: [120, 255, 255], omero_dx: [60, 230, 120], avambraccio_dx: [200, 255, 60], mano_dx: [120, 255, 255],
+  coscia_sx: [150, 80, 255], gamba_sx: [180, 120, 60], coscia_dx: [150, 80, 255], gamba_dx: [180, 120, 60], capelli_1: [255, 160, 160], capelli_2: [200, 100, 100] };
+const colOf = (n) => NAMED[n] || PAL[names.indexOf(n) % PAL.length];
 const atts = [];
 for (const slot of json.slots) {
   const skin = json.skins[0].attachments[slot.name]; if (!skin || !slot.attachment) continue;
@@ -26,7 +30,7 @@ for (const slot of json.slots) {
   if (at.vertices.length > n * 2) {
     for (let i = 0, k = 0; i < n; i++) {
       const c = at.vertices[k++]; let x = 0, y = 0; const col = [0, 0, 0];
-      for (let j = 0; j < c; j++) { const bi = at.vertices[k++], b = bones[names[bi]], vx = at.vertices[k++], vy = at.vertices[k++], w = at.vertices[k++]; x += (b.x + vx * Math.cos(b.a) - vy * Math.sin(b.a)) * w; y += (b.y + vx * Math.sin(b.a) + vy * Math.cos(b.a)) * w; for (let q = 0; q < 3; q++) col[q] += PAL[bi % PAL.length][q] * w; }
+      for (let j = 0; j < c; j++) { const bi = at.vertices[k++], b = bones[names[bi]], vx = at.vertices[k++], vy = at.vertices[k++], w = at.vertices[k++]; x += (b.x + vx * Math.cos(b.a) - vy * Math.sin(b.a)) * w; y += (b.y + vx * Math.sin(b.a) + vy * Math.cos(b.a)) * w; for (let q = 0; q < 3; q++) col[q] += colOf(names[bi])[q] * w; }
       pts.push([x, y]); cols.push(col);
     }
   } else { const b = bones[slot.bone]; for (let i = 0; i < n; i++) { const vx = at.vertices[2 * i], vy = at.vertices[2 * i + 1]; pts.push([b.x + vx * Math.cos(b.a) - vy * Math.sin(b.a), b.y + vx * Math.sin(b.a) + vy * Math.cos(b.a)]); } }

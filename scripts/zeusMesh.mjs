@@ -22,7 +22,7 @@ const landmarks = JSON.parse(fs.readFileSync(D + "landmarks.json", "utf8")).land
 const alpha = foregroundFromUniformBorder({ width: W, height: H, rgba, categories });
 const fg = Uint8Array.from(alpha, (a) => (a >= 0.5 ? 1 : 0));
 const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, rgba });
-const rules = { ...MESH_RIG_RULES, amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * BOOST])) };
+const rules = { ...MESH_RIG_RULES, lockObject: process.env.LOCK === "1", amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * BOOST])) };
 const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, rules);
 
 fs.mkdirSync(path.join(OUT, "images"), { recursive: true });

@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13.1";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -46,6 +46,7 @@ export const MESH_RIG_RULES = {
   // braccio tagliato + oggetto fermi (pesati sulla radice), maschera attorno a loro nel corpo che sfuma verso il
   // movimento normale; le parti dell'oggetto rimaste nel corpo (stesso colore, collegate) sono ferme anche loro
   lockObject: false,
+  lockGrow: 0.08, // crescita per colore della maschera al massimo a questa distanza dal pezzo (× spalle)
   lockBand: 0.14, // larghezza della sfumatura della maschera (× larghezza spalle)
   objectGrowMax: 6, // al massimo 6 volte i pixel riconosciuti
   // BOCCA (zeus-mesh-8): "no" | "loop" (sorride una volta nel loop) | "sempre" (sorriso tenuto per tutto il loop).
@@ -646,15 +647,18 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     for (let i = 0; i < W * H; i++) if (armMask[i] && decision.arms.some((s) => lab[i] === L_[`oggetto_${s}`])) { hist[key(i)]++; no++; }
     const okBin = new Uint8Array(512);
     for (let k = 0; k < 512; k++) if (no && hist[k] >= 0.004 * no) okBin[k] = 1;
-    const cap = 10 * no;
+    // con l'oggetto già completato (R13) al massimo 0,08 spalle dal pezzo (Zeus, 9 ott: i colori del fulmine — oro e bianco — sono anche su tunica e
+    // cintura, la crescita senza limite di distanza bloccava tutto il busto sulla radice)
+    const cap = 10 * no, maxD = rules.objectGrow ? Math.max(3, Math.round(rules.lockGrow * shoulderW)) : 65535, depth = new Uint16Array(W * H);
     let added = 0;
     for (let k = 0; k < q.length && added < cap; k++) {
       const i = q[k], x = i % W, y = (i / W) | 0;
+      if (depth[i] >= maxD) continue;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
         const j = ny * W + nx;
         if (seed[j] || !fg[j] || lab[j] === L_.testa || !okBin[key(j)]) continue;
-        seed[j] = 1; q.push(j); added++;
+        seed[j] = 1; depth[j] = depth[i] + 1; q.push(j); added++;
       }
     }
     // tutto ciò che sta DENTRO il contorno convesso dell'oggetto è fermo anche lui (corda dell'arco tesa fra le punte)
@@ -722,29 +726,35 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       }
       U = (p) => p[0] / cols; V = (p) => p[1] / rows;
     }
-    const uvs = [], vertices = [], WS = [], pin = [], XY = [];
+    const uvs = [], vertices = [], WS = [], pin = [], XY = [], LB = [], PX = [];
     for (const p of order) {
       // coordinate sui BORDI dei pixel, come le UV di Spine (u = 0 bordo sinistro, u = 1 bordo destro)
       const px = bx0 + U(p) * bw, py = by0 + V(p) * bh;
       uvs.push(+U(p).toFixed(5), +V(p).toFixed(5));
       const label = labelAt(px, py, step);
-      let w = chainWeights({ x: px, y: py }, C[label] || C.busto);
+      const w = chainWeights({ x: px, y: py }, C[label] || C.busto);
+      LB.push(label);
       if (label === "testa") {
         const f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
       }
       let fixed = String(label).startsWith("oggetto_"); // oggetto rigido (M4): solo l'osso della mano
+      if (lockF && lockF(px, py) >= 0.999) fixed = true;
+      WS.push(w); pin.push(fixed); XY.push(toS({ x: px, y: py })); PX.push({ x: px, y: py });
+    }
+    const nb = order.map(() => new Set());
+    for (let t = 0; t < triangles.length; t += 3) for (let e = 0; e < 3; e++) { const a = triangles[t + e], b = triangles[t + ((e + 1) % 3)]; nb[a].add(b); nb[b].add(a); }
+    // oggetto rigido e blocco
+    for (let i = 0; i < WS.length; i++) {
+      const { x: px, y: py } = PX[i];
+      if (String(LB[i]).startsWith("oggetto_")) { const s = String(LB[i]).slice(8); WS[i] = { [`mano_${s}`]: 1 }; }
       if (lockF) {
-        const f = lockF(px, py);
-        if (f > 0) { for (const k in w) w[k] *= 1 - f; w.root = (w.root || 0) + f; }
-        if (f >= 0.999) fixed = true;
+        const f = lockF(px, py), v = WS[i];
+        if (f > 0) { for (const k in v) v[k] *= 1 - f; v.root = (v.root || 0) + f; }
       }
-      WS.push(w); pin.push(fixed); XY.push(toS({ x: px, y: py }));
     }
     // PESI MORBIDI (R17): media coi vicini lungo i lati dei triangoli (solo DENTRO la mesh: due parti vicine ma
     // staccate non si scambiano pesi), più passate; oggetto rigido e zona bloccata restano come sono
-    const nb = order.map(() => new Set());
-    for (let t = 0; t < triangles.length; t += 3) for (let e = 0; e < 3; e++) { const a = triangles[t + e], b = triangles[t + ((e + 1) % 3)]; nb[a].add(b); nb[b].add(a); }
     for (let it = 0; it < (rules.weightSmooth ?? 0); it++) {
       const next = WS.map((w, i) => {
         if (pin[i] || !nb[i].size) return w;

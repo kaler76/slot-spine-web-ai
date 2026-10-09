@@ -146,6 +146,10 @@ Casella nell'app **🔒 Oggetto fermo** (attiva di serie; regola `lockObject`, d
 - Così anche le parti d'oggetto che il riconoscimento non ha preso restano ferme e l'oggetto non si spezza.
 - Tabella: "oggetto FERMO: braccio e oggetto bloccati, maschera di N px attorno (+M px d'oggetto rimasti nel corpo)".
 
+Correzione zeus-mesh-13.1 (9 ott, vista Weights di Spine su Zeus: 277 vertici del corpo su 851 sulla radice, busto
+fermo): con l'oggetto già completato (R13) la crescita per colore della maschera si ferma a `lockGrow` 0,08 spalle dal
+pezzo (oro e bianco del fulmine sono anche su tunica e cintura). Senza completamento resta come prima. Test M8.
+
 ## R15 — Inquadratura (F1–F2), zeus-mesh-11.1 / 12
 "Uno strumento per mostrare solo la porzione d'interesse" e "non c'è modo di fare frame nello Spine?".
 - Nell'app, accanto all'anteprima: **🔍 Inquadratura**: rettangolo trascinato sulla miniatura, o Tutto / Viso / Busto

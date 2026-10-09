@@ -98,3 +98,18 @@ test("M7 runtime ufficiale Spine 4.1 (se installato): legge il pacchetto e i ver
   }
   assert.ok(worst < 1.5, `scarto runtime/simulatore ${worst.toFixed(2)} px`);
 });
+
+// OGGETTO FERMO su Zeus (9 ott, vista Weights di Spine: busto quasi tutto sulla radice). Oro e bianco del fulmine
+// sono anche su tunica e cintura: la crescita per colore della maschera è limitata vicino al pezzo (lockGrow).
+test("M8 oggetto fermo su Zeus: la maschera resta attorno al braccio, il busto si muove (radice < 20% dei vertici)", () => {
+  const r = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, { ...MESH_RIG_RULES, lockObject: true });
+  const names = r.json.bones.map((b) => b.name), a = r.json.skins[0].attachments.corpo.corpo, n = a.uvs.length / 2;
+  let root = 0, petto = 0;
+  for (let i = 0, k = 0; i < n; i++) {
+    const c = a.vertices[k++]; let best = null;
+    for (let j = 0; j < c; j++) { const b = a.vertices[k], w = a.vertices[k + 3]; k += 4; if (!best || w > best[1]) best = [names[b], w]; }
+    if (best[0] === "root") root++; if (best[0] === "petto" || best[0] === "schiena") petto++;
+  }
+  assert.ok(root < 0.2 * n, `${root} vertici su ${n} fermi sulla radice`);
+  assert.ok(petto > 0.1 * n, `busto: ${petto} vertici su petto/schiena`);
+});
