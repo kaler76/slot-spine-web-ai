@@ -421,6 +421,16 @@ export default function RecognizePage() {
       )}
       {result && (
         <>
+          {sourceRef.current?.img && (
+            <div style={{ margin: "8px 0" }}>
+              <img
+                src={sourceRef.current.img.src}
+                alt={result.fileName || "personaggio"}
+                style={{ maxHeight: 260, maxWidth: "100%", borderRadius: 6, border: "1px solid #333", background: "#2a2b31" }}
+              />
+              <div className="hint">{result.fileName} · {result.W}×{result.H} px</div>
+            </div>
+          )}
           <details style={{ margin: "8px 0" }}>
           <summary style={{ cursor: "pointer", fontSize: 14, opacity: 0.85 }}>
             🔎 Controllo analisi (posa e parti riconosciute){result.warnings.length ? ` — ${result.warnings.length} avvis${result.warnings.length > 1 ? "i" : "o"}` : ""}
