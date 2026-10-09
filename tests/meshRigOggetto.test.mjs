@@ -70,3 +70,20 @@ test("B4 niente macchie di riempimento accanto all'oggetto fuori dal corpo (punt
   for (let y = 115; y < 200; y++) for (let x = 360; x < 440; x++) { const cx = x - ox, cy = y - oy; if (cx < 0 || cy < 0 || cx >= c.width || cy >= c.height) continue; if (c.rgba[(cy * c.width + cx) * 4 + 3] > 128) n++; }
   assert.ok(n < 800, `pixel del corpo attorno alla punta dell'arco: ${n} (solo la corda)`);
 });
+
+test("B5 oggetto FERMO (maschera block): arco e mano identici in tutto il loop, anche senza completamento", () => {
+  for (const objectGrow of [true, false]) {
+    const r = build({ ...MESH_RIG_RULES, lockObject: true, objectGrow });
+    assert.ok(r.report.decision.some((d) => /oggetto FERMO/.test(d)));
+    const fr = (t) => renderFrame(r.json, r.images, "ambient", t, { scale: 1, bg: [0, 0, 0, 255] });
+    const a = fr(0);
+    for (const t of [1.5, 3, 4.5]) {
+      const b = fr(t);
+      // zona dell'arco (a sinistra del corpo, dalla punta alta a quella bassa): pixel cambiati ≤ 1%
+      let n = 0, d = 0;
+      for (let y = 40 - oy; y < 1000 - oy; y++) for (let x = 300 - ox; x < 420 - ox; x++) { if (x < 0 || y < 0 || x >= a.width || y >= a.height) continue; const i = (y * a.width + x) * 4; if (a.data[i] + a.data[i + 1] + a.data[i + 2] < 30) continue; n++; if (Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]) > 30) d++; }
+      // senza completamento resta mobile solo un tratto di corda vicino alla punta alta
+      assert.ok(d / n < (objectGrow ? 0.01 : 0.03), `objectGrow=${objectGrow}, t=${t}: ${((100 * d) / n).toFixed(2)}% dei pixel dell'arco cambiati`);
+    }
+  }
+});

@@ -1,4 +1,4 @@
-# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-10.1, 9 ott 2026
+# Regole del metodo MESH (personaggio intero in mesh pesata) — versione zeus-mesh-11, 9 ott 2026
 
 Riferimento professionale: rig della Domatrice (`claude/ANALISI_RIG_DOMATRICE.md`). Caso approvato: Zeus, zeus-mesh-5
 ("perfetto", 8 ott). Codice: `src/lib/meshRig.js`. Test: `tests/meshRig.test.mjs` (M1–M7, Zeus), `tests/meshRigDomatrice.test.mjs` (D1–D5, Domatrice), `tests/meshRigBocca.test.mjs` (S1–S6, sorriso deformato), `tests/mouthGemini.test.mjs` (G1–G4, sorriso ridisegnato), `tests/meshRigOcchi.test.mjs` (O1, occhi), `tests/meshRigOggetto.test.mjs` (B1–B3, oggetto completato).
@@ -133,6 +133,18 @@ il resto dell'arco restava nel corpo e si piegava con la mesh, staccandosi dal t
 - Limiti noti: la corda dell'arco resta nel corpo; dove la punta dell'arco tocca una parte dello stesso colore (risvolto
   dello stivale) un pezzetto può entrare nel pezzo se le categorie non le distinguono.
 - Zeus identico a zeus-mesh-9.3.1 (fulmine già intero).
+
+## R14 — Oggetto FERMO, maschera block (B5), zeus-mesh-11
+Robin Hood (9 ott): "arco rotto sopra e sotto, piuttosto non muoverlo: fai una maschera block e muovi il resto".
+Casella nell'app **🔒 Oggetto fermo** (attiva di serie; regola `lockObject`, di serie spenta nel codice: Zeus invariato).
+- Il pezzo del braccio tagliato (mano + oggetto) è pesato al 100% sulla radice: non si muove. Le ossa di quel
+  braccio non hanno animazione.
+- MASCHERA nel corpo: pixel bloccati = pezzo del braccio + parti dell'oggetto rimaste nel corpo (stessi colori,
+  collegate, fino a 10 volte l'oggetto riconosciuto) + tutto ciò che sta dentro il contorno convesso dell'oggetto
+  (+ margine 0,03 × spalle: la corda tesa fra le punte). I vertici del corpo entro una cella della griglia sono fermi,
+  poi la fermezza sfuma su `lockBand` 0,14 × spalle: niente strappi fra parte ferma e parte che si muove.
+- Così anche le parti d'oggetto che il riconoscimento non ha preso restano ferme e l'oggetto non si spezza.
+- Tabella: "oggetto FERMO: braccio e oggetto bloccati, maschera di N px attorno (+M px d'oggetto rimasti nel corpo)".
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

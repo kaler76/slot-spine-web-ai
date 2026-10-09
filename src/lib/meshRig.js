@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-10.1";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-11";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -37,6 +37,11 @@ export const MESH_RIG_RULES = {
   // OGGETTO COMPLETATO (zeus-mesh-10): il riconoscimento nel browser prende spesso solo il tratto d'oggetto vicino
   // alla mano (arco di Robin Hood: 13709 px); si cresce per colore e si tiene solo ciò che prosegue lungo l'asse
   objectGrow: true,
+  // OGGETTO FERMO (zeus-mesh-11, Robin Hood: "piuttosto non muoverlo, fai una maschera block e muovi il resto"):
+  // braccio tagliato + oggetto fermi (pesati sulla radice), maschera attorno a loro nel corpo che sfuma verso il
+  // movimento normale; le parti dell'oggetto rimaste nel corpo (stesso colore, collegate) sono ferme anche loro
+  lockObject: false,
+  lockBand: 0.14, // larghezza della sfumatura della maschera (× larghezza spalle)
   objectGrowMax: 6, // al massimo 6 volte i pixel riconosciuti
   // BOCCA (zeus-mesh-8): "no" | "loop" (sorride una volta nel loop) | "sempre" (sorriso tenuto per tutto il loop).
   // Gli angoli della bocca salgono di smileUp × larghezza bocca e si allargano di smileOut ×; nel setup la
@@ -625,8 +630,62 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const crop = (src, bx0, by0, bw, bh) => { const out = new Uint8ClampedArray(bw * bh * 4); for (let y = 0; y < bh; y++) out.set(src.subarray(((y + by0) * W + bx0) * 4, ((y + by0) * W + bx0 + bw) * 4), y * bw * 4); return out; };
   const images = { corpo: { width: cw, height: ch, rgba: crop(body, x0, y0, cw, ch) } };
 
+  // maschera BLOCCO: pixel fermi (pezzo del braccio + oggetto rimasto nel corpo) e sfumatura attorno
+  let lockAt = null;
+  if (rules.lockObject && decision.arms.length) {
+    const seed = new Uint8Array(W * H), q = [];
+    for (let i = 0; i < W * H; i++) if (armMask[i]) { seed[i] = 1; q.push(i); }
+    // parti dell'oggetto rimaste nel corpo: stessi colori dell'oggetto, collegate al pezzo
+    const key = (i) => ((rgba[i * 4] >> 5) << 6) | ((rgba[i * 4 + 1] >> 5) << 3) | (rgba[i * 4 + 2] >> 5);
+    const hist = new Uint32Array(512); let no = 0;
+    for (let i = 0; i < W * H; i++) if (armMask[i] && decision.arms.some((s) => lab[i] === L_[`oggetto_${s}`])) { hist[key(i)]++; no++; }
+    const okBin = new Uint8Array(512);
+    for (let k = 0; k < 512; k++) if (no && hist[k] >= 0.004 * no) okBin[k] = 1;
+    const cap = 10 * no;
+    let added = 0;
+    for (let k = 0; k < q.length && added < cap; k++) {
+      const i = q[k], x = i % W, y = (i / W) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const j = ny * W + nx;
+        if (seed[j] || !fg[j] || lab[j] === L_.testa || !okBin[key(j)]) continue;
+        seed[j] = 1; q.push(j); added++;
+      }
+    }
+    // tutto ciò che sta DENTRO il contorno convesso dell'oggetto è fermo anche lui (corda dell'arco tesa fra le punte)
+    {
+      const pts = [];
+      for (let i = 0; i < W * H; i++) if (armMask[i] && decision.arms.some((s) => lab[i] === L_[`oggetto_${s}`])) pts.push([i % W, (i / W) | 0]);
+      if (pts.length > 2) {
+        pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+        const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        const lower = [], upper = [];
+        for (const p of pts) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop(); lower.push(p); }
+        for (let k = pts.length - 1; k >= 0; k--) { const p = pts[k]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop(); upper.push(p); }
+        const hull = lower.slice(0, -1).concat(upper.slice(0, -1));
+        let hy0 = H, hy1 = -1; for (const [, y] of hull) { hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y); }
+        let inHull = 0;
+        for (let y = hy0; y <= hy1; y++) {
+          const xs = [];
+          for (let k = 0; k < hull.length; k++) { const [ax, ay] = hull[k], [bx, by] = hull[(k + 1) % hull.length]; if ((ay <= y && by > y) || (by <= y && ay > y)) xs.push(ax + ((y - ay) / (by - ay)) * (bx - ax)); }
+          if (xs.length < 2) continue;
+          const mg = Math.round(0.03 * shoulderW); // margine: la corda sta sul bordo del contorno
+          const xa = Math.ceil(Math.min(...xs)) - mg, xb = Math.floor(Math.max(...xs)) + mg;
+          for (let x = Math.max(0, xa); x <= Math.min(W - 1, xb); x++) { const j = y * W + x; if (fg[j] && !seed[j] && (lab[j] !== L_.testa || Math.hypot(x - face.x, y - face.y) > faceR)) { seed[j] = 1; inHull++; } }
+        }
+        added += inHull;
+      }
+    }
+    // nucleo fermo largo una cella della griglia (i vertici distano fino a mezza cella dai pixel bloccati), poi sfumatura
+    const core = Math.max(cw, ch) / rules.cells, R = rules.lockBand * shoulderW, dist = new Float32Array(W * H).fill(Infinity), dq = [];
+    for (let i = 0; i < W * H; i++) if (seed[i]) { dist[i] = 0; dq.push(i); }
+    for (let k = 0; k < dq.length; k++) { const i = dq[k]; if (dist[i] >= R + core) continue; const x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (dist[j] !== Infinity) continue; dist[j] = dist[i] + 1; dq.push(j); } }
+    lockAt = (px, py) => { const d = dist[Math.min(H - 1, Math.max(0, Math.round(py))) * W + Math.min(W - 1, Math.max(0, Math.round(px)))]; return d === Infinity ? 0 : d <= core ? 1 : smooth(1 - (d - core) / R); };
+    decision.reasons.push(`oggetto FERMO: braccio e oggetto bloccati, maschera di ${Math.round(R)} px attorno (+${added} px d'oggetto rimasti nel corpo)`);
+  }
+
   // ---- mesh generica su un riquadro ----
-  function gridMesh(name, bx0, by0, bw, bh, cells, labelAt) {
+  function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
     const cols = Math.max(2, Math.round(bw / step)), rows = Math.max(2, Math.round(bh / step));
     const order = [];
@@ -647,6 +706,10 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       if (label === "testa") {
         const f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
+      }
+      if (lockF) {
+        const f = lockF(px, py);
+        if (f > 0) { for (const k in w) w[k] *= 1 - f; w.root = (w.root || 0) + f; }
       }
       const ws = Object.entries(w).filter(([, v]) => v > 0.01).sort((a, b) => b[1] - a[1]).slice(0, 4);
       const tot = ws.reduce((a, [, v]) => a + v, 0);
@@ -692,17 +755,17 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // (dal gomito: l'omero resta nel corpo e segue la catena del braccio)
   const bodyMap = (n) => (n === "capelli" ? "testa" : decision.arms.some((s) => (n === `braccio_${s}` && armFrom[s] === "spalla") || n === `oggetto_${s}`) ? "busto" : n);
   const attachments = {};
-  attachments.corpo = gridMesh("corpo", x0, y0, cw, ch, rules.cells, (px, py, step) => bodyMap(majority(() => true, nearLabel)(px, py, step)));
+  attachments.corpo = gridMesh("corpo", x0, y0, cw, ch, rules.cells, (px, py, step) => bodyMap(majority(() => true, nearLabel)(px, py, step)), lockAt);
 
   // pezzi tagliati
-  const pieceOf = (mask, name, map, cells) => {
+  const pieceOf = (mask, name, map, cells, lockF = null) => {
     let a = W, b = H, c = -1, d = -1;
     for (let i = 0; i < W * H; i++) if (mask[i]) { const x = i % W, y = (i / W) | 0; a = Math.min(a, x); c = Math.max(c, x); b = Math.min(b, y); d = Math.max(d, y); }
     a = Math.max(0, a - 2); b = Math.max(0, b - 2); c = Math.min(W - 1, c + 2); d = Math.min(H - 1, d + 2);
     const bw = c - a + 1, bh = d - b + 1, px = new Uint8ClampedArray(bw * bh * 4);
     for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const g = (y + b) * W + x + a; if (mask[g]) px.set(rgba.subarray(g * 4, g * 4 + 4), (y * bw + x) * 4); }
     images[name] = { width: bw, height: bh, rgba: px };
-    attachments[name] = gridMesh(name, a, b, bw, bh, cells, map);
+    attachments[name] = gridMesh(name, a, b, bw, bh, cells, map, lockF);
   };
   // vertici del pezzo fuori dalla sua sagoma: etichetta del pixel DEL PEZZO più vicino (prima il
   // ripiego era "braccio": la punta del fulmine si stirava tra mano e omero)
@@ -715,7 +778,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const s of decision.arms) {
     const own = (k) => k === L_[`braccio_${s}`] || k === L_[`oggetto_${s}`];
     const fallback = nearIn(armMask);
-    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells);
+    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt ? () => 1 : null);
   }
   if (decision.hair) pieceOf(hair, "capelli_dietro", () => "capelli", 8);
 
@@ -954,6 +1017,7 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
     viso: { translate: xy((t) => -A.visoSlide * height * bump(0.1)(t), zero) }
   };
   for (const [s, ph] of [["sx", 0], ["dx", 0.3]]) {
+    if (rules.lockObject && decision.arms.includes(s)) continue; // braccio con oggetto FERMO: niente rotazioni
     bones[`omero_${s}`] = { rotate: rot(A.omero, wave(1, ph)) };
     bones[`avambraccio_${s}`] = { rotate: rot(A.avambraccio, wave(1, ph + 0.12)) };
     bones[`mano_${s}`] = { rotate: rot(A.mano, wave(2, ph + 0.2)) };

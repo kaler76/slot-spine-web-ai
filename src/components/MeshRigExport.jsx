@@ -49,6 +49,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const [boost, setBoost] = useState(1);
   const [cuts, setCuts] = useState({ ...MESH_RIG_RULES.cuts });
   const [smile, setSmile] = useState("no");
+  const [lockObject, setLockObject] = useState(true); // oggetto in mano fermo (maschera block), il resto si muove
   const [smileHow, setSmileHow] = useState("gemini"); // "gemini" = bocca ridisegnata, "mesh" = deformazione
   const [smileKind, setSmileKind] = useState("chiusa");
   const [gem, setGem] = useState(null); // { kind, patch, previews: { orig, gen, result } }
@@ -115,6 +116,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         ...MESH_RIG_RULES,
         cuts,
         smile,
+        lockObject,
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
       let smilePatch = null, fallbackNote = "";
@@ -212,6 +214,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
             <input type="checkbox" checked={cuts[k]} disabled={busy} onChange={(e) => setCuts({ ...cuts, [k]: e.target.checked })} /> {label}
           </label>
         ))}
+        <label className="field-label-inline" title="Braccio e oggetto (arco, spada...) restano fermi; il resto del personaggio si muove">
+          <input type="checkbox" checked={lockObject} disabled={busy || !cuts.arm} onChange={(e) => setLockObject(e.target.checked)} /> 🔒 Oggetto fermo
+        </label>
         <label className="field-label-inline">
           😊 Sorriso
           <select value={smile} disabled={busy} onChange={(e) => setSmile(e.target.value)} style={{ marginLeft: 6 }}>

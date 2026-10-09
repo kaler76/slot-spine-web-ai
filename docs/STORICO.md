@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-11 | 9 ott | **Oggetto fermo** (maschera block): mano e oggetto bloccati, corpo attorno sfumato, il resto si muove; casella 🔒 nell'app | Robin: "arco rotto sopra e sotto, piuttosto non muoverlo, fai una maschera block" | B5 |
 | zeus-mesh-10.1 | 9 ott | Niente riempimento sotto l'oggetto fuori dalla sagoma del corpo | Robin: "cos'è quel pezzo vicino alla punta" (macchia accanto alla corda) | B4 |
 | zeus-mesh-10 | 9 ott | **Oggetto completato**: crescita per colore + filtro lungo l'asse, tutto nel pezzo della mano (arco intero, rigido) | Robin Hood: "l'arco si spezza, non è separato con la mano" | B1–B3 |
 | zeus-mesh-9.3.1 | 9 ott | Robin Hood nei casi di prova (occhi); regola R12 **approvata "perfetto"** | Rendere la regola degli occhi garantita per i casi futuri | O1 (avvocato, Domatrice, Robin) |
