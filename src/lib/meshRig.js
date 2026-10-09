@@ -15,7 +15,7 @@
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-10";
+export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-10.1";
 
 export const MESH_RIG_RULES = {
   cells: 34, // celle della griglia del corpo sul lato lungo
@@ -610,7 +610,16 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (let i = 0; i < W * H; i++) {
     if (!armMask[i] || dist[i] > fillR) continue;
     const y = (i / W) | 0, s = decision.arms.find((a) => lab[i] === L_[`braccio_${a}`] || lab[i] === L_[`oggetto_${a}`]);
-    if (s && (armFrom[s] === "gomito" || y <= elbowY[s])) holes.push(i);
+    if (!s || !(armFrom[s] === "gomito" || y <= elbowY[s])) continue;
+    // pixel dell'OGGETTO: si riempie solo se sta DENTRO la sagoma del corpo (corpo da due lati opposti entro la
+    // fascia), non accanto a una parte sottile (corda dell'arco di Robin Hood: macchia di riempimento vicino alla
+    // punta che si vedeva quando l'arco si muove)
+    if (lab[i] === L_[`oggetto_${s}`]) {
+      const x = i % W, R = Math.ceil(fillR);
+      const side = (dx, dy) => { for (let k = 1; k <= R; k++) { const nx = x + dx * k, ny = y + dy * k; if (nx < 0 || ny < 0 || nx >= W || ny >= H) return false; if (known[ny * W + nx]) return true; } return false; };
+      if (!((side(1, 0) && side(-1, 0)) || (side(0, 1) && side(0, -1)))) continue;
+    }
+    holes.push(i);
   }
   fillHoles(body, known, W, H, holes);
   const crop = (src, bx0, by0, bw, bh) => { const out = new Uint8ClampedArray(bw * bh * 4); for (let y = 0; y < bh; y++) out.set(src.subarray(((y + by0) * W + bx0) * 4, ((y + by0) * W + bx0 + bw) * 4), y * bw * 4); return out; };

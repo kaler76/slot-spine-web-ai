@@ -61,3 +61,12 @@ test("B3 senza completamento (regola spenta) l'arco resta spezzato: il caso è d
   const top = count(m, 40, 320, 300, 470);
   assert.ok(top < 1000, `arco sopra la mano senza completamento: ${top} px`);
 });
+
+test("B4 niente macchie di riempimento accanto all'oggetto fuori dal corpo (punta dell'arco vicino alla corda)", () => {
+  const { images } = build(MESH_RIG_RULES), c = images.corpo;
+  // zona della punta alta dell'arco: dopo il taglio nel corpo resta solo la corda (~500 px); prima della correzione
+  // c'era anche la macchia di riempimento (~1500 px)
+  let n = 0;
+  for (let y = 115; y < 200; y++) for (let x = 360; x < 440; x++) { const cx = x - ox, cy = y - oy; if (cx < 0 || cy < 0 || cx >= c.width || cy >= c.height) continue; if (c.rgba[(cy * c.width + cx) * 4 + 3] > 128) n++; }
+  assert.ok(n < 800, `pixel del corpo attorno alla punta dell'arco: ${n} (solo la corda)`);
+});
