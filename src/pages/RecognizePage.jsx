@@ -402,6 +402,11 @@ export default function RecognizePage() {
         )}
       </div>
       {status && <div className="status">{status}</div>}
+      {!result && !busy && !manual && (
+        <div className="hint" style={{ marginTop: 8 }}>
+          ⬆️ Carica l'immagine del personaggio: dopo l'analisi, qui sotto compare <b>🦴 Crea character Spine</b>.
+        </div>
+      )}
       {manual && (
         <ManualPosePicker
           img={manual.img}
@@ -447,6 +452,10 @@ export default function RecognizePage() {
             />
           )}
           {sourceRef.current && (
+            <details style={{ marginTop: 24, opacity: 0.85 }}>
+              <summary style={{ cursor: "pointer", fontSize: 14 }}>
+                🧩 Metodo vecchio: tavola esplosa → pezzi (nascosto; usa "Crea character" sopra)
+              </summary>
             <ExplodedSheetImport
               original={{ width: result.W, height: result.H, rgba: sourceRef.current.rgba, img: sourceRef.current.img }}
               landmarks={result.landmarks}
@@ -455,6 +464,7 @@ export default function RecognizePage() {
               fileName={result.fileName}
               heldObjects={result.heldObjects}
             />
+            </details>
           )}
         </>
       )}
