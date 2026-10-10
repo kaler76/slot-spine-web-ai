@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.3";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.4";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -312,6 +312,7 @@ function findEyeOnce(center, ipd, W, H, rgba, fg, rules_irisGrow = true) {
   };
   closeInside();
   const gapPx = []; // pixel chiusi fra due pixel del buco (fascia centrale dell'iride)
+  let circle = false; // iride trovata come cerchio (colore non blu né verde)
   // chiusura per righe: fra due pixel del buco sulla stessa riga (distanza ≤ metà della larghezza del buco)
   // tutto è occhio. Pupilla e parte scura dell'iride toccano il contorno in alto e la chiusura dall'esterno non
   // le prende (Robin Hood: pupilla rimasta nel corpo)
@@ -341,11 +342,19 @@ function findEyeOnce(center, ipd, W, H, rgba, fg, rules_irisGrow = true) {
     let sy = 0, sn = 0; for (const [y, [a0, a1]] of rowW) if (a1 - a0 + 1 >= 0.7 * bw0) { sy += y; sn++; }
     const ccx = bx, ccy = sn ? sy / sn : bestY, rr = Math.min(0.18 * ipd, (bw0 + 2) / 2);
     if (rr >= 3) {
+      circle = true;
+      // in altezza il cerchio non va oltre l'apertura dell'occhio (bianco e chiusure fra i bianchi, + 2 px): sotto c'è
+      // la rima della palpebra inferiore, che non è pelle ma nemmeno occhio (Rita: buco alto, palpebra che stirava
+      // la pelle fin sotto l'occhio nel battito)
+      let oy0 = h, oy1 = -1;
+      for (let i = 0; i < w * h; i++) if (base[i]) { const y = (i / w) | 0; oy0 = Math.min(oy0, y); oy1 = Math.max(oy1, y); }
+      for (const i of gapPx) { const y = (i / w) | 0; oy0 = Math.min(oy0, y); oy1 = Math.max(oy1, y); }
+      const yLo = oy0 - 0.35 * rr, yHi = oy1 + 2;
       // buco = bianco riconosciuto + cerchio dell'iride (senza pelle) + chiusure fra i bianchi vicine al cerchio;
       // il resto delle chiusure (ciglia, eyeliner sopra l'iride: righe bianche a occhio aperto) torna al corpo
       hole.set(base);
       for (let y = Math.max(0, Math.floor(ccy - rr)); y <= Math.min(h - 1, Math.ceil(ccy + rr)); y++) for (let x = Math.max(0, Math.floor(ccx - rr)); x <= Math.min(w - 1, Math.ceil(ccx + rr)); x++) {
-        if ((x - ccx) ** 2 + (y - ccy) ** 2 > rr * rr) continue;
+        if ((x - ccx) ** 2 + (y - ccy) ** 2 > rr * rr || y < yLo || y > yHi) continue;
         const g = (y + y0) * W + x + x0, c = g * 4; if (!fg[g]) continue;
         if (Math.abs(rgba[c] - skin[0]) + Math.abs(rgba[c + 1] - skin[1]) + Math.abs(rgba[c + 2] - skin[2]) <= 80) continue;
         // metà alta del cerchio: le ciglia (quasi nere) coprono l'iride sotto la palpebra e restano al corpo
@@ -383,7 +392,7 @@ function findEyeOnce(center, ipd, W, H, rgba, fg, rules_irisGrow = true) {
   }
   let hx0 = w, hx1 = -1, hy0 = h, hy1 = -1;
   for (let i = 0; i < w * h; i++) if (hole[i]) { const x = i % w, y = (i / w) | 0; hx0 = Math.min(hx0, x); hx1 = Math.max(hx1, x); hy0 = Math.min(hy0, y); hy1 = Math.max(hy1, y); }
-  return { x0, y0, w, h, hole, iris, skin, white: sn > 10 ? [sr / sn, sg / sn, sb / sn] : [240, 238, 232], box: { x0: x0 + hx0, y0: y0 + hy0, x1: x0 + hx1, y1: y0 + hy1 } };
+  return { x0, y0, w, h, hole, iris, skin, circle, white: sn > 10 ? [sr / sn, sg / sn, sb / sn] : [240, 238, 232], box: { x0: x0 + hx0, y0: y0 + hy0, x1: x0 + hx1, y1: y0 + hy1 } };
 }
 
 /** Filtro "a binario" dell'oggetto completato (zeus-mesh-10, arco di Robin Hood). */
@@ -1254,7 +1263,10 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
     // distanza periodica: il loop si chiude sullo stesso valore
     const look = (t) => { const p = t / T; const g = (c) => { const d = Math.min(Math.abs(p - c), 1 - Math.abs(p - c)); return Math.exp(-(d ** 2) / 0.006); }; return g(0.22) + g(0.72); };
     for (const e of eyes) {
-      bones[`pupilla_${e.side}`] = { translate: xy((t) => -A.pupille * ipd * 0.5 * look(t), (t) => -A.pupille * ipd * 0.25 * look(t)) };
+      // iride a cerchio (colore qualsiasi: il buco segue solo in parte l'iride e le ciglia): sguardo FERMO. Muovendola
+      // scopriva il bianco dove il buco taglia l'iride o la rima di sotto (Rita, 10 ott: "righe negli occhi")
+      const kx = e.circle ? 0 : 1, ky = e.circle ? 0 : 1;
+      bones[`pupilla_${e.side}`] = { translate: xy((t) => -A.pupille * ipd * 0.5 * kx * look(t), (t) => -A.pupille * ipd * 0.25 * ky * look(t)) };
       // battito: 0,13 s chiusura, 0,2 s apertura (chiavi lineari, è uno scatto voluto)
       const t0 = rules.blinkAt;
       const r3 = (v) => +v.toFixed(3);

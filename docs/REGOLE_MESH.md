@@ -211,6 +211,10 @@ gli occhi".
 - **Iride di qualsiasi colore**: se l'iride non è blu né verde, è un CERCHIO stimato dalla fascia chiusa fra i bianchi
   (raggio ≤ 0,18 ipd); nel buco: bianco + cerchio senza pelle; le ciglia scure sopra l'iride restano al corpo.
   Il bianco generato va solo dove il bianco è stato riconosciuto (niente righe bianche fra le ciglia).
+- 13.4 (Rita: "gli occhi si chiudono male", "righe negli occhi"): il cerchio dell'iride non va oltre l'apertura
+  dell'occhio (bianco e chiusure fra i bianchi, + 2 px): la rima di sotto restava nel buco, l'occhio risultava alto e
+  la palpebra stirava la pelle fin sotto l'occhio. Con l'iride a cerchio lo sguardo resta FERMO: spostandola scopriva
+  il bianco dove il buco taglia l'iride o la rima (righe bianche).
 
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:

@@ -32,5 +32,9 @@ for (const [name, maxVisible] of [["avvocato", 25], ["domatrice", 25], ["robin",
     assert.ok(count(0) > 150, "a occhi aperti il bianco e la pupilla si vedono");
     const closed = count(MESH_RIG_RULES.blinkAt + 0.133);
     assert.ok(closed <= maxVisible, `a occhio chiuso si vedono ancora ${closed} pixel di bianco/pupilla`);
+    // iride a cerchio (Rita, 10 ott: "righe negli occhi"): sguardo fermo, nel loop il bianco non si scopre
+    if (name === "rita") {
+      for (const s of ["sx", "dx"]) assert.equal(json.animations.ambient.bones[`pupilla_${s}`].translate.every((k) => !k.x && !k.y), true, `pupilla_${s} ferma`);
+    }
   });
 }
