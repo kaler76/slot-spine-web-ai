@@ -343,7 +343,18 @@ function FrameTool({ pkg, frame, onChange, clipPkg, onClipPkg }) {
     if (kind === "tutto") return onChange(null);
     const w = poseAt(pkg.json, 0, "ambient"), v = w.viso, n = w.collo, a = w.anca;
     const sw = Math.hypot(w.omero_sx.tx - w.omero_dx.tx, w.omero_sx.ty - w.omero_dx.ty);
-    if (kind === "viso") { const r = 0.75 * sw; return onChange({ x: v.tx - r, y: v.ty - r * 0.9, width: 2 * r, height: 2 * r }); }
+    // viso (approvato su Jessica, 10 ott: "questo è il viso corretto"): da sopra la testa all'attacco del petto,
+    // largo quanto capelli e spalle, e comprende le braccia tagliate che salgono fin lì (bocchino, fumo)
+    if (kind === "viso") {
+      let x0 = n.tx - 1.1 * sw, x1 = n.tx + 1.1 * sw, top = v.ty + 0.9 * sw;
+      const bot = n.ty - 0.55 * sw;
+      for (const [name, b] of Object.entries(pkg.report?.pieceBoxes || {})) {
+        if (!name.startsWith("braccio_") || b.y + b.height < bot) continue;
+        const m = 0.08 * Math.max(b.width, b.height);
+        x0 = Math.min(x0, b.x - m); x1 = Math.max(x1, b.x + b.width + m); top = Math.max(top, b.y + b.height + m);
+      }
+      return onChange({ x: x0, y: bot, width: x1 - x0, height: top - bot });
+    }
     // busto: dalla vita a sopra la testa, larghezza 2,2 spalle; si allarga per comprendere le braccia TAGLIATE sopra
     // la vita (braccio alzato col bocchino e il fumo di Jessica: tagliati fuori dal riquadro) + 8% per il movimento
     let x0 = n.tx - 1.1 * sw, x1 = n.tx + 1.1 * sw, top = v.ty + 0.9 * sw;
