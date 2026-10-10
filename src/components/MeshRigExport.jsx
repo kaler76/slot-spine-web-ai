@@ -285,7 +285,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
           </label>
         ))}
         <label className="field-label-inline" title="Gemini ridisegna l'immagine senza il braccio alzato: il pezzo è la differenza (pixel dell'originale), dietro c'è quello che Gemini ha ridisegnato">
-          <input type="checkbox" checked={armAi} disabled={busy || !(cuts.arm || cuts.raisedArm)} onChange={(e) => setArmAi(e.target.checked)} /> 🤖 Braccio alzato con AI
+          <input type="checkbox" checked={armAi && (cuts.arm || cuts.raisedArm)} disabled={busy} onChange={(e) => { setArmAi(e.target.checked); if (e.target.checked && !cuts.arm && !cuts.raisedArm) setCuts({ ...cuts, raisedArm: true }); }} /> 🤖 Braccio alzato con AI
         </label>
         <label className="field-label-inline" title="Braccio e oggetto (arco, spada...) restano fermi; il resto del personaggio si muove">
           <input type="checkbox" checked={lockObject} disabled={busy || !(cuts.arm || cuts.raisedArm)} onChange={(e) => setLockObject(e.target.checked)} /> 🔒 Oggetto fermo
