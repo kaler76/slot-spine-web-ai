@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.11";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-14";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -617,7 +617,7 @@ export function findMouth(landmarks, ipd, W, H, rgba, fg) {
  * @param {{ width, height, rgba, fg: Uint8Array, parts: Uint8Array, categories?: Uint8Array, landmarks, joints }} input
  * @returns {{ json, images: { [nome]: {width,height,rgba} }, report }}
  */
-export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch = null }, rules = MESH_RIG_RULES) {
+export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch = null, partPatches = null }, rules = MESH_RIG_RULES) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1, fgN = 0;
   for (let i = 0; i < W * H; i++) if (fg[i]) { fgN++; const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   x0 = Math.max(0, x0 - rules.pad); y0 = Math.max(0, y0 - rules.pad); x1 = Math.min(W - 1, x1 + rules.pad); y1 = Math.min(H - 1, y1 + rules.pad);
@@ -722,8 +722,23 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const raised = wr.y <= el.y - 0.5 * shoulderW;
     free[s] = { free: raised && frac >= 0.7, raised, frac, upperFree: raised && cu / nu < 0.3 };
   }
+  // BRACCIA ALZATE per il ritaglio con Gemini (R22): geometria per il riquadro e il prompt (lato nell'immagine)
+  const raisedArms = [];
+  for (const s of ["sx", "dx"]) {
+    if (!free[s]?.raised) continue;
+    const o = s === "sx" ? "dx" : "sx";
+    let ox0 = W, oy0 = H, ox1 = -1, oy1 = -1;
+    for (let i = 0; i < W * H; i++) if (lab[i] === L_[`oggetto_${s}`]) { const x = i % W, y = (i / W) | 0; ox0 = Math.min(ox0, x); ox1 = Math.max(ox1, x); oy0 = Math.min(oy0, y); oy1 = Math.max(oy1, y); }
+    const pt = (p) => ({ x: +p.x.toFixed(1), y: +p.y.toFixed(1) });
+    raisedArms.push({ side: s, imageSide: by[`omero_${s}`].head.x < by[`omero_${o}`].head.x ? "left" : "right", shoulderW: +shoulderW.toFixed(1),
+      sh: pt(by[`omero_${s}`].head), el: pt(by[`avambraccio_${s}`].head), wr: pt(by[`mano_${s}`].head), hd: pt(by[`mano_${s}`].tail), objBox: ox1 >= 0 ? { x0: ox0, y0: oy0, x1: ox1, y1: oy1 } : null });
+  }
+  // pezzo già separato con Gemini: il braccio si taglia comunque dalla spalla (dietro c'è la piastra ridisegnata)
+  const aiPatch = (s) => (partPatches && free[s]?.raised && partPatches[s]?.mask ? partPatches[s] : null);
+  for (const s of ["sx", "dx"]) if (aiPatch(s)) free[s] = { ...free[s], free: true, frac: 1, upperFree: true, ai: true };
   const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
   decision.freeArms = decision.arms.filter((a) => free[a]?.free);
+  for (const s of decision.arms) if (free[s]?.ai) decision.reasons.push(`braccio_${s}: ritagliato con GEMINI (immagine senza il braccio, differenza con l'originale)`);
 
   // capelli: catena di 2 ossa dal punto più alto al più basso del gruppo
   if (decision.hair) {
@@ -847,6 +862,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
 
   // ---- immagini ----
   const armMask = new Uint8Array(W * H);
+  const aiMask = new Uint8Array(W * H); // pixel del pezzo separato con Gemini (contorno già compreso)
   const armFrom = {};
   for (const s of decision.arms) {
     const hairOut = [];
@@ -862,6 +878,15 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     // spalla e un pezzo di corpetto di Jessica: buchi nei capelli a riposo) ma dalla FORMA del braccio: capsule attorno
     // a omero (dal 10%), avambraccio e mano, solo i pixel coi COLORI del braccio (campionati lungo l'asse: guanto, pelle)
     // o il contorno scuro, più l'oggetto; si tiene il pezzo collegato all'asse
+    // BRACCIO SEPARATO CON GEMINI (R22): il pezzo è la maschera della differenza; pixel dall'originale
+    if (free[s]?.ai) {
+      const M = partPatches[s].mask;
+      for (let i = 0; i < W * H; i++) {
+        if (M[i] && fg[i]) { armMask[i] = 1; aiMask[i] = 1; if (lab[i] !== L_[`oggetto_${s}`]) lab[i] = L_[`braccio_${s}`]; }
+        else if (lab[i] === L_[`braccio_${s}`] || lab[i] === L_[`oggetto_${s}`]) lab[i] = categories && categories[i] === SEG.hair ? L_.testa : L_.busto;
+      }
+      continue;
+    }
     if (free[s]?.free) {
       const hd = by[`mano_${s}`].tail, hc = lerp(wr, hd, 0.5);
       const caps = [[lerp(sh, el, 0.1), el, 0.2 * shoulderW], [el, wr, 0.18 * shoulderW], [wr, hd, 0.3 * shoulderW]];
@@ -964,7 +989,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
         if (armMask[i] || !fg[i] || lab[i] === L_.testa || (categories && categories[i] === SEG.hair)) continue;
         const c = i * 4; if (luma(rgba[c], rgba[c + 1], rgba[c + 2]) >= 100) continue;
         const x = i % W, y = (i / W) | 0;
-        for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx >= 0 && ny >= 0 && nx < W && ny < H && armMask[ny * W + nx]) { add.push(i); break; } }
+        for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx >= 0 && ny >= 0 && nx < W && ny < H && armMask[ny * W + nx] && !aiMask[ny * W + nx]) { add.push(i); break; } }
       }
       for (const i of add) armMask[i] = 1;
     }
@@ -1047,7 +1072,12 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     }
   };
   for (const er of earrings) fillRows(er.idx, earMask, Math.ceil(0.2 * shoulderW));
-  for (const s of decision.arms) if (free[s]?.raised) {
+  // dietro il braccio separato con Gemini: la PIASTRA ridisegnata (capelli, spalla, vestito che c'erano dietro)
+  for (const s of decision.arms) if (free[s]?.ai) {
+    const PL = partPatches[s].plate;
+    for (let i = 0; i < W * H; i++) if (aiMask[i] && !known[i] && PL[i * 4 + 3] > 0) { body.set(PL.subarray(i * 4, i * 4 + 4), i * 4); known[i] = 1; }
+  }
+  for (const s of decision.arms) if (free[s]?.raised && !free[s]?.ai) {
     const idx = []; for (let i = 0; i < W * H; i++) if (armMask[i] && (lab[i] === L_[`braccio_${s}`] || lab[i] === L_[`oggetto_${s}`])) idx.push(i);
     fillRows(idx, armMask, Math.ceil(0.5 * shoulderW), Math.ceil(0.3 * shoulderW));
   }
@@ -1281,10 +1311,19 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (m[j] < 0) { m[j] = m[i]; q.push(j); } } }
     return (px, py) => LABELS[m[Math.min(H - 1, Math.max(0, Math.round(py))) * W + Math.min(W - 1, Math.max(0, Math.round(px)))]];
   };
-  for (const s of decision.arms) {
+  // ogni pixel della maschera va a UN braccio (con due braccia tagliate ogni pezzo conteneva anche l'altro): si parte
+  // dai pixel etichettati braccio/oggetto di quel lato e si cresce dentro la maschera
+  const armOwner = new Int8Array(W * H).fill(-1);
+  {
+    const q = [];
+    for (let i = 0; i < W * H; i++) if (armMask[i]) { const k = decision.arms.findIndex((a) => lab[i] === L_[`braccio_${a}`] || lab[i] === L_[`oggetto_${a}`]); if (k >= 0) { armOwner[i] = k; q.push(i); } }
+    for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % W, y = (i / W) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j] && armOwner[j] < 0) { armOwner[j] = armOwner[i]; q.push(j); } } }
+  }
+  for (const [k, s] of decision.arms.entries()) {
     const own = (k) => k === L_[`braccio_${s}`] || k === L_[`oggetto_${s}`];
-    const fallback = nearIn(armMask);
-    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt && lockedArms.includes(s) ? () => 1 : null);
+    const maskS = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) if (armMask[i] && armOwner[i] === k) maskS[i] = 1;
+    const fallback = nearIn(maskS);
+    pieceOf(maskS, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt && lockedArms.includes(s) ? () => 1 : null);
   }
   if (decision.hair) pieceOf(hair, "capelli_dietro", () => "capelli", 8);
 
@@ -1484,7 +1523,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   return {
     json,
     images,
-    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes }
+    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes, raisedArms, aiArms: decision.arms.filter((a) => free[a]?.ai) }
   };
 }
 

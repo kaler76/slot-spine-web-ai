@@ -4,13 +4,14 @@ import { SpinePlayer } from "@esotericsoftware/spine-player";
 import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { buildMeshRig, packAtlas, findMouth, applyFrameClip, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
 import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
+import { armRemovalPrompts, armCropBox, flattenOnKey, armPartFromGemini } from "../lib/partGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { poseAt } from "../lib/animationSim.js";
 
 // Gemini (gemini-3-pro-image-preview) tramite la funzione edge già in produzione: prompt personalizzato +
 // immagine di riferimento; nessuna nuova funzione da pubblicare. Formato di uscita della funzione: 16:9, 1K.
 const GEMINI_SIDE = 1376;
-async function geminiEditMouth(cropCanvas, prompt) {
+async function geminiEditMouth(cropCanvas, prompt, why = "ritocco della bocca") {
   const big = document.createElement("canvas");
   big.width = GEMINI_SIDE;
   big.height = Math.round((GEMINI_SIDE * 9) / 16);
@@ -22,7 +23,7 @@ async function geminiEditMouth(cropCanvas, prompt) {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${SUPABASE_ANON_KEY}`, apikey: SUPABASE_ANON_KEY },
     // referenceAnalysisError valorizzato: la funzione salta l'analisi del riferimento (una chiamata in meno)
-    body: JSON.stringify({ group: "face", promptOverride: prompt, referenceImagesBase64: [b64], referenceAnalysisError: "non richiesta: ritocco della bocca" })
+    body: JSON.stringify({ group: "face", promptOverride: prompt, referenceImagesBase64: [b64], referenceAnalysisError: `non richiesta: ${why}` })
   });
   const raw = await res.text();
   let data;
@@ -54,6 +55,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const [smileHow, setSmileHow] = useState("gemini"); // "gemini" = bocca ridisegnata, "mesh" = deformazione
   const [smileKind, setSmileKind] = useState("chiusa");
   const [gem, setGem] = useState(null); // { kind, patch, previews: { orig, gen, result } }
+  // braccio alzato separato con Gemini (R22): immagine senza il braccio → maschera e "dietro"
+  const [armAi, setArmAi] = useState(true);
+  const [armGem, setArmGem] = useState({}); // { [lato]: { patch, previews } | { error } }
   const [pkg, setPkg] = useState(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,7 +70,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const base = (fileName || "character").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase() || "character";
 
   // a nuova analisi il pacchetto precedente non vale più
-  useEffect(() => { setPkg(null); setGem(null); setFrame(null); }, [original, parts]);
+  useEffect(() => { setPkg(null); setGem(null); setArmGem({}); setFrame(null); }, [original, parts]);
 
   /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
   async function makeGeminiSmile(fg) {
@@ -109,7 +113,47 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     return g;
   }
 
-  async function build(forceGemini = false) {
+  /** Braccio alzato separato con Gemini: ritaglio 16:9 → Gemini lo toglie → differenza = pezzo, risposta = dietro. */
+  async function makeGeminiArm(arm) {
+    const { width: W, height: H, rgba } = original;
+    const box = armCropBox(arm);
+    const orig = cropRgba(rgba, W, H, box);
+    const flat = flattenOnKey(orig);
+    const prompts = armRemovalPrompts(arm.imageSide);
+    let b64 = null, lastErr = null;
+    for (let k = 0; k < prompts.length && !b64; k++) {
+      setStatus(`⏳ Gemini toglie il braccio alzato (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`);
+      try { b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), prompts[k], "braccio da separare"); }
+      catch (e) { lastErr = e; if (!isGeminiRefusal(e.message)) throw e; }
+    }
+    if (!b64) throw new Error(`Gemini ha rifiutato ${prompts.length} volte (${lastErr?.message || "nessuna immagine"})`);
+    const im = await loadB64(b64);
+    const small = document.createElement("canvas");
+    small.width = box.width; small.height = box.height;
+    const sg = small.getContext("2d");
+    sg.imageSmoothingQuality = "high";
+    sg.drawImage(im, 0, 0, box.width, box.height);
+    const gen = sg.getImageData(0, 0, box.width, box.height).data;
+    const patch = armPartFromGemini({ orig, gen, box, arm, W, H });
+    const url = (c) => c.toDataURL("image/png");
+    const previews = { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small) };
+    if (!patch.error) {
+      // pezzo (pixel dell'originale) e corpo senza braccio (con la piastra dietro), nel riquadro
+      const piece = new Uint8ClampedArray(box.width * box.height * 4).fill(60), back = new Uint8ClampedArray(flat);
+      for (let i = 3; i < piece.length; i += 4) piece[i] = 255;
+      for (let y = 0; y < box.height; y++) for (let x = 0; x < box.width; x++) {
+        const X = x + box.x0, Y = y + box.y0; if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
+        const g = Y * W + X, o = (y * box.width + x) * 4; if (!patch.mask[g]) continue;
+        piece.set(rgba.subarray(g * 4, g * 4 + 3), o);
+        const a = patch.plate[g * 4 + 3] / 255; for (let k = 0; k < 3; k++) back[o + k] = patch.plate[g * 4 + k] * a + 255 * (1 - a) * (k === 1 ? 0 : 1);
+      }
+      previews.piece = url(canvasOf(piece, box.width, box.height));
+      previews.back = url(canvasOf(back, box.width, box.height));
+    }
+    return { patch, previews };
+  }
+
+  async function build(forceGemini = false, forceArm = false) {
     setBusy(true);
     setStatus("⏳ Creo il rig mesh...");
     try {
@@ -137,7 +181,26 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         }
         setStatus("⏳ Creo il rig mesh...");
       }
-      const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
+      // BRACCIO ALZATO con Gemini: primo passaggio per sapere quali braccia sono alzate (e dove), poi Gemini per
+      // ciascuna (risultato tenuto finché non cambia l'analisi), poi il rig con i pezzi separati
+      let partPatches = null;
+      if (armAi && (cuts.raisedArm || cuts.arm)) {
+        const first = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
+        const got = { ...(forceArm ? {} : armGem) };
+        for (const arm of first.report.raisedArms || []) {
+          if (!got[arm.side]) {
+            try { got[arm.side] = await makeGeminiArm(arm); }
+            catch (e) { got[arm.side] = { error: e.message || String(e) }; }
+          }
+          const r = got[arm.side];
+          const err = r.error || r.patch?.error;
+          if (err) fallbackNote += ` ⚠️ Braccio alzato con Gemini non usato (${err}): taglio senza AI.`;
+          else (partPatches ||= {})[arm.side] = r.patch;
+        }
+        setArmGem(got);
+        setStatus("⏳ Creo il rig mesh...");
+      }
+      const { json, images, report } = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch, partPatches }, rules);
       json.skeleton.images = "./images/";
       const page = packAtlas(images, `${base}.png`);
       const pngs = {};
@@ -221,6 +284,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
             <input type="checkbox" checked={cuts[k]} disabled={busy} onChange={(e) => setCuts({ ...cuts, [k]: e.target.checked })} /> {label}
           </label>
         ))}
+        <label className="field-label-inline" title="Gemini ridisegna l'immagine senza il braccio alzato: il pezzo è la differenza (pixel dell'originale), dietro c'è quello che Gemini ha ridisegnato">
+          <input type="checkbox" checked={armAi} disabled={busy || !(cuts.arm || cuts.raisedArm)} onChange={(e) => setArmAi(e.target.checked)} /> 🤖 Braccio alzato con AI
+        </label>
         <label className="field-label-inline" title="Braccio e oggetto (arco, spada...) restano fermi; il resto del personaggio si muove">
           <input type="checkbox" checked={lockObject} disabled={busy || !(cuts.arm || cuts.raisedArm)} onChange={(e) => setLockObject(e.target.checked)} /> 🔒 Oggetto fermo
         </label>
@@ -279,6 +345,22 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
           </div>
         </div>
       )}
+      {armAi && Object.entries(armGem).map(([side, r]) => (
+        <div key={side} className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0" }}>
+          {r.previews && [["Originale", r.previews.orig], ["Gemini (senza braccio)", r.previews.gen], ["Pezzo", r.previews.piece], ["Dietro", r.previews.back]].filter(([, u]) => u).map(([t, u]) => (
+            <figure key={t} style={{ margin: 0, textAlign: "center", fontSize: 12 }}>
+              <img src={u} alt={t} style={{ width: 220, borderRadius: 4, border: "1px solid #333" }} />
+              <figcaption>{t}</figcaption>
+            </figure>
+          ))}
+          <div style={{ fontSize: 12, opacity: 0.8 }}>
+            braccio_{side}: {r.error || r.patch?.error ? <span style={{ color: "#ffb347" }}>⚠️ {r.error || r.patch.error}</span> : <>pezzo di {r.patch.n} px, scarto {r.patch.checks.mismatch}, grandezza ×{r.patch.checks.ratio}</>}
+            <div>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => build(false, true)} style={{ marginTop: 6 }}>🔄 Ridisegna braccio (Gemini)</button>
+            </div>
+          </div>
+        </div>
+      ))}
       {pkg && (
         <>
           <table style={{ borderCollapse: "collapse", margin: "8px 0", fontSize: 13 }}>

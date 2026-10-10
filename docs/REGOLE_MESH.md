@@ -259,6 +259,32 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R22 — Pezzo separato con GEMINI (G1–G3, GR1–GR3), zeus-mesh-14
+Fabio (10 ott): "deve essere standard, Jessica è uno dei mille character che passeranno da questo software". Separare
+per forma e colore fallisce quando il riconoscimento è sbagliato a monte (sul sito: lati scambiati, punti della posa
+spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo generale, oggi per il braccio alzato:
+- **Primo passaggio** del rig: `report.raisedArms` (lato, spalla/gomito/polso/punta mano, riquadro dell'oggetto, lato
+  nell'immagine). Per ogni braccio alzato, ritaglio 16:9 (`armCropBox`, margine 0,55 spalle) appiattito su **magenta**
+  → Gemini (`gemini-3-pro-image-preview`, funzione edge già in produzione `generate-sprite-sheet` con `promptOverride`,
+  nessun deploy) con l'ordine: togli il braccio e l'oggetto, ridisegna quello che c'era dietro, magenta dove niente.
+- **Riallineamento** sui pixel lontani dal braccio (> 0,7 spalle dalle ossa): ricerca grossolana su immagini sfocate
+  (le texture ripetute davano allineamenti sfalsati di un motivo), poi fine; misura = luminosità + "magenta"
+  ((R+B)/2 − G, altrimenti fondo e pelle si confondono); almeno l'85% dei punti dentro la risposta. Colori adattati
+  (guadagno + scarto per canale sui pixel opachi lontani).
+- **Pezzo** = dove originale e risposta differiscono (media 5×5 > 48), solo nella zona attorno alle ossa (capsule
+  0,5/0,45/0,6 spalle + oggetto); chiusura 3 px, componenti < 10% della maggiore scartate, buchi chiusi pieni, +1 px.
+  I pixel del pezzo sono SEMPRE dell'originale; della risposta si usa solo la **piastra** dietro (corpo), trasparente
+  dove Gemini ha messo il magenta.
+- **Controlli** (altrimenti metodo senza AI e avviso): scarto medio ≤ 40 e ≤ 30% di pixel lontani cambiati; pezzo fra
+  0,25 e 4 volte l'atteso (lunghezza delle ossa × spessore); ≥ 40% dell'avambraccio coperto.
+- Nel rig: braccio con piastra = libero, tagliato dalla SPALLA, mai bloccato; niente contorno aggiunto né riempimento
+  per righe (la piastra c'è già). Piastra per un braccio non alzato: ignorata (GR3).
+- App: casella **"🤖 Braccio alzato con AI"** (di serie accesa; serve "Taglia braccio alzato" o "con oggetto"),
+  anteprime Originale / Gemini / Pezzo / Dietro, pulsante "Ridisegna braccio (Gemini)". Risultato tenuto finché non
+  cambia l'analisi.
+- Corretto insieme: con due braccia tagliate ogni pezzo conteneva anche l'altro braccio (maschera unica): ora ogni
+  pixel della maschera va al braccio da cui è raggiungibile.
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.

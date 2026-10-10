@@ -9,6 +9,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
 | zeus-mesh-13.11 | 10 ott | Braccio alzato ritagliato per forma (capsule sulle ossa) e colore (tavolozza del braccio), non per etichette | Jessica: ciocche e corpetto nel pezzo del braccio, buchi nei capelli ("solito problema del ritaglio") | J6 |
+| zeus-mesh-14 | 10 ott | Braccio alzato separato con Gemini: immagine senza braccio, pezzo = differenza (pixel dell'originale), dietro = piastra di Gemini; controlli automatici e ritorno al metodo senza AI. Due braccia tagliate: un pezzo per braccio | Ritaglio per colore fallito sul sito (lati scambiati, capelli senza categoria); metodo da rendere standard per tutti i character | G1–G3, GR1–GR3 |
 | zeus-mesh-13.10 | 10 ott | Casella "Taglia braccio alzato" indipendente; il braccio alzato si anima anche con "Oggetto fermo" | Jessica: "il braccio non è tagliato??" (casella del braccio con oggetto spenta) | J5 |
 | zeus-mesh-13.9 | 10 ott | Inquadratura "Viso": da sopra la testa all'attacco del petto, larga come capelli e spalle, con le braccia tagliate che salgono fin lì | Jessica: "questo è il viso corretto" | build |
 | zeus-mesh-13.8 | 10 ott | Fumo vicino all'oggetto col braccio; inquadratura Busto che comprende il braccio alzato | Jessica: bocchino e fumo tagliati fuori nell'anteprima | J4 |
