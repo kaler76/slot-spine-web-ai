@@ -87,3 +87,14 @@ test("B5 oggetto FERMO (maschera block): arco e mano identici in tutto il loop, 
     }
   }
 });
+
+// MANO STIMATA (Rita, 10 ott: braccio sotto la pelliccia dato "fuori dall'immagine", pezzo di pelliccia preso per
+// oggetto e inchiodato alla mano stimata → strappo nero). Una mano stimata (visibilità 0,3) non tiene oggetti.
+test("B6 mano stimata: niente oggetto né taglio su quel lato", () => {
+  const lm = landmarks.map((p, i) => (i === 16 ? { ...p, visibility: 0.3 } : p));
+  const r = buildMeshRig({ width: W, height: H, rgba, fg, parts: Uint8Array.from(parts), categories, landmarks: lm, joints: rec.joints }, MESH_RIG_RULES);
+  const line = r.report.decision.find((d) => d.startsWith("braccio_dx"));
+  assert.ok(/^braccio_dx: mesh$/.test(line), line);
+  assert.ok(!r.json.slots.some((s) => s.name === "braccio_dx"));
+});
+

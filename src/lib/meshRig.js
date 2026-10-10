@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.4";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.5";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -527,6 +527,11 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       if (nsx && nsx < px.length) { const k = nsx * 2 >= px.length ? L_.oggetto_sx : L_.oggetto_dx; for (const i of px) lab[i] = k; }
     }
   }
+  // MANO STIMATA (posa a mano "fuori dall'immagine" o braccio nascosto: visibilità del polso 0,3): niente oggetto in
+  // quella mano. Rita (10 ott): braccio sotto la pelliccia, un pezzo di pelliccia preso per "oggetto" (5609 px) e
+  // pesato rigido sulla mano stimata → strappo nero nella pelliccia quando si muove
+  const handGuessed = { sx: (landmarks[15]?.visibility ?? 1) < 0.31, dx: (landmarks[16]?.visibility ?? 1) < 0.31 }; // 0,3 = punto stimato (bustPose, "fuori dall'immagine")
+  for (const s of ["sx", "dx"]) if (handGuessed[s]) for (let i = 0; i < W * H; i++) if (lab[i] === L_[`oggetto_${s}`]) lab[i] = L_.busto;
   for (let i = 0; i < W * H; i++) if (lab[i] >= 0) counts[LABELS[lab[i]]] = (counts[LABELS[lab[i]]] || 0) + 1;
 
   // capelli dietro: "capelli/accessori" ai lati del viso, sopra le spalle, vicino alla testa

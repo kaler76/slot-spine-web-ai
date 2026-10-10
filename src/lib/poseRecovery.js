@@ -139,7 +139,8 @@ export function landmarksFromClicks(clicks) {
   const sw = Math.hypot(P.shoulderSx.x - P.shoulderDx.x, P.shoulderSx.y - P.shoulderDx.y) || 1;
   const L = Array.from({ length: 33 }, () => null);
   const set = (i, x, y, v) => (L[i] = { x, y, visibility: v });
-  for (const p of MANUAL_POINTS) set(p.index, P[p.key].x, P[p.key].y, 0.95);
+  // punti cliccati 0.95; "fuori dall'immagine" 0.3 (stimati: la mano stimata non tiene oggetti, vedi meshRig)
+  for (const p of MANUAL_POINTS) set(p.index, P[p.key].x, P[p.key].y, clicks[p.key]?.outside ? 0.3 : 0.95);
   // verso "sinistra del personaggio" (dalla spalla dx alla sx), per orecchie e occhi
   const ux = (P.shoulderSx.x - P.shoulderDx.x) / sw, uy = (P.shoulderSx.y - P.shoulderDx.y) / sw;
   const n = P.nose;

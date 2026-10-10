@@ -211,6 +211,9 @@ gli occhi".
 - **Iride di qualsiasi colore**: se l'iride non è blu né verde, è un CERCHIO stimato dalla fascia chiusa fra i bianchi
   (raggio ≤ 0,18 ipd); nel buco: bianco + cerchio senza pelle; le ciglia scure sopra l'iride restano al corpo.
   Il bianco generato va solo dove il bianco è stato riconosciuto (niente righe bianche fra le ciglia).
+- 13.5 (Rita, pelliccia "strappata"): una mano STIMATA (visibilità 0,3: "fuori dall'immagine" nella posa a mano o
+  braccio nascosto in bustPose) non tiene oggetti: i pixel "oggetto" di quel lato tornano al busto. Prima un pezzo di
+  pelliccia (5609 px) era preso per oggetto e pesato rigido sulla mano stimata, lontana: strappo nero nel movimento (B6).
 - 13.4 (Rita: "gli occhi si chiudono male", "righe negli occhi"): il cerchio dell'iride non va oltre l'apertura
   dell'occhio (bianco e chiusure fra i bianchi, + 2 px): la rima di sotto restava nel buco, l'occhio risultava alto e
   la palpebra stirava la pelle fin sotto l'occhio. Con l'iride a cerchio lo sguardo resta FERMO: spostandola scopriva
