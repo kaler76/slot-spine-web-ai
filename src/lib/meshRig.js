@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-09.zeus-mesh-13.2";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.3";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -201,7 +201,55 @@ export function findEye(center, ipd, W, H, rgba, fg) {
   return nb > n && inB >= 0.8 * n && hb <= 1.5 * ha ? b : a;
 }
 
-function findEyeOnce(center, ipd, W, H, rgba, fg) {
+/**
+ * OCCHI CERCATI NEL VISO (zeus-mesh-13.3, Rita 9 ott: posa data a mano coi 9 click, occhi STIMATI dal naso e dalle
+ * spalle, lontani da quelli veri → "occhi: non trovati"). Si cercano i bianchi degli occhi sopra il naso: pixel
+ * chiari e poco saturi vicino a pixel molto scuri (ciglia, pupilla; i riflessi della pelle non ne hanno), raggruppati
+ * per occhio; si sceglie la coppia più grande, una per lato del naso, quasi alla stessa altezza.
+ * @returns {[{x,y},{x,y}] | null}  [lato sx del personaggio (a destra per chi guarda), lato dx]
+ */
+export function findEyePair(nose, ipd0, W, H, rgba, fg) {
+  const x0 = Math.max(0, Math.round(nose.x - 1.8 * ipd0)), x1 = Math.min(W - 1, Math.round(nose.x + 1.8 * ipd0));
+  const y0 = Math.max(0, Math.round(nose.y - 1.6 * ipd0)), y1 = Math.min(H - 1, Math.round(nose.y + 0.2 * ipd0));
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, dark = new Uint8Array(w * h), m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const g = (y + y0) * W + x + x0, i = g * 4; if (fg[g] && luma(rgba[i], rgba[i + 1], rgba[i + 2]) < 45) dark[y * w + x] = 1; }
+  const R = Math.max(2, Math.round(0.12 * ipd0));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const g = (y + y0) * W + x + x0, i = g * 4; if (!fg[g]) continue;
+    const r = rgba[i], gg = rgba[i + 1], b = rgba[i + 2], l = luma(r, gg, b), sat = Math.max(r, gg, b) - Math.min(r, gg, b);
+    if (!((l > 170 && sat < 60) || (l > 120 && sat < 35))) continue;
+    let near = false;
+    for (let dy = -R; dy <= R && !near; dy += 2) for (let dx = -R; dx <= R; dx += 2) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < w && Y < h && dark[Y * w + X]) { near = true; break; } }
+    if (near) m[y * w + x] = 1;
+  }
+  const seen = new Uint8Array(w * h), comps = [];
+  for (let s = 0; s < w * h; s++) {
+    if (!m[s] || seen[s]) continue;
+    const st = [s]; seen[s] = 1; let n = 0, sx = 0, sy = 0, ax = w, bx = -1, ay = h, by = -1;
+    while (st.length) { const i = st.pop(), x = i % w, y = (i / w) | 0; n++; sx += x; sy += y; ax = Math.min(ax, x); bx = Math.max(bx, x); ay = Math.min(ay, y); by = Math.max(by, y); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (m[j] && !seen[j]) { seen[j] = 1; st.push(j); } } }
+    if (n >= 8 && by - ay <= 0.5 * ipd0) comps.push({ n, cx: sx / n + x0, cy: sy / n + y0, ax: ax + x0, bx: bx + x0, ay: ay + y0, by: by + y0 });
+  }
+  // gruppi = un occhio (bianco a sinistra e a destra dell'iride)
+  const groups = [];
+  for (const c of comps.sort((a, b) => b.n - a.n)) {
+    const gp = groups.find((q) => Math.abs(q.cy - c.cy) < 0.2 * ipd0 && c.ax < q.bx + 0.45 * ipd0 && c.bx > q.ax - 0.45 * ipd0);
+    if (gp) { gp.cy = (gp.cy * gp.n + c.cy * c.n) / (gp.n + c.n); gp.n += c.n; gp.ax = Math.min(gp.ax, c.ax); gp.bx = Math.max(gp.bx, c.bx); gp.ay = Math.min(gp.ay, c.ay); gp.by = Math.max(gp.by, c.by); }
+    else groups.push({ ...c });
+  }
+  let best = null;
+  for (const a of groups) for (const b of groups) {
+    if (a === b) continue;
+    const ca = { x: (a.ax + a.bx + 1) / 2, y: (a.ay + a.by + 1) / 2 }, cb = { x: (b.ax + b.bx + 1) / 2, y: (b.ay + b.by + 1) / 2 };
+    if (!(ca.x < nose.x && cb.x > nose.x)) continue; // a: a sinistra per chi guarda (lato dx del personaggio)
+    const dx = cb.x - ca.x, dy = Math.abs(cb.y - ca.y);
+    if (dx < 0.5 * ipd0 || dx > 2.4 * ipd0 || dy > 0.45 * dx) continue;
+    const sc = Math.min(a.n, b.n) * 2 + Math.max(a.n, b.n);
+    if (!best || sc > best.sc) best = { sc, pair: [cb, ca] };
+  }
+  return best ? best.pair : null;
+}
+
+function findEyeOnce(center, ipd, W, H, rgba, fg, rules_irisGrow = true) {
   const rx = Math.round(0.36 * ipd), ry = Math.round(0.2 * ipd);
   const x0 = Math.max(0, Math.round(center.x - rx)), x1 = Math.min(W - 1, Math.round(center.x + rx));
   const y0 = Math.max(0, Math.round(center.y - ry)), y1 = Math.min(H - 1, Math.round(center.y + ry));
@@ -211,7 +259,7 @@ function findEyeOnce(center, ipd, W, H, rgba, fg) {
     for (let x = Math.round(center.x - rx / 2); x < center.x + rx / 2; x++) { const i = (y * W + x) * 4; sk.push([rgba[i], rgba[i + 1], rgba[i + 2]]); }
   const med = (k) => sk.map((p) => p[k]).sort((a, b) => a - b)[sk.length >> 1] ?? 200;
   const skin = [med(0), med(1), med(2)];
-  const w = x1 - x0 + 1, h = y1 - y0 + 1, m = new Uint8Array(w * h);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, m = new Uint8Array(w * h), irisCol = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const dx = (x + x0 - center.x) / rx, dy = (y + y0 - center.y) / ry;
     if (dx * dx + dy * dy > 1) continue;
@@ -221,12 +269,14 @@ function findEyeOnce(center, ipd, W, H, rgba, fg) {
     const dSkin = Math.abs(r - skin[0]) + Math.abs(gg - skin[1]) + Math.abs(b - skin[2]);
     const sat = Math.max(r, gg, b) - Math.min(r, gg, b);
     // bianco: chiaro e poco saturo, anche in ombra (grigio-azzurro: avvocato) purché quasi senza colore
-    const sclera = (l > 170 && sat < 60) || (l > 120 && sat < 35);
+    // (+ bianco in ombra rosata: Rita, 9 ott — l > 110, poco saturo, blu ≥ 0,65 rosso: la pelle ha meno blu)
+    const sclera = (l > 170 && sat < 60) || (l > 120 && sat < 35) || (l > 110 && sat < 70 && b > 0.65 * r && dSkin > 60);
     // iride: blu (b > r) o VERDE (g > r: Robin Hood); le ciglia castane (r > g) restano fuori
     // (iride castana: niente regola di colore, che prendeva anche ombretto e ciglia della Domatrice; la prende la
     // chiusura per righe fra il bianco a sinistra e quello a destra)
     const iris = dSkin > 120 && ((l > 45 && b > r) || (l > 25 && gg > r + 20));
     if (sclera || iris) m[y * w + x] = 1;
+    if (iris && !sclera) irisCol[y * w + x] = 1;
   }
   // componente più grande, poi i buchi interni (pupilla, riflesso) chiusi
   const comp = new Int32Array(w * h).fill(-1);
@@ -245,29 +295,71 @@ function findEyeOnce(center, ipd, W, H, rgba, fg) {
   // Le sopracciglia stanno più in alto e non si sovrappongono in altezza.
   const B = comps.get(best), keep = new Set([best]);
   for (const [k, c] of comps) {
-    if (k === best || c.n < 0.1 * bestN) continue;
+    if (k === best || c.n < Math.min(0.1 * bestN, 12)) continue;
     const ov = Math.min(c.yb, B.yb) - Math.max(c.ya, B.ya) + 1;
     if (ov >= 0.5 * (c.yb - c.ya + 1)) keep.add(k);
   }
   const hole = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) if (keep.has(comp[i])) hole[i] = 1;
-  const out = new Uint8Array(w * h), q = [];
-  for (let i = 0; i < w * h; i++) { const x = i % w, y = (i / w) | 0; if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && !hole[i]) { out[i] = 1; q.push(i); } }
-  for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (!out[j] && !hole[j]) { out[j] = 1; q.push(j); } } }
-  for (let i = 0; i < w * h; i++) if (!out[i]) hole[i] = 1;
+  const base = hole.slice();
+  let nBase = 0, nCol = 0; for (let i = 0; i < w * h; i++) if (base[i]) { nBase++; if (irisCol[i]) nCol++; }
+  // buchi interni chiusi (pixel non raggiungibili dal bordo del riquadro)
+  const closeInside = () => {
+    const out = new Uint8Array(w * h), q = [];
+    for (let i = 0; i < w * h; i++) { const x = i % w, y = (i / w) | 0; if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && !hole[i]) { out[i] = 1; q.push(i); } }
+    for (let qi = 0; qi < q.length; qi++) { const i = q[qi], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue; const j = ny * w + nx; if (!out[j] && !hole[j]) { out[j] = 1; q.push(j); } } }
+    for (let i = 0; i < w * h; i++) if (!out[i]) hole[i] = 1;
+  };
+  closeInside();
+  const gapPx = []; // pixel chiusi fra due pixel del buco (fascia centrale dell'iride)
   // chiusura per righe: fra due pixel del buco sulla stessa riga (distanza ≤ metà della larghezza del buco)
   // tutto è occhio. Pupilla e parte scura dell'iride toccano il contorno in alto e la chiusura dall'esterno non
   // le prende (Robin Hood: pupilla rimasta nel corpo)
   {
     let hx0 = w, hx1 = -1;
     for (let i = 0; i < w * h; i++) if (hole[i]) { hx0 = Math.min(hx0, i % w); hx1 = Math.max(hx1, i % w); }
-    const maxGap = 0.6 * (hx1 - hx0 + 1);
+    const maxGap = Math.max(0.6 * (hx1 - hx0 + 1), 0.35 * ipd); // iride larga (Rita): bianco piccolo ai due lati
     for (let y = 0; y < h; y++) {
       let last = -1;
       for (let x = 0; x < w; x++) {
         if (!hole[y * w + x]) continue;
-        if (last >= 0 && x - last > 1 && x - last <= maxGap) for (let k = last + 1; k < x; k++) hole[y * w + k] = 1;
+        if (last >= 0 && x - last > 1 && x - last <= maxGap) for (let k = last + 1; k < x; k++) { hole[y * w + k] = 1; gapPx.push(y * w + k); }
         last = x;
+      }
+    }
+  }
+  // IRIDE DI QUALSIASI COLORE (zeus-mesh-13.3, Rita: iride oliva, solo blu e verde erano riconosciute): l'iride è
+  // un CERCHIO. Dai pixel chiusi fra i bianchi (fascia centrale dell'iride) si stimano centro e raggio (metà della
+  // fascia più larga); dentro il cerchio vanno nel buco i pixel che non sono pelle. Le ciglia e la riga di eyeliner
+  // fuori dal cerchio restano nel corpo (prima, crescendo per colore, il buco prendeva anche loro: righe bianche).
+  // solo se l'iride non è stata riconosciuta per colore (blu, verde): con quelle il buco resta com'era
+  if (rules_irisGrow && gapPx.length > 4 && nCol < 0.15 * nBase) {
+    const rowW = new Map();
+    for (const i of gapPx) { const y = (i / w) | 0, x = i % w; const r = rowW.get(y) || [x, x]; r[0] = Math.min(r[0], x); r[1] = Math.max(r[1], x); rowW.set(y, r); }
+    let bestY = -1, bw0 = 0, bx = 0;
+    for (const [y, [a0, a1]] of rowW) if (a1 - a0 + 1 > bw0) { bw0 = a1 - a0 + 1; bestY = y; bx = (a0 + a1) / 2; }
+    let sy = 0, sn = 0; for (const [y, [a0, a1]] of rowW) if (a1 - a0 + 1 >= 0.7 * bw0) { sy += y; sn++; }
+    const ccx = bx, ccy = sn ? sy / sn : bestY, rr = Math.min(0.18 * ipd, (bw0 + 2) / 2);
+    if (rr >= 3) {
+      // buco = bianco riconosciuto + cerchio dell'iride (senza pelle) + chiusure fra i bianchi vicine al cerchio;
+      // il resto delle chiusure (ciglia, eyeliner sopra l'iride: righe bianche a occhio aperto) torna al corpo
+      hole.set(base);
+      for (let y = Math.max(0, Math.floor(ccy - rr)); y <= Math.min(h - 1, Math.ceil(ccy + rr)); y++) for (let x = Math.max(0, Math.floor(ccx - rr)); x <= Math.min(w - 1, Math.ceil(ccx + rr)); x++) {
+        if ((x - ccx) ** 2 + (y - ccy) ** 2 > rr * rr) continue;
+        const g = (y + y0) * W + x + x0, c = g * 4; if (!fg[g]) continue;
+        if (Math.abs(rgba[c] - skin[0]) + Math.abs(rgba[c + 1] - skin[1]) + Math.abs(rgba[c + 2] - skin[2]) <= 80) continue;
+        // metà alta del cerchio: le ciglia (quasi nere) coprono l'iride sotto la palpebra e restano al corpo
+        if (y < ccy - 0.45 * rr && luma(rgba[c], rgba[c + 1], rgba[c + 2]) < 40) continue;
+        hole[y * w + x] = 1;
+      }
+      for (const i of gapPx) if (((i % w) - ccx) ** 2 + (((i / w) | 0) - ccy) ** 2 <= (1.1 * rr) ** 2) hole[i] = 1;
+      closeInside();
+      // ciglia sopra l'iride (scure, nella parte alta, fuori dalla pupilla) tolte DOPO la chiusura: se restano nel
+      // pezzo della pupilla si spostano con lo sguardo e scoprono il bianco (righe bianche fra le ciglia)
+      for (let i = 0; i < w * h; i++) {
+        if (!hole[i] || base[i]) continue;
+        const x = i % w, y = (i / w) | 0; if (y >= ccy - 0.3 * rr || Math.hypot(x - ccx, y - ccy) < 0.45 * rr) continue;
+        const c = ((y + y0) * W + x + x0) * 4; if (luma(rgba[c], rgba[c + 1], rgba[c + 2]) < 80) hole[i] = 0;
       }
     }
   }
@@ -277,7 +369,9 @@ function findEyeOnce(center, ipd, W, H, rgba, fg) {
     if (!hole[i]) continue;
     const g = ((i / w) | 0) + y0, x = (i % w) + x0, k = (g * W + x) * 4;
     const l = luma(rgba[k], rgba[k + 1], rgba[k + 2]), sat = Math.max(rgba[k], rgba[k + 1], rgba[k + 2]) - Math.min(rgba[k], rgba[k + 1], rgba[k + 2]);
-    if (l > 170 && sat < 60) { sr += rgba[k]; sg += rgba[k + 1]; sb += rgba[k + 2]; sn++; } else iris[i] = 1;
+    // bianco solo dove il bianco è stato riconosciuto (componenti iniziali): pixel chiari aggiunti dalle chiusure
+    // (luci dell'ombretto fra le ciglia: Rita, righe bianche a occhio aperto) restano col disegno originale
+    if (l > 170 && sat < 60 && base[i]) { sr += rgba[k]; sg += rgba[k + 1]; sb += rgba[k + 2]; sn++; } else iris[i] = 1;
   }
   // riflessi bianchi DENTRO l'iride (fra due pixel d'iride sulla stessa riga e sulla stessa colonna) sono iride:
   // si muovono con la pupilla invece di restare fermi sul bianco (righe bianche sulla pupilla che guarda di lato)
@@ -453,7 +547,30 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
 
   // occhi
   const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
-  const eyes = rules.cuts.eyes ? [["sx", landmarks[2]], ["dx", landmarks[5]]].map(([s, c]) => { const e = findEye(c, ipd, W, H, rgba, fg); return e && { side: s, ...e }; }).filter(Boolean) : [];
+  let eyes = rules.cuts.eyes ? [["sx", landmarks[2]], ["dx", landmarks[5]]].map(([s, c]) => { const e = findEye(c, ipd, W, H, rgba, fg); return e && { side: s, ...e }; }).filter(Boolean) : [];
+  // occhi STIMATI (posa a mano: visibilità < 0,5) o non trovati: si cercano nel viso (findEyePair)
+  if (rules.cuts.eyes && (eyes.length < 2 || (landmarks[2].visibility ?? 1) < 0.5 || (landmarks[5].visibility ?? 1) < 0.5)) {
+    const pair = findEyePair(nose, ipd, W, H, rgba, fg);
+    if (pair) {
+      const ipd2 = Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y);
+      // il centro del gruppo di bianco può stare da un lato dell'iride (Rita: solo il bianco verso il naso): si prova
+      // anche spostati di lato e si tiene l'occhio più grande che resta della forma di un occhio
+      const best = (c) => {
+        let b = null;
+        for (const k of [0, -1, 1, -2, 2]) {
+          const e = findEye({ x: c.x + k * 0.18 * ipd2, y: c.y }, ipd2, W, H, rgba, fg);
+          if (!e) continue;
+          const bw = e.box.x1 - e.box.x0 + 1, bh = e.box.y1 - e.box.y0 + 1;
+          if (bw > 0.9 * ipd2 || bh > 0.5 * ipd2) continue;
+          let n = 0; for (let i = 0; i < e.w * e.h; i++) n += e.hole[i];
+          if (!b || n > b.n) b = { e, n };
+        }
+        return b && b.e;
+      };
+      const found = [["sx", pair[0]], ["dx", pair[1]]].map(([s, c]) => { const e = best(c); return e && { side: s, ...e }; }).filter(Boolean);
+      if (found.length === 2) eyes = found;
+    }
+  }
 
   const decision = decideCuts({ counts, fgN, eyes, hairN }, rules);
 

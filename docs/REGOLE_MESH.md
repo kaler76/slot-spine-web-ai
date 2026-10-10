@@ -198,6 +198,20 @@ Studio di esotericsoftware.com/spine-meshes e /spine-weights, applicato:
   La palpebra (sempre disegnata sopra il corpo) non scivola più: Zeus da 1445 a ≤ 230 pixel diversi (M9).
   Un nucleo più largo dava varchi fra i riccioli della Domatrice nel movimento (D5).
 
+## R19 — Mezzo busto e occhi di qualsiasi colore (O1 rita, posa), zeus-mesh-13.3
+Rita (10 ott): ritratto tagliato al petto, braccio sotto la pelliccia, iride oliva. "Non riconosce posa", "non chiude
+gli occhi".
+- **Posa a mezzo busto** (`acceptDetectedPose` → `bustPose`): con naso e spalle visibili e le anche SOTTO l'immagine
+  (o assenti) la posa di MediaPipe si accetta; anche mancanti stimate 1,5 spalle sotto le spalle, gomiti e polsi
+  nascosti o non plausibili stimati in giù lungo il fianco. Figura intera: regole di prima (polso nascosto = rifiuto).
+- **Posa a mano**: per gomiti, polsi e anche c'è il pulsante "⤓ Fuori dall'immagine / nascosto" (stima come sopra).
+- **Occhi stimati** (posa a mano) o non trovati: `findEyePair` cerca i bianchi sopra il naso (chiari, poco saturi,
+  vicino a pixel scuri), una coppia per lato; per ogni occhio si prova anche spostati di lato e si tiene il buco più
+  grande con forma d'occhio.
+- **Iride di qualsiasi colore**: se l'iride non è blu né verde, è un CERCHIO stimato dalla fascia chiusa fra i bianchi
+  (raggio ≤ 0,18 ipd); nel buco: bianco + cerchio senza pelle; le ciglia scure sopra l'iride restano al corpo.
+  Il bianco generato va solo dove il bianco è stato riconosciuto (niente righe bianche fra le ciglia).
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.

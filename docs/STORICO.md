@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.3 | 10 ott | Posa a mezzo busto (anche sotto il bordo, braccia nascoste stimate; pulsante "fuori dall'immagine" nella posa a mano); occhi cercati nel viso e iride di qualsiasi colore | Rita: "non riconosce posa", "non chiude gli occhi" | O1 rita, poseRecovery |
 | zeus-mesh-13.2 | 9 ott | Regole dalla guida di Spine: niente buchi nelle mesh, meno vertici (Trace), palpebra saldata ai pesi del corpo (Weld) | Studio di Spine Academy (link inviato) | H3, M9, D5 |
 | zeus-mesh-13.1 | 9 ott | Maschera "oggetto fermo": crescita per colore limitata vicino al pezzo | Zeus nella vista pesi di Spine: busto quasi tutto sulla radice ("i pesi sono messi male?") | M8 |
 | zeus-mesh-13 | 9 ott | **Mesh sulla sagoma** (contorno sui pixel, vertici solo dentro, buchi grandi vuoti, più fitta su articolazioni e viso) e **pesi morbidi** (media coi vicini dentro la mesh) | Vista mesh di Zeus: griglia su tutto il riquadro, anche sullo sfondo; "gestisci i pesi in maniera ottimale" | H1–H5, W1 |
@@ -47,7 +48,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 ## Dove sta cosa
 - **Regole**: `docs/REGOLE_MESH.md`, `docs/REGOLE_TAVOLA_ESPLOSA.md` (copie nel progetto Claude, cartella `claude/`).
 - **Garanzie**: ogni regola ha un test in `tests/` (`node --test tests/*.test.mjs`); i casi approvati stanno in
-  `tests/fixtures/` (Zeus, Domatrice, folletto, avvocato, Jessica) e non possono peggiorare senza che un test fallisca.
+  `tests/fixtures/` (Zeus, Domatrice, folletto, avvocato, Jessica, Robin, Rita) e non possono peggiorare senza che un test fallisca.
 - **Prove visive**: `prototipi/` (pacchetti e fotogrammi di ogni passo, non salvati in git).
 
 ## Da fare (aperto)

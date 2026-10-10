@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MANUAL_POINTS, landmarksFromClicks } from "../lib/poseRecovery.js";
+import { MANUAL_POINTS, OUTSIDE_OK, landmarksFromClicks } from "../lib/poseRecovery.js";
 
 /**
  * Posa manuale (gratuita): quando la posa non si ricava in automatico (es. cavaliere con
@@ -23,7 +23,7 @@ export default function ManualPosePicker({ img, width: W, height: H, onDone, onC
     ctx.font = `bold ${Math.max(14, W / 50)}px sans-serif`;
     MANUAL_POINTS.forEach((p, i) => {
       const q = clicks[p.key];
-      if (!q) return;
+      if (!q || q.outside) return;
       ctx.fillStyle = p.key.endsWith("Sx") ? "#00e5ff" : p.key.endsWith("Dx") ? "#ff4fa0" : "#ffe14f";
       ctx.beginPath();
       ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
@@ -79,6 +79,16 @@ export default function ManualPosePicker({ img, width: W, height: H, onDone, onC
           <input type="checkbox" checked={twoHands} onChange={(e) => setTwoHands(e.target.checked)} /> Tiene un oggetto con
           tutte e due le mani
         </label>
+        {next && OUTSIDE_OK.has(next.key) && (
+          <button
+            type="button"
+            className="btn secondary"
+            title="Mezzo busto o braccio nascosto: il punto viene stimato in giù dalla spalla"
+            onClick={() => setClicks((c) => ({ ...c, [next.key]: { outside: true } }))}
+          >
+            ⤓ Fuori dall'immagine / nascosto
+          </button>
+        )}
         <button type="button" className="btn" onClick={done} disabled={!!next}>
           ✅ Continua l'analisi
         </button>

@@ -34,8 +34,16 @@ export const POSE_CORE = [0, 11, 12, 13, 14, 15, 16];
 export function acceptDetectedPose(points) {
   if (!Array.isArray(points) || points.length !== 33) throw new Error('pose_shape');
   const ok = (p, v) => p && [p.x, p.y].every(Number.isFinite) && p.x > -0.05 && p.x < 1.05 && p.y > -0.05 && p.y < 1.05 && (p.visibility ?? 1) >= v;
-  for (const i of POSE_CORE) if (!ok(points[i], 0.3)) throw new Error('pose_point');
-  for (const i of [23, 24]) if (!ok(points[i], 0.05)) throw new Error('pose_point');
+  // MEZZO BUSTO (10 ott, Rita: ritratto tagliato al petto, braccio sotto la pelliccia): anche SOTTO l'immagine
+  // (stimate da MediaPipe fuori quadro). Allora gomiti e polsi nascosti o fuori quadro non fanno scartare la posa:
+  // si usano se plausibili, altrimenti si stimano in giù dalla spalla. Con le anche dentro l'immagine nulla cambia.
+  const fin = (p) => p && [p.x, p.y].every(Number.isFinite);
+  const bust = [11, 12].every((i) => ok(points[i], 0.3)) && ok(points[0], 0.3) &&
+    [23, 24].every((i) => !fin(points[i]) || points[i].y > 0.97);
+  if (bust) points = bustPose(points);
+  // a mezzo busto gomiti e polsi possono stare sotto il bordo (stimati o fuori quadro)
+  for (const i of POSE_CORE) if (!(bust && i >= 13 ? fin(points[i]) && points[i].visibility >= 0.3 : ok(points[i], 0.3))) throw new Error('pose_point');
+  for (const i of [23, 24]) if (!(bust ? fin(points[i]) : ok(points[i], 0.05))) throw new Error('pose_point');
   const P = points.map((p) => (p ? { ...p, visibility: p.visibility ?? 1 } : p));
   const d = (a, b) => Math.hypot(P[a].x - P[b].x, P[a].y - P[b].y);
   if (d(11, 12) < 0.035 || d(23, 24) < 0.015 || d(11, 23) < 0.05 || d(12, 24) < 0.05) throw new Error('pose_collapsed');
@@ -48,6 +56,29 @@ export function acceptDetectedPose(points) {
       const off = [0.05, 0, -0.06][k], ahead = [0.14, 0.16, 0.1][k];
       P[f] = { x: P[w].x + dx * ahead * sw - dy * off * sw, y: P[w].y + dy * ahead * sw + dx * off * sw, visibility: 0.3 };
     });
+  }
+  return P;
+}
+
+/** Posa a mezzo busto: anche sotto le spalle se mancano; gomiti e polsi non attendibili stimati lungo il fianco. */
+export function bustPose(points) {
+  const P = points.map((p) => (p ? { ...p } : p));
+  const fin = (p) => p && [p.x, p.y].every(Number.isFinite);
+  const sx = P[11], dx = P[12], sw = Math.hypot(sx.x - dx.x, sx.y - dx.y) || 0.1;
+  // "giù" = perpendicolare alla linea delle spalle, verso il basso dell'immagine
+  let ux = -(sx.y - dx.y) / sw, uy = (sx.x - dx.x) / sw;
+  if (uy < 0) { ux = -ux; uy = -uy; }
+  const inX = (sx.x - dx.x) / sw, inY = (sx.y - dx.y) / sw; // verso la spalla sinistra del personaggio
+  for (const [h, sh, k] of [[23, sx, -0.1], [24, dx, 0.1]]) {
+    if (fin(P[h]) && P[h].y > sh.y + 0.5 * sw * uy && P[h].y < 3) continue;
+    P[h] = { x: sh.x + ux * 1.5 * sw + inX * k * sw, y: sh.y + uy * 1.5 * sw + inY * k * sw, visibility: 0.05 };
+  }
+  for (const [sh, e, w] of [[11, 13, 15], [12, 14, 16]]) {
+    const S = P[sh], good = (p, v) => fin(p) && (p.visibility ?? 1) >= v && p.x > -0.5 && p.x < 1.5 && p.y > -0.5 && p.y < 2.5;
+    // visibile (≥ 0,3) e a una distanza da braccio: si tiene; nascosto o fuori misura: stimato in giù
+    const ok = (i, from) => good(P[i], 0.3) && Math.hypot(P[i].x - from.x, P[i].y - from.y) / sw > 0.3 && Math.hypot(P[i].x - from.x, P[i].y - from.y) / sw < 2;
+    if (!ok(e, S)) P[e] = { x: S.x + ux * 0.9 * sw, y: S.y + uy * 0.9 * sw, visibility: 0.3 };
+    if (!ok(w, P[e])) P[w] = { x: P[e].x + ux * 0.8 * sw, y: P[e].y + uy * 0.8 * sw, visibility: 0.3 };
   }
   return P;
 }
@@ -65,6 +96,8 @@ export async function resolvePose({ detect, recover, width, height }) {
 
 // ---------------------------------------------------------------- posa manuale (gratuita)
 /** I 9 punti che l'utente clicca quando la posa non si ricava in automatico. sx/dx = lato del PERSONAGGIO. */
+/** Punti che si possono dichiarare "fuori dall'immagine / nascosti" nella posa manuale. */
+export const OUTSIDE_OK = new Set(["elbowSx", "elbowDx", "wristSx", "wristDx", "hipSx", "hipDx"]);
 export const MANUAL_POINTS = [
   { key: "nose", index: 0, label: "Centro del viso (naso, o centro della visiera)" },
   { key: "shoulderSx", index: 11, label: "Spalla SINISTRA del personaggio (a destra per chi guarda)" },
@@ -83,11 +116,26 @@ export const MANUAL_POINTS = [
  * come stima per le regole, non come misura.
  */
 export function landmarksFromClicks(clicks) {
+  // punti "fuori dall'immagine" (mezzo busto: anche sotto il bordo, braccio sotto la pelliccia): { outside: true },
+  // stimati in giù dalla spalla come bustPose
+  const P = { ...clicks };
   for (const p of MANUAL_POINTS) {
-    const c = clicks[p.key];
+    const c = P[p.key];
+    if (c?.outside && OUTSIDE_OK.has(p.key)) continue;
     if (!c || !Number.isFinite(c.x) || !Number.isFinite(c.y)) throw new Error(`Punto mancante: ${p.label}`);
   }
-  const P = clicks;
+  {
+    const sx = P.shoulderSx, dx = P.shoulderDx, sw0 = Math.hypot(sx.x - dx.x, sx.y - dx.y) || 1;
+    let ux = -(sx.y - dx.y) / sw0, uy = (sx.x - dx.x) / sw0;
+    if (uy < 0) { ux = -ux; uy = -uy; }
+    const inX = (sx.x - dx.x) / sw0, inY = (sx.y - dx.y) / sw0;
+    const down = (q, f, k = 0) => ({ x: q.x + ux * f * sw0 + inX * k * sw0, y: q.y + uy * f * sw0 + inY * k * sw0 });
+    for (const s of ["Sx", "Dx"]) {
+      if (P[`elbow${s}`]?.outside) P[`elbow${s}`] = down(P[`shoulder${s}`], 0.9);
+      if (P[`wrist${s}`]?.outside) P[`wrist${s}`] = down(P[`elbow${s}`], 0.8);
+      if (P[`hip${s}`]?.outside) P[`hip${s}`] = down(P[`shoulder${s}`], 1.5, s === "Sx" ? -0.1 : 0.1);
+    }
+  }
   const sw = Math.hypot(P.shoulderSx.x - P.shoulderDx.x, P.shoulderSx.y - P.shoulderDx.y) || 1;
   const L = Array.from({ length: 33 }, () => null);
   const set = (i, x, y, v) => (L[i] = { x, y, visibility: v });

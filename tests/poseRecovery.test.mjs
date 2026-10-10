@@ -57,3 +57,33 @@ test("posa collassata o senza polsi: rifiutata (si passa al recupero o ai click)
   Q[15].visibility = 0.1;
   assert.throws(() => acceptDetectedPose(Q), /pose_point/);
 });
+
+// MEZZO BUSTO (10 ott, Rita: ritratto tagliato al petto, braccio sotto la pelliccia: "non riconosce posa")
+test("mezzo busto: anche sotto l'immagine e braccio nascosto → posa accettata con gomito e polso stimati", () => {
+  const P = standing();
+  P[0] = { x: 0.5, y: 0.3, visibility: 0.99 }; P[11] = { x: 0.65, y: 0.62, visibility: 0.95 }; P[12] = { x: 0.35, y: 0.62, visibility: 0.95 };
+  P[23] = { x: 0.6, y: 1.25, visibility: 0.01 }; P[24] = { x: 0.4, y: 1.25, visibility: 0.01 };
+  P[14] = { x: 0.3, y: 0.85, visibility: 0.9 }; P[16] = { x: 0.28, y: 0.98, visibility: 0.8 };
+  P[13] = { x: NaN, y: NaN, visibility: 0 }; P[15] = { x: 0.9, y: 0.4, visibility: 0.02 }; // nascosti sotto la pelliccia
+  const R = acceptDetectedPose(P);
+  assert.ok(R[13].y > R[11].y && R[15].y > R[13].y, "gomito e polso stimati in giù dalla spalla");
+  assert.ok(R[23].y > 1 && R[24].y > 1, "anche sotto il bordo");
+  assert.deepEqual([R[14].x, R[14].y], [0.3, 0.85], "il braccio visibile resta quello di MediaPipe");
+});
+
+test("mezzo busto: senza anche affatto si stimano sotto le spalle; figura intera con polso nascosto resta rifiutata", () => {
+  const P = standing();
+  P[11] = { x: 0.65, y: 0.62, visibility: 0.95 }; P[12] = { x: 0.35, y: 0.62, visibility: 0.95 }; P[0] = { x: 0.5, y: 0.3, visibility: 0.99 };
+  P[23] = { x: NaN, y: NaN, visibility: 0 }; P[24] = { x: NaN, y: NaN, visibility: 0 };
+  const R = acceptDetectedPose(P);
+  assert.ok(R[23].y > 0.62 + 0.3 && R[24].y > 0.62 + 0.3);
+  const Q = standing(); Q[15].visibility = 0.1;
+  assert.throws(() => acceptDetectedPose(Q), /pose_point/);
+});
+
+test("posa manuale: gomito, polso e anche si possono dare come \"fuori dall'immagine\"", () => {
+  const c = { nose: { x: 500, y: 300 }, shoulderSx: { x: 650, y: 620 }, shoulderDx: { x: 350, y: 620 }, elbowSx: { outside: true }, elbowDx: { x: 300, y: 850 }, wristSx: { outside: true }, wristDx: { x: 280, y: 980 }, hipSx: { outside: true }, hipDx: { outside: true } };
+  const L = landmarksFromClicks(c);
+  assert.ok(L[13].y > 620 && L[15].y > L[13].y && L[23].y > 1000 && L[24].y > 1000);
+  assert.throws(() => landmarksFromClicks({ ...c, nose: { outside: true } }));
+});

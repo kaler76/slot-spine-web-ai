@@ -1,6 +1,7 @@
 // OCCHI (R12 di docs/REGOLE_MESH.md, zeus-mesh-9.3): a occhio chiuso non si vede né il bianco né la pupilla,
 // anche con iride castana e bianco in ombra (avvocato), trucco scuro attorno all'occhio (Domatrice) e iride VERDE
-// con il punto della posa di lato all'occhio (Robin Hood, approvato "perfetto" il 9 ott).
+// con il punto della posa di lato all'occhio (Robin Hood, approvato "perfetto" il 9 ott); iride OLIVA e posa a mano
+// a mezzo busto, occhi stimati e cercati nel viso (Rita, 10 ott: "non chiude gli occhi").
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -12,7 +13,7 @@ import { buildMeshRig, MESH_RIG_RULES } from "../src/lib/meshRig.js";
 import { renderFrame } from "../scripts/renderSpine.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/recognition");
-for (const [name, maxVisible] of [["avvocato", 25], ["domatrice", 25], ["robin", 25]]) {
+for (const [name, maxVisible] of [["avvocato", 25], ["domatrice", 25], ["robin", 25], ["rita", 40]]) {
   test(`O1 ${name}: occhio chiuso senza bianco né pupilla visibili; occhi aperti col bianco`, () => {
     const D = path.join(root, name);
     const img = PNG.sync.read(fs.readFileSync(path.join(D, "image.png"))), W = img.width, H = img.height, rgba = img.data;
