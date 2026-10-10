@@ -114,10 +114,14 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   }
 
   /** Braccio alzato separato con Gemini: ritaglio 16:9 → Gemini lo toglie → differenza = pezzo, risposta = dietro. */
-  async function makeGeminiArm(arm) {
+  async function makeGeminiArm(arm, fg) {
     const { width: W, height: H, rgba } = original;
     const box = armCropBox(arm);
-    const orig = cropRgba(rgba, W, H, box);
+    // trasparenza dalla SAGOMA riconosciuta (fg), non dal PNG: con un originale su fondo nero pieno (Jessica sul sito)
+    // il fondo arrivava a Gemini come nero e tornava nella piastra: "ombra" nera a forma di braccio dietro il pezzo
+    const src = new Uint8ClampedArray(rgba);
+    for (let i = 0; i < W * H; i++) if (!fg[i]) src[i * 4 + 3] = 0;
+    const orig = cropRgba(src, W, H, box);
     const flat = flattenOnKey(orig);
     const prompts = armRemovalPrompts(arm.imageSide);
     let b64 = null, lastErr = null;
@@ -189,7 +193,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         const got = { ...(forceArm ? {} : armGem) };
         for (const arm of first.report.raisedArms || []) {
           if (!got[arm.side]) {
-            try { got[arm.side] = await makeGeminiArm(arm); }
+            try { got[arm.side] = await makeGeminiArm(arm, fg); }
             catch (e) { got[arm.side] = { error: e.message || String(e) }; }
           }
           const r = got[arm.side];

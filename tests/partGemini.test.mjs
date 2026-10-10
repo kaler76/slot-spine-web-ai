@@ -21,13 +21,13 @@ for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
   if (d <= 0) { orig.set(d > -3 ? [30, 10, 40, 255] : [120 + (y % 9), 40, 170, 255], i); truth[y * W + x] = 1; }
 }
 
-function geminiLike(box) {
+function geminiLike(box, bg = PART_KEY) {
   // ritaglio del corpo senza braccio, fondo magenta, poi ingrandito 2% e spostato (6, -4), colori +6% e rumore
   const w = box.width, h = box.height, src = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const X = x + box.x0, Y = y + box.y0, i = (y * w + x) * 4;
     if (X >= 0 && Y >= 0 && X < W && Y < H && bodyOnly[(Y * W + X) * 4 + 3]) src.set(bodyOnly.subarray((Y * W + X) * 4, (Y * W + X) * 4 + 4), i);
-    else src.set([...PART_KEY, 255], i);
+    else src.set([...bg, 255], i);
   }
   const out = new Uint8ClampedArray(w * h * 4); let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff - 0.5) * 20;
@@ -35,7 +35,7 @@ function geminiLike(box) {
     // risposta(g) = sorgente((g - centro - spost.) / s + centro)
     const sx = Math.round((x - w / 2 - 6) / 1.02 + w / 2), sy = Math.round((y - h / 2 + 4) / 1.02 + h / 2), i = (y * w + x) * 4;
     const j = (Math.min(h - 1, Math.max(0, sy)) * w + Math.min(w - 1, Math.max(0, sx))) * 4;
-    const key = src[j] === 255 && src[j + 1] === 0 && src[j + 2] === 255;
+    const key = src[j] === bg[0] && src[j + 1] === bg[1] && src[j + 2] === bg[2];
     for (let k = 0; k < 3; k++) out[i + k] = key ? src[j + k] : src[j + k] * 1.06 + rnd();
     out[i + 3] = 255;
   }
@@ -73,4 +73,16 @@ test("G3 Gemini che non toglie il braccio o cambia tutto: errore (si torna al me
   assert.match(armPartFromGemini({ orig: crop, gen: same, box, arm, W, H }).error, /non ha tolto/);
   let sd = 3; const noise = new Uint8ClampedArray(crop.length); for (let i = 0; i < noise.length; i++) noise[i] = (sd = (sd * 1103515245 + 12345) & 0x7fffffff) >> 23;
   assert.ok(armPartFromGemini({ orig: crop, gen: noise, box, arm, W, H }).error);
+});
+
+test("G4 Gemini rende il fondo NERO invece del magenta: niente \"ombra\" nera nella piastra fuori dal corpo", () => {
+  const r = armPartFromGemini({ orig: crop, gen: geminiLike(box, [8, 8, 10]), box, arm, W, H });
+  assert.equal(r.error, null, JSON.stringify(r.checks));
+  let inter = 0, uni = 0, plateOut = 0, plateIn = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const g = y * W + x; if (r.mask[g] && truth[g]) inter++; if (r.mask[g] || truth[g]) uni++;
+    if (r.plate[g * 4 + 3] > 128) { if (inBody(x, y)) plateIn++; else plateOut++; }
+  }
+  assert.ok(inter / uni >= 0.85, `IoU ${(inter / uni).toFixed(3)}`);
+  assert.ok(plateOut <= 0.03 * plateIn, `piastra fuori ${plateOut} / dentro ${plateIn}`);
 });

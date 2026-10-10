@@ -93,6 +93,18 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
     const i = (y * w + x) * 4; if (orig[i + 3] >= 200) opaque++; else if (orig[i + 3] > 8) continue;
     pts.push([x, y, orig[i + 3] >= 200 ? 1 : 0.3]);
   }
+  // fondo della risposta ancora magenta? (mediana dove l'originale è vuoto, senza spostamento). Se Gemini l'ha cambiato
+  // (nero, grigio), per ALLINEARSI si riporta a magenta il colore del suo fondo (i bordi della sagoma restano l'àncora)
+  let genA = gen;
+  {
+    const ch = [[], [], []];
+    for (const [x, y, wt] of pts) if (wt < 1) { const i = (y * w + x) * 4; for (let k = 0; k < 3; k++) ch[k].push(gen[i + k]); }
+    const med = ch[0].length >= 30 ? ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1]) : PART_KEY;
+    if (Math.abs(med[0] - PART_KEY[0]) + Math.abs(med[1] - PART_KEY[1]) + Math.abs(med[2] - PART_KEY[2]) > 90) {
+      genA = new Uint8ClampedArray(gen);
+      for (let i = 0; i < genA.length; i += 4) if (Math.abs(genA[i] - med[0]) + Math.abs(genA[i + 1] - med[1]) + Math.abs(genA[i + 2] - med[2]) < 36) { genA[i] = PART_KEY[0]; genA[i + 1] = PART_KEY[1]; genA[i + 2] = PART_KEY[2]; }
+    }
+  }
   const tmp = new Float32Array(4);
   // luminosità sfocate (media r×r) per la ricerca GROSSOLANA: senza, le texture ripetute (righe, paillettes) davano
   // allineamenti sfalsati di un motivo
@@ -107,7 +119,7 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
   // pelle o un rosso medi si confondevano: il bordo della sagoma spariva e l'allineamento scivolava di lato
   const LO = new Float32Array(w * h), LG = new Float32Array(w * h), MO = new Float32Array(w * h), MG = new Float32Array(w * h);
   const mag = (a, i) => (a[i] + a[i + 2]) / 2 - a[i + 1];
-  for (let j = 0; j < w * h; j++) { LO[j] = lum(flat, j * 4); LG[j] = lum(gen, j * 4); MO[j] = mag(flat, j * 4); MG[j] = mag(gen, j * 4); }
+  for (let j = 0; j < w * h; j++) { LO[j] = lum(flat, j * 4); LG[j] = lum(genA, j * 4); MO[j] = mag(flat, j * 4); MG[j] = mag(genA, j * 4); }
   const sample1 = (A, x, y) => {
     if (x < 0 || y < 0 || x > w - 1 || y > h - 1) return -1;
     const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1), fx = x - x0, fy = y - y0;
@@ -140,7 +152,7 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
   }
   // pixel lontani CAMBIATI (scarto > 40 di luminosità): Gemini ha ridisegnato anche altro, non solo il braccio
   let changed = 0, cn = 0;
-  for (const [x, y] of pts) { const v = sample1(LG, (x - w / 2) * best.s + w / 2 + best.dx, (y - h / 2) * best.s + h / 2 + best.dy); if (v < 0) continue; cn++; if (Math.abs(v - LO[y * w + x]) > 40) changed++; }
+  for (const [x, y, wt] of pts) { if (wt < 1) continue; const v = sample1(LG, (x - w / 2) * best.s + w / 2 + best.dx, (y - h / 2) * best.s + h / 2 + best.dy); if (v < 0) continue; cn++; if (Math.abs(v - LO[y * w + x]) > 40) changed++; }
   const checks = { mismatch: +best.e.toFixed(1), changedFar: +(changed / Math.max(1, cn)).toFixed(2), farPoints: pts.length };
   if (checks.changedFar > 0.3) return { error: `Gemini ha ridisegnato anche lontano dal braccio (${Math.round(100 * checks.changedFar)}% dei pixel cambiati)`, checks };
   if (!(best.e <= 40)) return { error: `risposta di Gemini non allineabile (scarto ${checks.mismatch} sui pixel lontani dal braccio)`, checks };
@@ -158,14 +170,27 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
       gain[k] = Math.min(1.4, Math.max(0.7, Math.sqrt(vo / vg))); off[k] = mo - gain[k] * mg;
     }
   }
-  const keyA = (i) => { const d = Math.abs(al[i] - PART_KEY[0]) + Math.abs(al[i + 1] - PART_KEY[1]) + Math.abs(al[i + 2] - PART_KEY[2]); return Math.max(0, Math.min(1, (d - 60) / 90)); };
+  // FONDO della risposta: Gemini a volte non tiene il magenta (lo rende nero o grigio). Colore mediano della risposta
+  // dove l'originale è vuoto, lontano dal braccio; "fondo" = vicino al magenta o a quel colore
+  const bgCol = (() => {
+    const ch = [[], [], []];
+    for (const [x, y] of pts) { const j = y * w + x, i = j * 4; if (!ok[j] || orig[i + 3] > 8) continue; for (let k = 0; k < 3; k++) ch[k].push(al[i + k]); }
+    if (ch[0].length < 30) return PART_KEY;
+    return ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1]);
+  })();
+  const magA = (i) => Math.max(0, Math.min(1, (Math.abs(al[i] - PART_KEY[0]) + Math.abs(al[i + 1] - PART_KEY[1]) + Math.abs(al[i + 2] - PART_KEY[2]) - 60) / 90));
+  const keyA = (i) => {
+    const d1 = Math.abs(al[i] - PART_KEY[0]) + Math.abs(al[i + 1] - PART_KEY[1]) + Math.abs(al[i + 2] - PART_KEY[2]);
+    const d2 = Math.abs(al[i] - bgCol[0]) + Math.abs(al[i + 1] - bgCol[1]) + Math.abs(al[i + 2] - bgCol[2]);
+    return Math.max(0, Math.min(1, (Math.min(d1, d2) - 60) / 90));
+  };
 
   // 2. differenza originale ↔ risposta (sfondo magenta = "niente": contro un pixel opaco è differenza piena)
   const diff = new Float32Array(w * h);
   for (let j = 0; j < w * h; j++) {
     const i = j * 4; if (!zone[j] || orig[i + 3] < 128) continue;
     if (!ok[j]) { diff[j] = 255; continue; }
-    const ka = keyA(i); let d = 0;
+    const ka = magA(i); let d = 0;
     for (let k = 0; k < 3; k++) d = Math.max(d, Math.abs(orig[i + k] - (al[i + k] * gain[k] + off[k])));
     diff[j] = ka * d + (1 - ka) * 255;
   }
@@ -212,10 +237,21 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
     for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!m[j] && !out[j]) { out[j] = 1; q.push(j); } } }
     for (let j = 0; j < w * h; j++) if (!out[j]) m[j] = 1;
   }
+  // contorno del braccio contro un fondo dello STESSO colore (contorno nero, fondo di Gemini nero): la differenza non
+  // lo vede; fino a 4 px attaccati al pezzo dove la risposta è fondo e l'originale è personaggio, vanno nel pezzo
+  for (let k = 0; k < 4; k++) {
+    const add = [];
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const j = y * w + x; if (m[j] || !zone[j] || orig[j * 4 + 3] < 128 || !ok[j] || keyA(j * 4) > 0.3) continue;
+      if ((x > 0 && m[j - 1]) || (x < w - 1 && m[j + 1]) || (y > 0 && m[j - w]) || (y < h - 1 && m[j + w])) add.push(j);
+    }
+    for (const j of add) m[j] = 1;
+  }
   // + 1 px di bordo (antialias del contorno), solo dove l'originale è opaco
   m = morph(m, 1, true);
   for (let j = 0; j < w * h; j++) if (orig[j * 4 + 3] < 8) m[j] = 0;
 
+  checks.background = bgCol.map(Math.round);
   // 3. controlli
   let n = 0; for (let j = 0; j < w * h; j++) n += m[j];
   const L = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);

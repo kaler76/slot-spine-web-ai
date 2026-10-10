@@ -282,6 +282,11 @@ spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo 
 - App: casella **"🤖 Braccio alzato con AI"** (di serie accesa; serve "Taglia braccio alzato" o "con oggetto"),
   anteprime Originale / Gemini / Pezzo / Dietro, pulsante "Ridisegna braccio (Gemini)". Risultato tenuto finché non
   cambia l'analisi.
+- 14.2 (Jessica sul sito: "il nero dietro è ombra?"): l'originale era su fondo NERO pieno (PNG opaco), il fondo arrivava
+  a Gemini come nero e tornava nella PIASTRA → sagoma nera del braccio nel corpo, visibile quando il braccio si muove.
+  Ora la trasparenza del ritaglio viene dalla sagoma riconosciuta (fg), non dal PNG. In più, se Gemini cambia il fondo
+  (nero, grigio): per allinearsi il suo colore di fondo torna magenta; la piastra è trasparente anche su quel colore;
+  il contorno del braccio dello stesso colore del fondo (4 px attaccati al pezzo) va nel pezzo (G4).
 - Corretto insieme: con due braccia tagliate ogni pezzo conteneva anche l'altro braccio (maschera unica): ora ogni
   pixel della maschera va al braccio da cui è raggiungibile.
 
