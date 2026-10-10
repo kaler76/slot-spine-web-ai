@@ -45,7 +45,8 @@ function dropSpecks(m, W, H) {
     while (st.length) { const i = st.pop(); px.push(i); const x = i % W, y = (i / W) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const j = (y + dy) * W + x + dx; if (m[j] && !seen[j]) { seen[j] = 1; st.push(j); } } }
     comps.push(px); tot += px.length;
   }
-  const min = Math.min(200, 0.0005 * tot);
+  // solo briciole (< 20 px): pezzi più grandi si vedono (Jessica: fili di capelli fra braccio e spalla scoperti a riposo)
+  const min = Math.min(20, 0.0005 * tot);
   for (const px of comps) if (px.length < min) for (const i of px) m[i] = 0;
 }
 

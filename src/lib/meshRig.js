@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.6";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.7";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -159,12 +159,15 @@ function labelOf(part, x, midX) {
  *   occhi: buco + bianco + pupilla se entrambi gli occhi sono trovati.
  * @returns {{ arms: string[], hair: boolean, eyes: boolean, reasons: string[] }}
  */
-export function decideCuts({ counts, fgN, eyes, hairN }, rules = MESH_RIG_RULES) {
+export function decideCuts({ counts, fgN, eyes, hairN, free = {} }, rules = MESH_RIG_RULES) {
   const reasons = [];
   const arms = [];
   for (const s of ["sx", "dx"]) {
     const n = counts[`oggetto_${s}`] || 0;
     if (rules.cuts.arm && n >= rules.objectMin * fgN) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, tiene un oggetto (${n} px)`); }
+    // BRACCIO LIBERO (zeus-mesh-13.7, Jessica: "se c'è un braccio così dovrebbe essere tagliato bene e animato
+    // indipendente"): staccato dal busto per quasi tutta la lunghezza → pezzo anche senza oggetto
+    else if (rules.cuts.arm && free[s]?.free) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, braccio libero (staccato dal busto per il ${Math.round(100 * free[s].frac)}%)`); }
     else reasons.push(`braccio_${s}: mesh${n ? (rules.cuts.arm ? ` (oggetto piccolo, ${n} px)` : ` (tiene un oggetto di ${n} px ma il taglio del braccio è disattivato: l'oggetto si piega col corpo)`) : ""}`);
   }
   const hair = rules.cuts.hair && hairN >= rules.hairMin * fgN;
@@ -701,7 +704,24 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     }
   }
 
-  const decision = decideCuts({ counts, fgN, eyes, hairN }, rules);
+  // braccio LIBERO: campioni lungo omero (dal 35%) e avambraccio; "a contatto" se entro 0,12 spalle c'è il busto
+  // (vestito, giacca). Libero = alzato e ≥ 70% dei campioni senza contatto; omero libero = taglio dalla spalla
+  const free = {};
+  for (const s of ["sx", "dx"]) {
+    const sh = by[`omero_${s}`].head, el = by[`avambraccio_${s}`].head, wr = by[`mano_${s}`].head;
+    if ((landmarks[s === "sx" ? 15 : 16]?.visibility ?? 1) < 0.31) continue; // mano stimata
+    const r = Math.round(0.12 * shoulderW);
+    const touch = (p) => { for (let dy = -r; dy <= r; dy += 2) for (let dx = -r; dx <= r; dx += 2) { if (dx * dx + dy * dy > r * r) continue; const X = Math.round(p.x + dx), Y = Math.round(p.y + dy); if (X < 0 || Y < 0 || X >= W || Y >= H) continue; if (lab[Y * W + X] === L_.busto) return true; } return false; };
+    let nu = 0, cu = 0, nf = 0, cf = 0;
+    for (let t = 0.35; t <= 1.0001; t += 0.05) { nu++; if (touch(lerp(sh, el, t))) cu++; }
+    for (let t = 0; t <= 1.0001; t += 0.05) { nf++; if (touch(lerp(el, wr, t))) cf++; }
+    const frac = 1 - (cu + cf) / (nu + nf);
+    // solo braccio ALZATO (polso sopra il gomito di almeno mezza spalla: Jessica col bocchino). Le braccia lungo il
+    // fianco, sui fianchi (Domatrice) o tese (Zeus, Robin) restano alle regole di prima
+    const raised = wr.y <= el.y - 0.5 * shoulderW;
+    free[s] = { free: raised && frac >= 0.7, raised, frac, upperFree: raised && cu / nu < 0.3 };
+  }
+  const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
 
   // capelli: catena di 2 ossa dal punto più alto al più basso del gruppo
   if (decision.hair) {
@@ -827,20 +847,34 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const armMask = new Uint8Array(W * H);
   const armFrom = {};
   for (const s of decision.arms) {
+    const hairOut = [];
     const sh = by[`omero_${s}`].head, el = by[`avambraccio_${s}`].head, hip = landmarks[s === "sx" ? 23 : 24];
     const ang = Math.abs(deg(Math.atan2(el.y - sh.y, el.x - sh.x) - Math.atan2(hip.y - sh.y, hip.x - sh.x)));
     const down = Math.min(ang, 360 - ang);
-    armFrom[s] = rules.armFrom === "auto" || !rules.armFrom ? (down <= rules.armDownMaxDeg ? "gomito" : "spalla") : rules.armFrom;
+    // omero lungo il fianco MA staccato dal busto (Jessica: braccio sollevato, omero davanti ai capelli): dalla spalla
+    armFrom[s] = rules.armFrom === "auto" || !rules.armFrom ? (down <= rules.armDownMaxDeg && !free[s]?.upperFree ? "gomito" : "spalla") : rules.armFrom;
     decision.reasons.push(`braccio_${s} tagliato dal${armFrom[s] === "gomito" ? " GOMITO (omero lungo il fianco" : "la SPALLA (braccio staccato dal busto"}, ${down.toFixed(0)}°)`);
     const fore = PART[`avambraccio_${s}`], wr = by[`mano_${s}`].head;
     const dx = wr.x - el.x, dy = wr.y - el.y, len = Math.hypot(dx, dy) || 1, ov = (rules.elbowOverlap ?? 0.08) * shoulderW;
     for (let i = 0; i < W * H; i++) {
       if (lab[i] === L_[`oggetto_${s}`]) { armMask[i] = 1; continue; }
       if (lab[i] !== L_[`braccio_${s}`]) continue;
+      // i CAPELLI non vanno nel pezzo del braccio (Jessica: le ciocche accanto al braccio alzato erano "braccio" per
+      // geometria; il pezzo se le portava via e nel corpo restava un buco): restano al corpo
+      if (categories && categories[i] === SEG.hair) { hairOut.push(i); continue; }
       if (armFrom[s] === "spalla") { armMask[i] = 1; continue; }
       // dal gomito: avambraccio e mano, oltre il gomito lungo gomito→polso (meno la sovrapposizione)
       const x = i % W, y = (i / W) | 0, t = ((x - el.x) * dx + (y - el.y) * dy) / len;
       if (t >= -ov && (parts[i] === fore || Math.hypot(x - el.x, y - el.y) <= ov)) armMask[i] = 1;
+    }
+    // capelli esclusi: restano al corpo solo se collegati ai capelli fuori dal braccio; le "isole" chiuse nel braccio
+    // (ombre della pelle prese per capelli) vanno nel pezzo, altrimenti nel corpo restano frammenti scoperti
+    if (hairOut.length) {
+      const ex = new Uint8Array(W * H); for (const i of hairOut) ex[i] = 1;
+      const keep = new Uint8Array(W * H), q = [];
+      for (const i of hairOut) { const x = i % W, y = (i / W) | 0; for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (!ex[j] && !armMask[j] && fg[j] && lab[j] !== L_[`braccio_${s}`] && lab[j] !== L_[`oggetto_${s}`]) { keep[i] = 1; q.push(i); break; } } }
+      for (let k = 0; k < q.length; k++) { const i = q[k], x = i % W, y = (i / W) | 0; for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (ex[j] && !keep[j]) { keep[j] = 1; q.push(j); } } }
+      for (const i of hairOut) { if (keep[i]) lab[i] = L_.testa; else armMask[i] = 1; }
     }
   }
   // isole del corpo staccate dal resto che toccano il braccio tagliato (pezzi d'oggetto non
@@ -849,12 +883,48 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const comp = new Int32Array(W * H).fill(-1), sizes = [];
     for (let s0 = 0; s0 < W * H; s0++) {
       if (!fg[s0] || armMask[s0] || comp[s0] >= 0) continue;
-      const id = sizes.length, st = [s0]; comp[s0] = id; let n = 0, touch = false;
-      while (st.length) { const i = st.pop(); n++; const x = i % W, y = (i / W) | 0; for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j]) touch = true; else if (fg[j] && comp[j] < 0) { comp[j] = id; st.push(j); } } }
-      sizes.push({ n, touch });
+      const id = sizes.length, st = [s0]; comp[s0] = id; let n = 0, touch = false, near = null, nd = Infinity;
+      while (st.length) {
+        const i = st.pop(); n++; const x = i % W, y = (i / W) | 0;
+        // isole vicine a una mano tagliata (fumo della sigaretta di Jessica, staccato dal bocchino): con quella mano
+        for (const a of decision.arms) { const hp = by[`mano_${a}`].tail, d = Math.hypot(x - hp.x, y - hp.y); if (d < nd) { nd = d; near = a; } }
+        for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j]) touch = true; else if (fg[j] && comp[j] < 0) { comp[j] = id; st.push(j); } }
+      }
+      sizes.push({ n, touch, near, nd });
     }
     const main = sizes.reduce((b, c, k) => (c.n > sizes[b].n ? k : b), 0);
-    for (let i = 0; i < W * H; i++) { const c = comp[i]; if (c >= 0 && c !== main && sizes[c].touch && sizes[c].n < 0.02 * fgN) { armMask[i] = 1; const s = decision.arms[0]; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`]; } }
+    for (let i = 0; i < W * H; i++) {
+      const c = comp[i]; if (c < 0 || c === main || sizes[c].n >= 0.02 * fgN) continue;
+      const z = sizes[c];
+      if (!(z.touch || z.nd < 0.9 * shoulderW)) continue;
+      armMask[i] = 1; const s = z.touch ? decision.arms[0] : z.near; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`];
+    }
+    // contorno scuro del braccio (riga nera del disegno, 3 px): va col pezzo, altrimenti resta nel corpo e quando il
+    // braccio si muove si vede un alone scuro (Jessica)
+    for (let k = 0; k < 3; k++) {
+      const add = [];
+      for (let i = 0; i < W * H; i++) {
+        if (armMask[i] || !fg[i] || lab[i] === L_.testa || (categories && categories[i] === SEG.hair)) continue;
+        const c = i * 4; if (luma(rgba[c], rgba[c + 1], rgba[c + 2]) >= 100) continue;
+        const x = i % W, y = (i / W) | 0;
+        for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx >= 0 && ny >= 0 && nx < W && ny < H && armMask[ny * W + nx]) { add.push(i); break; } }
+      }
+      for (const i of add) armMask[i] = 1;
+    }
+    // frammenti del pezzo staccati dal braccio (righe d'ombra fra le ciocche: Jessica) tornano al corpo, altrimenti
+    // restano scoperti (né nel pezzo, dove la mesh li salta, né nel corpo). Restano: il braccio, i pezzi grandi e quelli
+    // con pixel d'oggetto (fumo, bocchino)
+    {
+      const comp = new Int32Array(W * H).fill(-1), info = [];
+      for (let s0 = 0; s0 < W * H; s0++) {
+        if (!armMask[s0] || comp[s0] >= 0) continue;
+        const id = info.length, st = [s0], px = []; comp[s0] = id; let obj = false;
+        while (st.length) { const i = st.pop(); px.push(i); if (decision.arms.some((a) => lab[i] === L_[`oggetto_${a}`])) obj = true; const x = i % W, y = (i / W) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j] && comp[j] < 0) { comp[j] = id; st.push(j); } } }
+        info.push({ px, obj });
+      }
+      const big = Math.max(...info.map((c) => c.px.length));
+      for (const c of info) if (!c.obj && c.px.length < 0.02 * big) for (const i of c.px) { armMask[i] = 0; if (decision.arms.some((a) => lab[i] === L_[`braccio_${a}`])) lab[i] = L_.busto; }
+    }
   }
   const earMask = new Uint8Array(W * H);
   for (const er of earrings) for (const i of er.idx) earMask[i] = 1;
@@ -880,6 +950,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     if (!armMask[i] || dist[i] > fillR) continue;
     const y = (i / W) | 0, s = decision.arms.find((a) => lab[i] === L_[`braccio_${a}`] || lab[i] === L_[`oggetto_${a}`]);
     if (!s || !(armFrom[s] === "gomito" || y <= elbowY[s])) continue;
+    if (free[s]?.raised) continue; // braccio alzato: dietro si riempie per righe (fillRows)
     // pixel dell'OGGETTO: si riempie solo se sta DENTRO la sagoma del corpo (corpo da due lati opposti entro la
     // fascia), non accanto a una parte sottile (corda dell'arco di Robin Hood: macchia di riempimento vicino alla
     // punta che si vedeva quando l'arco si muove)
@@ -890,28 +961,38 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     }
     holes.push(i);
   }
-  // dietro l'orecchino: riga per riga, sfumatura fra il pixel del corpo a sinistra e quello a destra (capelli, collo:
-  // l'orecchino pende in verticale). Il riempimento "dai vicini" portava la pelle del mento sopra i capelli (macchia
-  // arancio che si vedeva quando l'orecchino oscilla). Contro lo sfondo da un lato: resta vuoto.
-  for (const er of earrings) {
+  // dietro l'orecchino (e il braccio ALZATO): riga per riga, sfumatura fra il pixel del corpo a sinistra e quello a
+  // destra (capelli, collo). Il riempimento "dai vicini" portava la pelle sopra i capelli (macchia che si vedeva quando
+  // il pezzo si muove: orecchini di Rita, braccio di Jessica). Contro lo sfondo da un lato: resta vuoto.
+  const fillRows = (idx, mask, R, oneSide = 0) => {
     const rows = new Map();
-    for (const i of er.idx) { const y = (i / W) | 0, x = i % W; const r = rows.get(y) || [x, x]; r[0] = Math.min(r[0], x); r[1] = Math.max(r[1], x); rows.set(y, r); }
-    const R = Math.ceil(0.2 * shoulderW);
+    for (const i of idx) { const y = (i / W) | 0, x = i % W; const r = rows.get(y) || [x, x]; r[0] = Math.min(r[0], x); r[1] = Math.max(r[1], x); rows.set(y, r); }
     for (const [y, [xa, xb]] of rows) {
       let L = -1, Rr = -1;
       for (let x = xa - 1; x >= Math.max(0, xa - R); x--) { const j = y * W + x; if (known[j]) { L = x; break; } if (!fg[j]) break; }
       for (let x = xb + 1; x <= Math.min(W - 1, xb + R); x++) { const j = y * W + x; if (known[j]) { Rr = x; break; } if (!fg[j]) break; }
-      if (L < 0 || Rr < 0) continue;
+      if (L < 0 || Rr < 0) {
+        // un lato solo, ed è CAPELLI (braccio alzato davanti alle ciocche): i capelli continuano dietro per un tratto
+        const side = L >= 0 ? L : Rr; if (side < 0 || !categories || categories[y * W + side] !== SEG.hair || !oneSide) continue;
+        const c0 = rgba.subarray((y * W + side) * 4, (y * W + side) * 4 + 4), dir = L >= 0 ? 1 : -1;
+        for (let k = 1; k <= oneSide; k++) { const x = side + dir * k; if (x < 0 || x >= W) break; const j = y * W + x; if (known[j]) continue; if (!mask[j]) break; for (let q = 0; q < 3; q++) body[j * 4 + q] = c0[q]; body[j * 4 + 3] = 255; }
+        continue;
+      }
       let cl = rgba.subarray((y * W + L) * 4, (y * W + L) * 4 + 4), cr = rgba.subarray((y * W + Rr) * 4, (y * W + Rr) * 4 + 4);
-      // capelli da un lato e pelle (collo, mento) dall'altro: dietro l'orecchino ci sono i capelli, non una sfumatura
+      // capelli da un lato e pelle dall'altro: dietro ci sono i capelli, non una sfumatura
       if (categories) { const hl = categories[y * W + L] === SEG.hair, hr = categories[y * W + Rr] === SEG.hair; if (hl && !hr) cr = cl; else if (hr && !hl) cl = cr; }
       for (let x = L + 1; x < Rr; x++) {
-        const j = y * W + x; if (known[j] || !earMask[j]) continue;
+        const j = y * W + x; if (known[j] || !mask[j]) continue;
         const t = (x - L) / (Rr - L);
         for (let k = 0; k < 3; k++) body[j * 4 + k] = cl[k] * (1 - t) + cr[k] * t;
         body[j * 4 + 3] = 255;
       }
     }
+  };
+  for (const er of earrings) fillRows(er.idx, earMask, Math.ceil(0.2 * shoulderW));
+  for (const s of decision.arms) if (free[s]?.raised) {
+    const idx = []; for (let i = 0; i < W * H; i++) if (armMask[i] && (lab[i] === L_[`braccio_${s}`] || lab[i] === L_[`oggetto_${s}`])) idx.push(i);
+    fillRows(idx, armMask, Math.ceil(0.5 * shoulderW), Math.ceil(0.3 * shoulderW));
   }
   fillHoles(body, known, W, H, holes);
   const crop = (src, bx0, by0, bw, bh) => { const out = new Uint8ClampedArray(bw * bh * 4); for (let y = 0; y < bh; y++) out.set(src.subarray(((y + by0) * W + bx0) * 4, ((y + by0) * W + bx0 + bw) * 4), y * bw * 4); return out; };

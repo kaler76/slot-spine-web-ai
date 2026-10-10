@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.7 | 10 ott | **Braccio alzato** tagliato dalla spalla e animato da solo (anche senza oggetto), senza capelli, con fumo e contorno; dietro i capelli continuano | Jessica: "se c'è un braccio così dovrebbe essere tagliato BENE e animato indipendente" | J1–J3 |
 | zeus-mesh-13.6 | 10 ott | **Orecchini pendenti**: trovati sotto le orecchie, pezzo sull'osso orecchino che oscilla | Rita: "questi orecchini non si possono far muovere?" | R1–R3 |
 | zeus-mesh-13.5 | 10 ott | Mano stimata (fuori dall'immagine / nascosta) = niente oggetto in mano | Rita: pezzo di pelliccia preso per oggetto, strappo nero | B6 |
 | zeus-mesh-13.4 | 10 ott | Iride a cerchio: buco limitato all'apertura dell'occhio, sguardo fermo | Rita: "gli occhi si chiudono male", "righe negli occhi" | O1 rita |

@@ -233,6 +233,21 @@ Rita (10 ott): "questi orecchini non si possono far muovere?". Casella "Orecchin
   ±7° in ritardo sulla testa, lati sfasati. Dietro, nel corpo: riga per riga il colore dei capelli ai lati (con capelli da
   un lato e pelle dall'altro vince il lato capelli); contro lo sfondo resta vuoto. A riposo identico (R2).
 
+## R21 — Braccio alzato tagliato bene (J1–J3), zeus-mesh-13.7
+Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e animato indipendente".
+- **Braccio alzato** = polso sopra il gomito di almeno mezza spalla. Se è anche **libero** (≥ 70% dei campioni lungo
+  omero e avambraccio senza busto entro 0,12 spalle) si taglia anche senza oggetto in mano. Se l'omero è libero
+  (< 30% a contatto) il taglio parte dalla SPALLA anche con omero lungo il fianco. Braccia lungo il fianco, sui fianchi
+  (Domatrice) o tese (Zeus, Robin) restano alle regole di prima.
+- **Niente capelli nel pezzo**: i pixel "capelli" dentro la zona del braccio restano al corpo se collegati ai capelli
+  fuori; quelli chiusi dentro il braccio (ombre della pelle) vanno nel pezzo.
+- **Isole vicine alla mano** (fumo della sigaretta staccato dal bocchino, entro 0,9 spalle) vanno con la mano;
+  **contorno scuro** del braccio (luma < 100, non capelli, 3 px) nel pezzo; frammenti del pezzo staccati e piccoli
+  (< 2% del braccio, senza oggetto) tornano al corpo.
+- **Dietro il braccio alzato**: riempimento per righe fra i pixel del corpo ai lati (capelli da preferire); con un lato
+  solo che è capelli, i capelli continuano fino a 0,3 spalle. Niente riempimento "dai vicini" (macchia di pelle).
+- Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.
