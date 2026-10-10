@@ -246,6 +246,9 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   (< 2% del braccio, senza oggetto) tornano al corpo.
 - **Dietro il braccio alzato**: riempimento per righe fra i pixel del corpo ai lati (capelli da preferire); con un lato
   solo che è capelli, i capelli continuano fino a 0,3 spalle. Niente riempimento "dai vicini" (macchia di pelle).
+- 13.10 (Jessica: "il braccio non è tagliato??", con "Taglia braccio con oggetto" spenta): casella a parte
+  **"Taglia braccio alzato"** (di serie accesa, `cuts.raisedArm`), indipendente dall'altra; il braccio alzato non si
+  blocca con "Oggetto fermo" (si anima per conto suo), il blocco resta per gli altri bracci con oggetto (J5).
 - 13.8: isole entro 0,45 spalle dal pezzo (non solo dalla mano) vanno col braccio (fumo staccato dalla punta, J4);
   l'inquadratura "Busto" si allarga per comprendere le braccia tagliate sopra la vita (+8% per il movimento): prima
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).

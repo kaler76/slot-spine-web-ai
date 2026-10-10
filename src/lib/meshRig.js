@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.9";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.10";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -32,7 +32,7 @@ export const MESH_RIG_RULES = {
   fillBand: 0.14, // zona dietro il braccio tagliato riempita nel corpo (× larghezza spalle dal busto)
   objectMin: 0.002, // quota del personaggio oltre cui un oggetto in mano fa tagliare il braccio
   hairMin: 0.004, // quota minima dei capelli dietro per farne un pezzo
-  cuts: { arm: true, hair: true, eyes: true, earrings: true },
+  cuts: { arm: true, raisedArm: true, hair: true, eyes: true, earrings: true }, // raisedArm: braccio alzato e libero, anche senza oggetto (R21)
   // braccio tagliato: dalla SPALLA se il braccio è staccato dal busto (Zeus, braccio alzato); dal
   // GOMITO se l'omero scende lungo il fianco (Domatrice): l'omero resta nella mesh del corpo, così
   // il pezzo non si porta via risvolto e bottoni della giacca. "auto" sceglie con armDownMaxDeg.
@@ -164,10 +164,11 @@ export function decideCuts({ counts, fgN, eyes, hairN, free = {} }, rules = MESH
   const arms = [];
   for (const s of ["sx", "dx"]) {
     const n = counts[`oggetto_${s}`] || 0;
+    // braccio ALZATO e libero: casella a parte, vale anche col taglio "braccio con oggetto" spento (Jessica, 10 ott:
+    // "il braccio non è tagliato??" con l'altra casella spenta)
+    if ((rules.cuts.raisedArm ?? rules.cuts.arm) && free[s]?.free) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, braccio alzato e libero (staccato dal busto per il ${Math.round(100 * free[s].frac)}%)${n >= rules.objectMin * fgN ? `, con l'oggetto (${n} px)` : ""}`); continue; }
     if (rules.cuts.arm && n >= rules.objectMin * fgN) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, tiene un oggetto (${n} px)`); }
-    // BRACCIO LIBERO (zeus-mesh-13.7, Jessica: "se c'è un braccio così dovrebbe essere tagliato bene e animato
-    // indipendente"): staccato dal busto per quasi tutta la lunghezza → pezzo anche senza oggetto
-    else if (rules.cuts.arm && free[s]?.free) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, braccio libero (staccato dal busto per il ${Math.round(100 * free[s].frac)}%)`); }
+
     else reasons.push(`braccio_${s}: mesh${n ? (rules.cuts.arm ? ` (oggetto piccolo, ${n} px)` : ` (tiene un oggetto di ${n} px ma il taglio del braccio è disattivato: l'oggetto si piega col corpo)`) : ""}`);
   }
   const hair = rules.cuts.hair && hairN >= rules.hairMin * fgN;
@@ -722,6 +723,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     free[s] = { free: raised && frac >= 0.7, raised, frac, upperFree: raised && cu / nu < 0.3 };
   }
   const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
+  decision.freeArms = decision.arms.filter((a) => free[a]?.free);
 
   // capelli: catena di 2 ossa dal punto più alto al più basso del gruppo
   if (decision.hair) {
@@ -1007,13 +1009,16 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
 
   // maschera BLOCCO: pixel fermi (pezzo del braccio + oggetto rimasto nel corpo) e sfumatura attorno
   let lockAt = null;
-  if (rules.lockObject && decision.arms.length) {
+  // braccio ALZATO e libero (Jessica col bocchino) non si blocca: si anima per conto suo
+  const lockedArms = decision.arms.filter((a) => !free[a]?.free);
+  const lockedPx = (i) => lockedArms.some((a) => lab[i] === L_[`braccio_${a}`] || lab[i] === L_[`oggetto_${a}`]);
+  if (rules.lockObject && lockedArms.length) {
     const seed = new Uint8Array(W * H), q = [];
-    for (let i = 0; i < W * H; i++) if (armMask[i]) { seed[i] = 1; q.push(i); }
+    for (let i = 0; i < W * H; i++) if (armMask[i] && lockedPx(i)) { seed[i] = 1; q.push(i); }
     // parti dell'oggetto rimaste nel corpo: stessi colori dell'oggetto, collegate al pezzo
     const key = (i) => ((rgba[i * 4] >> 5) << 6) | ((rgba[i * 4 + 1] >> 5) << 3) | (rgba[i * 4 + 2] >> 5);
     const hist = new Uint32Array(512); let no = 0;
-    for (let i = 0; i < W * H; i++) if (armMask[i] && decision.arms.some((s) => lab[i] === L_[`oggetto_${s}`])) { hist[key(i)]++; no++; }
+    for (let i = 0; i < W * H; i++) if (armMask[i] && lockedArms.some((s) => lab[i] === L_[`oggetto_${s}`])) { hist[key(i)]++; no++; }
     const okBin = new Uint8Array(512);
     for (let k = 0; k < 512; k++) if (no && hist[k] >= 0.004 * no) okBin[k] = 1;
     // con l'oggetto già completato (R13) al massimo 0,08 spalle dal pezzo (Zeus, 9 ott: i colori del fulmine — oro e bianco — sono anche su tunica e
@@ -1033,7 +1038,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     // tutto ciò che sta DENTRO il contorno convesso dell'oggetto è fermo anche lui (corda dell'arco tesa fra le punte)
     {
       const pts = [];
-      for (let i = 0; i < W * H; i++) if (armMask[i] && decision.arms.some((s) => lab[i] === L_[`oggetto_${s}`])) pts.push([i % W, (i / W) | 0]);
+      for (let i = 0; i < W * H; i++) if (armMask[i] && lockedArms.some((s) => lab[i] === L_[`oggetto_${s}`])) pts.push([i % W, (i / W) | 0]);
       if (pts.length > 2) {
         pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
         const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -1231,7 +1236,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const s of decision.arms) {
     const own = (k) => k === L_[`braccio_${s}`] || k === L_[`oggetto_${s}`];
     const fallback = nearIn(armMask);
-    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt ? () => 1 : null);
+    pieceOf(armMask, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt && lockedArms.includes(s) ? () => 1 : null);
   }
   if (decision.hair) pieceOf(hair, "capelli_dietro", () => "capelli", 8);
 
@@ -1481,7 +1486,7 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
     viso: { translate: xy((t) => -A.visoSlide * height * bump(0.1)(t), zero) }
   };
   for (const [s, ph] of [["sx", 0], ["dx", 0.3]]) {
-    if (rules.lockObject && decision.arms.includes(s)) continue; // braccio con oggetto FERMO: niente rotazioni
+    if (rules.lockObject && decision.arms.includes(s) && !decision.freeArms?.includes(s)) continue; // braccio con oggetto FERMO: niente rotazioni (non quello alzato)
     bones[`omero_${s}`] = { rotate: rot(A.omero, wave(1, ph)) };
     bones[`avambraccio_${s}`] = { rotate: rot(A.avambraccio, wave(1, ph + 0.12)) };
     bones[`mano_${s}`] = { rotate: rot(A.mano, wave(2, ph + 0.2)) };

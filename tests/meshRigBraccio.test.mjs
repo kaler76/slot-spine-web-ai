@@ -80,3 +80,11 @@ test("J4 fumo STACCATO dalla punta della sigaretta (bordo sfumato tolto dal fond
   assert.ok(sx0 >= 0 && sy0 >= 0);
   assert.ok(inArm > 300 && inBody < 20, `fumo nel braccio ${inArm}, nel corpo ${inBody}`);
 });
+
+test("J5 braccio alzato tagliato anche con \"Taglia braccio con oggetto\" spento, e si anima anche con \"Oggetto fermo\"", () => {
+  const r = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints }, { ...MESH_RIG_RULES, cuts: { ...MESH_RIG_RULES.cuts, arm: false }, lockObject: true });
+  assert.ok(r.report.decision.some((d) => d.startsWith("braccio_dx: TAGLIO, braccio alzato")), r.report.decision.join(" | "));
+  assert.ok(r.json.slots.some((s) => s.name === "braccio_dx"));
+  const tr = r.json.animations.ambient.bones.omero_dx?.rotate || [];
+  assert.ok(tr.length > 1 && Math.max(...tr.map((k) => Math.abs(k.value))) > 1, "omero animato");
+});

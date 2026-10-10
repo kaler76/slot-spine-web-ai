@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.10 | 10 ott | Casella "Taglia braccio alzato" indipendente; il braccio alzato si anima anche con "Oggetto fermo" | Jessica: "il braccio non è tagliato??" (casella del braccio con oggetto spenta) | J5 |
 | zeus-mesh-13.9 | 10 ott | Inquadratura "Viso": da sopra la testa all'attacco del petto, larga come capelli e spalle, con le braccia tagliate che salgono fin lì | Jessica: "questo è il viso corretto" | build |
 | zeus-mesh-13.8 | 10 ott | Fumo vicino all'oggetto col braccio; inquadratura Busto che comprende il braccio alzato | Jessica: bocchino e fumo tagliati fuori nell'anteprima | J4 |
 | zeus-mesh-13.7 | 10 ott | **Braccio alzato** tagliato dalla spalla e animato da solo (anche senza oggetto), senza capelli, con fumo e contorno; dietro i capelli continuano | Jessica: "se c'è un braccio così dovrebbe essere tagliato BENE e animato indipendente" | J1–J3 |
