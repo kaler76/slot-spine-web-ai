@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.7";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.8";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -880,23 +880,29 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // isole del corpo staccate dal resto che toccano il braccio tagliato (pezzi d'oggetto non
   // riconosciuti, es. il cerchio vicino alla mano): vanno nel pezzo, non restano sospese nel corpo
   if (decision.arms.length) {
+    // distanza dal pezzo (braccio + oggetto) fino a 0,45 spalle: il fumo staccato dalla punta della sigaretta (Jessica,
+    // 10 ott: fumo rimasto fermo mentre il bocchino si sposta) è lontano dalla mano ma vicino all'oggetto
+    const reach = Math.ceil(0.45 * shoulderW), dArm = new Int32Array(W * H).fill(-1), dq2 = [];
+    for (let i = 0; i < W * H; i++) if (armMask[i]) { dArm[i] = 0; dq2.push(i); }
+    for (let k = 0; k < dq2.length; k++) { const i = dq2[k]; if (dArm[i] >= reach) continue; const x = i % W, y = (i / W) | 0; for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (dArm[j] < 0) { dArm[j] = dArm[i] + 1; dq2.push(j); } } }
     const comp = new Int32Array(W * H).fill(-1), sizes = [];
     for (let s0 = 0; s0 < W * H; s0++) {
       if (!fg[s0] || armMask[s0] || comp[s0] >= 0) continue;
-      const id = sizes.length, st = [s0]; comp[s0] = id; let n = 0, touch = false, near = null, nd = Infinity;
+      const id = sizes.length, st = [s0]; comp[s0] = id; let n = 0, touch = false, near = null, nd = Infinity, nearPiece = Infinity;
       while (st.length) {
         const i = st.pop(); n++; const x = i % W, y = (i / W) | 0;
         // isole vicine a una mano tagliata (fumo della sigaretta di Jessica, staccato dal bocchino): con quella mano
         for (const a of decision.arms) { const hp = by[`mano_${a}`].tail, d = Math.hypot(x - hp.x, y - hp.y); if (d < nd) { nd = d; near = a; } }
+        if (dArm[i] >= 0 && dArm[i] < nearPiece) nearPiece = dArm[i];
         for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (armMask[j]) touch = true; else if (fg[j] && comp[j] < 0) { comp[j] = id; st.push(j); } }
       }
-      sizes.push({ n, touch, near, nd });
+      sizes.push({ n, touch, near, nd, nearPiece });
     }
     const main = sizes.reduce((b, c, k) => (c.n > sizes[b].n ? k : b), 0);
     for (let i = 0; i < W * H; i++) {
       const c = comp[i]; if (c < 0 || c === main || sizes[c].n >= 0.02 * fgN) continue;
       const z = sizes[c];
-      if (!(z.touch || z.nd < 0.9 * shoulderW)) continue;
+      if (!(z.touch || z.nd < 0.9 * shoulderW || z.nearPiece <= reach)) continue;
       armMask[i] = 1; const s = z.touch ? decision.arms[0] : z.near; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`];
     }
     // contorno scuro del braccio (riga nera del disegno, 3 px): va col pezzo, altrimenti resta nel corpo e quando il
@@ -1202,6 +1208,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   attachments.corpo = gridMesh("corpo", x0, y0, cw, ch, rules.cells, (px, py, step) => bodyMap(majority(() => true, nearLabel)(px, py, step)), lockAt);
 
   // pezzi tagliati
+  const pieceBoxes = {};
   const pieceOf = (mask, name, map, cells, lockF = null) => {
     let a = W, b = H, c = -1, d = -1;
     for (let i = 0; i < W * H; i++) if (mask[i]) { const x = i % W, y = (i / W) | 0; a = Math.min(a, x); c = Math.max(c, x); b = Math.min(b, y); d = Math.max(d, y); }
@@ -1210,6 +1217,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) { const g = (y + b) * W + x + a; if (mask[g]) px.set(rgba.subarray(g * 4, g * 4 + 4), (y * bw + x) * 4); }
     images[name] = { width: bw, height: bh, rgba: px };
     attachments[name] = gridMesh(name, a, b, bw, bh, cells, map, lockF);
+    { const p0 = toS({ x: a, y: b + bh }); pieceBoxes[name] = { x: +p0.x.toFixed(1), y: +p0.y.toFixed(1), width: bw, height: bh }; } // riquadro nello skeleton (per l'inquadratura)
   };
   // vertici del pezzo fuori dalla sua sagoma: etichetta del pixel DEL PEZZO più vicino (prima il
   // ripiego era "braccio": la punta del fulmine si stirava tra mano e omero)
@@ -1422,7 +1430,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   return {
     json,
     images,
-    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length }
+    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes }
   };
 }
 

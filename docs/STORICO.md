@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.8 | 10 ott | Fumo vicino all'oggetto col braccio; inquadratura Busto che comprende il braccio alzato | Jessica: bocchino e fumo tagliati fuori nell'anteprima | J4 |
 | zeus-mesh-13.7 | 10 ott | **Braccio alzato** tagliato dalla spalla e animato da solo (anche senza oggetto), senza capelli, con fumo e contorno; dietro i capelli continuano | Jessica: "se c'è un braccio così dovrebbe essere tagliato BENE e animato indipendente" | J1–J3 |
 | zeus-mesh-13.6 | 10 ott | **Orecchini pendenti**: trovati sotto le orecchie, pezzo sull'osso orecchino che oscilla | Rita: "questi orecchini non si possono far muovere?" | R1–R3 |
 | zeus-mesh-13.5 | 10 ott | Mano stimata (fuori dall'immagine / nascosta) = niente oggetto in mano | Rita: pezzo di pelliccia preso per oggetto, strappo nero | B6 |

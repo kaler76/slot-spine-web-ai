@@ -60,3 +60,23 @@ test("J3 nel movimento niente buchi chiusi nel personaggio (dietro il braccio i 
     assert.ok(holes < 60, `t=${t}: ${holes} pixel di buchi chiusi`);
   }
 });
+
+test("J4 fumo STACCATO dalla punta della sigaretta (bordo sfumato tolto dal fondo): va comunque col braccio", () => {
+  const fg2 = fg.slice();
+  for (let y = 126; y <= 142; y++) for (let x = 120; x < 210; x++) fg2[y * W + x] = 0; // stacco di 17 px fra fumo e punta
+  const r = buildMeshRig({ width: W, height: H, rgba, fg: fg2, parts: rec.parts, categories, landmarks, joints: rec.joints });
+  const sx0 = Math.max(0, x0), sy0 = Math.max(0, y0);
+  let bx = W, by2 = H; for (let i = 0; i < W * H; i++) if (fg2[i]) { bx = Math.min(bx, i % W); by2 = Math.min(by2, (i / W) | 0); }
+  const ox = Math.max(0, bx - MESH_RIG_RULES.pad), oy = Math.max(0, by2 - MESH_RIG_RULES.pad);
+  const only = (names) => renderFrame({ ...r.json, slots: r.json.slots.filter((s) => names.includes(s.name)), animations: { f: { bones: {} } } }, r.images, "f", 0, { scale: 1, bg: [255, 0, 255, 255] });
+  const arm = only(["braccio_dx"]), body = only(["corpo"]);
+  let inArm = 0, inBody = 0;
+  for (let y = 30; y < 110; y++) for (let x = 140; x < 200; x++) {
+    const fx = x - ox, fy = y - oy; if (fx < 0 || fy < 0 || fx >= arm.width || fy >= arm.height) continue;
+    const i = (fy * arm.width + fx) * 4;
+    if (!(arm.data[i] === 255 && arm.data[i + 1] === 0 && arm.data[i + 2] === 255)) inArm++;
+    if (!(body.data[i] === 255 && body.data[i + 1] === 0 && body.data[i + 2] === 255)) inBody++;
+  }
+  assert.ok(sx0 >= 0 && sy0 >= 0);
+  assert.ok(inArm > 300 && inBody < 20, `fumo nel braccio ${inArm}, nel corpo ${inBody}`);
+});

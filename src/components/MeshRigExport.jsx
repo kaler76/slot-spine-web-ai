@@ -344,9 +344,16 @@ function FrameTool({ pkg, frame, onChange, clipPkg, onClipPkg }) {
     const w = poseAt(pkg.json, 0, "ambient"), v = w.viso, n = w.collo, a = w.anca;
     const sw = Math.hypot(w.omero_sx.tx - w.omero_dx.tx, w.omero_sx.ty - w.omero_dx.ty);
     if (kind === "viso") { const r = 0.75 * sw; return onChange({ x: v.tx - r, y: v.ty - r * 0.9, width: 2 * r, height: 2 * r }); }
-    // busto: dalla vita a sopra la testa, larghezza 2,2 spalle
-    const top = v.ty + 0.9 * sw, bot = a.ty + 0.1 * sw, cx = n.tx;
-    return onChange({ x: cx - 1.1 * sw, y: bot, width: 2.2 * sw, height: top - bot });
+    // busto: dalla vita a sopra la testa, larghezza 2,2 spalle; si allarga per comprendere le braccia TAGLIATE sopra
+    // la vita (braccio alzato col bocchino e il fumo di Jessica: tagliati fuori dal riquadro) + 8% per il movimento
+    let x0 = n.tx - 1.1 * sw, x1 = n.tx + 1.1 * sw, top = v.ty + 0.9 * sw;
+    const bot = a.ty + 0.1 * sw;
+    for (const [name, b] of Object.entries(pkg.report?.pieceBoxes || {})) {
+      if (!name.startsWith("braccio_") || b.y + b.height < bot) continue;
+      const m = 0.08 * Math.max(b.width, b.height);
+      x0 = Math.min(x0, b.x - m); x1 = Math.max(x1, b.x + b.width + m); top = Math.max(top, b.y + b.height + m);
+    }
+    return onChange({ x: x0, y: bot, width: x1 - x0, height: top - bot });
   };
   const pos = (e) => { const r = e.currentTarget.getBoundingClientRect(); return { x: Math.max(0, Math.min(TW, e.clientX - r.left)), y: Math.max(0, Math.min(TH, e.clientY - r.top)) }; };
   const onDown = (e) => { const p = pos(e); setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y }); };
