@@ -902,7 +902,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     for (let i = 0; i < W * H; i++) {
       const c = comp[i]; if (c < 0 || c === main || sizes[c].n >= 0.02 * fgN) continue;
       const z = sizes[c];
-      if (!(z.touch || z.nd < 0.9 * shoulderW || z.nearPiece <= reach)) continue;
+      // (briciole di pochi pixel no: attaccate al pezzo allargavano la maschera "oggetto fermo" di Zeus)
+      if (!(z.touch || z.nd < 0.9 * shoulderW || (z.nearPiece <= reach && z.n >= 30))) continue;
       armMask[i] = 1; const s = z.touch ? decision.arms[0] : z.near; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`];
     }
     // contorno scuro del braccio (riga nera del disegno, 3 px): va col pezzo, altrimenti resta nel corpo e quando il
