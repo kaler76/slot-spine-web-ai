@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.5";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.6";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -32,7 +32,7 @@ export const MESH_RIG_RULES = {
   fillBand: 0.14, // zona dietro il braccio tagliato riempita nel corpo (× larghezza spalle dal busto)
   objectMin: 0.002, // quota del personaggio oltre cui un oggetto in mano fa tagliare il braccio
   hairMin: 0.004, // quota minima dei capelli dietro per farne un pezzo
-  cuts: { arm: true, hair: true, eyes: true },
+  cuts: { arm: true, hair: true, eyes: true, earrings: true },
   // braccio tagliato: dalla SPALLA se il braccio è staccato dal busto (Zeus, braccio alzato); dal
   // GOMITO se l'omero scende lungo il fianco (Domatrice): l'omero resta nella mesh del corpo, così
   // il pezzo non si porta via risvolto e bottoni della giacca. "auto" sceglie con armDownMaxDeg.
@@ -55,7 +55,7 @@ export const MESH_RIG_RULES = {
   smile: "no",
   smileUp: 0.16,
   smileOut: 0.06,
-  amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12 },
+  amp: { schiena: 1.2, petto: 2.4, testa: 2.0, omero: 3.0, avambraccio: 2.4, mano: 3.0, visoSlide: 0.004, breath: 0.01, capelli: 3.0, pupille: 0.12, orecchini: 7 },
   blinkAt: 2.0,
   lid: "pelle" // "pelle" = pelle stirata come la Domatrice; "disegnata" = palpebra chiusa disegnata (zeus-mesh-4)
 };
@@ -199,6 +199,121 @@ export function findEye(center, ipd, W, H, rgba, fg) {
   }
   const ha = a.box.y1 - a.box.y0 + 1, hb = b.box.y1 - b.box.y0 + 1;
   return nb > n && inB >= 0.8 * n && hb <= 1.5 * ha ? b : a;
+}
+
+/**
+ * ORECCHINI PENDENTI (zeus-mesh-13.6, Rita 10 ott: "questi orecchini non si possono far muovere?"). Per ogni lato,
+ * sotto l'occhio e verso l'esterno (fino alle spalle), si cercano gruppi di pixel SATURI che non sono pelle (oro,
+ * pietre colorate) o della categoria "accessori": il gruppo più grande più alto che largo è l'orecchino. Il contorno
+ * scuro attaccato (2 px) va con lui. Le labbra (larghe) e il vestito (sotto le spalle) restano fuori.
+ * @returns {Array<{side, idx:number[], top:{x,y}, bot:{x,y}}>}
+ */
+export function findEarrings({ eyesC, W, H, rgba, fg, categories, skin, shoulderY }) {
+  const out = [];
+  let catInfo = false; if (categories) for (let i = 0; i < W * H; i += 7) if (categories[i] === SEG.hair) { catInfo = true; break; }
+  // senza categorie che distinguono i capelli (solo primo piano) niente orecchini: le ciocche ramate sembrano oro
+  if (!catInfo) return out;
+  const [es, ed] = eyesC; // lato sx e dx del personaggio
+  const ipd = Math.hypot(es.x - ed.x, es.y - ed.y) || 1, ux = (es.x - ed.x) / ipd, uy = (es.y - ed.y) / ipd;
+  for (const [side, e, sg] of [["sx", es, 1], ["dx", ed, -1]]) {
+    // riquadro: da 0,4 ipd verso il centro a 1,6 ipd verso l'esterno; da 0,5 a 2,6 ipd sotto l'occhio
+    const xs = [e.x - sg * ux * 0.4 * ipd, e.x + sg * ux * 1.6 * ipd];
+    const x0 = Math.max(0, Math.round(Math.min(...xs))), x1 = Math.min(W - 1, Math.round(Math.max(...xs)));
+    const y0 = Math.max(0, Math.round(e.y + 0.5 * ipd)), y1 = Math.min(H - 1, Math.round(Math.min(e.y + 2.6 * ipd, shoulderY - 0.05 * ipd)));
+    if (x1 <= x0 || y1 <= y0) continue;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, m = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const g = (y + y0) * W + x + x0, i = g * 4; if (!fg[g]) continue;
+      const r = rgba[i], gg = rgba[i + 1], b = rgba[i + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), d = mx - mn;
+      // tinta: pelle, labbra e capelli castani stanno fra il rosso e l'arancio (−15°…32°); oro (35–60°), verde, azzurro
+      // e viola delle pietre fuori. Saturi e non troppo scuri. Oppure categoria "accessori" del segmentatore.
+      let hue = 0; if (d) { hue = mx === r ? ((gg - b) / d) % 6 : mx === gg ? (b - r) / d + 2 : (r - gg) / d + 4; hue = (hue * 60 + 360) % 360; }
+      // oro ramato (Rita: tinta 22–31° come la pelle, ma saturazione ≥ 0,8 e chiaro; pelle ≤ 0,6, capelli più scuri)
+      const sat = d / (mx || 1), metal = (sat > 0.35 && mx > 70 && hue > 33 && hue < 345) || (sat >= 0.8 && mx >= 100 && hue >= 12 && hue <= 60);
+      // con le categorie del segmentatore (se distinguono i capelli): mai capelli né pelle (ciocche ramate di Domatrice e
+      // Robin, capelli grigio-azzurri dell'avvocato erano presi per orecchini)
+      const cat = catInfo ? categories[g] : -1;
+      if (cat === SEG.hair || cat === SEG.faceSkin || cat === SEG.bodySkin) continue;
+      if (metal || cat === SEG.others) m[y * w + x] = 1;
+    }
+    const seen = new Uint8Array(w * h), comps = [];
+    let best = null;
+    for (let s0 = 0; s0 < w * h; s0++) {
+      if (!m[s0] || seen[s0]) continue;
+      const st = [s0], px = []; seen[s0] = 1; let ax = w, bx = -1, ay = h, by = -1;
+      while (st.length) { const i = st.pop(); px.push(i); const x = i % w, y = (i / w) | 0; ax = Math.min(ax, x); bx = Math.max(bx, x); ay = Math.min(ay, y); by = Math.max(by, y); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (m[j] && !seen[j]) { seen[j] = 1; st.push(j); } } }
+      const bw = bx - ax + 1, bh = by - ay + 1;
+      comps.push({ px, ax, bx, ay, by });
+      // firma del gioiello: pezzo pieno (pietra, montatura: riempie il riquadro) e quasi tutto colore vivo; le ciocche
+      // di capelli sono sottili e curve (riempimento basso), i capelli grigi poco saturi
+      let vivid = 0;
+      for (const i of px) { const g = ((i / w) | 0) * W + (i % w) + x0 + y0 * W, c = g * 4, mx2 = Math.max(rgba[c], rgba[c + 1], rgba[c + 2]), mn2 = Math.min(rgba[c], rgba[c + 1], rgba[c + 2]); if (mx2 >= 90 && (mx2 - mn2) / mx2 >= 0.6) vivid++; }
+      // riempimento contando i buchi interni (sfaccettature scure della pietra)
+      let enclosed = 0;
+      {
+        const bw2 = bw + 2, bh2 = bh + 2, mm = new Uint8Array(bw2 * bh2), oo = new Uint8Array(bw2 * bh2), q2 = [0];
+        for (const i of px) mm[((((i / w) | 0) - ay) + 1) * bw2 + (i % w) - ax + 1] = 1;
+        oo[0] = 1;
+        for (let k = 0; k < q2.length; k++) { const i = q2[k], x = i % bw2, y = (i / bw2) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= bw2 || Y >= bh2) continue; const j = Y * bw2 + X; if (!oo[j] && !mm[j]) { oo[j] = 1; q2.push(j); } } }
+        for (let i = 0; i < bw2 * bh2; i++) if (!oo[i] && !mm[i]) enclosed++;
+      }
+      const fill = (px.length + enclosed) / (bw * bh);
+      if (fill < 0.38 || vivid < 0.5 * px.length) continue;
+      if (px.length < 0.04 * ipd * ipd || px.length > 0.8 * ipd * ipd || bh < 1.2 * bw || ax === 0 || bx === w - 1) continue;
+      if (!best || px.length > best.px.length) best = { px, ax, bx, ay, by };
+    }
+    if (!best) continue;
+    const inE = new Uint8Array(w * h); for (const i of best.px) inE[i] = 1;
+    // pezzi SOPRA il pendente (perla, gancio, montatura: Rita) nella stessa colonna, fino a 0,45 ipd: stesso orecchino
+    let top = best.ay;
+    for (const c of comps.sort((p, q) => q.by - p.by)) {
+      if (c === best || c.px.length < 10 || c.by >= top || c.by < top - 0.45 * ipd) continue;
+      if (c.bx < best.ax - 0.1 * ipd || c.ax > best.bx + 0.1 * ipd) continue;
+      for (const i of c.px) inE[i] = 1; top = Math.min(top, c.ay);
+    }
+    // colore dei capelli lì attorno (mediana dei pixel "capelli" del riquadro)
+    const hairRef = (() => { const v = [[], [], []]; for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) { const g = (y + y0) * W + x + x0; if (categories[g] !== SEG.hair) continue; for (let k = 0; k < 3; k++) v[k].push(rgba[g * 4 + k]); } return v.map((a) => (a.length ? a.sort((p, q) => p - q)[a.length >> 1] : 40)); })();
+    // contorno scuro attaccato (4 px) e anello/gancio sopra (pixel non pelle a contatto)
+    for (let k = 0; k < 4; k++) {
+      const add = [];
+      for (let i = 0; i < w * h; i++) {
+        if (inE[i]) continue; const x = i % w, y = (i / w) | 0;
+        let near = false; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X >= 0 && Y >= 0 && X < w && Y < h && inE[Y * w + X]) { near = true; break; } }
+        if (!near) continue;
+        const g = (y + y0) * W + x + x0, c = g * 4; if (!fg[g]) continue;
+        const l = luma(rgba[c], rgba[c + 1], rgba[c + 2]), dSkin = Math.abs(rgba[c] - skin[0]) + Math.abs(rgba[c + 1] - skin[1]) + Math.abs(rgba[c + 2] - skin[2]);
+        const mx3 = Math.max(rgba[c], rgba[c + 1], rgba[c + 2]), sat3 = mx3 ? (mx3 - Math.min(rgba[c], rgba[c + 1], rgba[c + 2])) / mx3 : 0;
+        if (catInfo && categories[g] === SEG.faceSkin) continue;
+        // bordi sfumati della montatura: tutto ciò che non somiglia ai capelli lì attorno (né alla pelle)
+        const dHair = Math.abs(rgba[c] - hairRef[0]) + Math.abs(rgba[c + 1] - hairRef[1]) + Math.abs(rgba[c + 2] - hairRef[2]);
+        if (l < 60 || (dHair > 60 && dSkin > 60) || (sat3 >= 0.6 && dSkin > 60)) add.push(i);
+      }
+      for (const i of add) inE[i] = 1;
+    }
+    // buchi interni (sfaccettature scure della pietra): dentro l'orecchino
+    {
+      const outE = new Uint8Array(w * h), q = [];
+      for (let i = 0; i < w * h; i++) { const x = i % w, y = (i / w) | 0; if ((x === 0 || y === 0 || x === w - 1 || y === h - 1) && !inE[i]) { outE[i] = 1; q.push(i); } }
+      for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!outE[j] && !inE[j]) { outE[j] = 1; q.push(j); } } }
+      // solo buchi piccoli (sfaccettature), non un'ansa di pelle o di capelli chiusa dal pezzo
+      let nE = 0; for (let i = 0; i < w * h; i++) nE += inE[i];
+      const seenH = new Uint8Array(w * h);
+      for (let s1 = 0; s1 < w * h; s1++) {
+        if (outE[s1] || inE[s1] || seenH[s1]) continue;
+        const st = [s1], px2 = []; seenH[s1] = 1;
+        while (st.length) { const i = st.pop(); px2.push(i); const x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!outE[j] && !inE[j] && !seenH[j]) { seenH[j] = 1; st.push(j); } } }
+        if (px2.length < 0.3 * nE) for (const i of px2) if (fg[((i / w) | 0) * W + (i % w) + x0 + y0 * W]) inE[i] = 1;
+      }
+    }
+    const idx = []; let tx = 0, tn = 0, bxs = 0, bn = 0, ty = h, byy = -1;
+    for (let i = 0; i < w * h; i++) if (inE[i]) { const y = (i / w) | 0; ty = Math.min(ty, y); byy = Math.max(byy, y); }
+    for (let i = 0; i < w * h; i++) if (inE[i]) {
+      const x = i % w, y = (i / w) | 0; idx.push((y + y0) * W + x + x0);
+      if (y <= ty + 2) { tx += x; tn++; } if (y >= byy - 2) { bxs += x; bn++; }
+    }
+    out.push({ side, idx, top: { x: tx / tn + x0, y: ty + y0 }, bot: { x: bxs / bn + x0, y: byy + y0 + 1 } });
+  }
+  return out;
 }
 
 /**
@@ -624,6 +739,16 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     bones.push({ name: `palpebra_${e.side}`, parent: `occhio_${e.side}`, head: { x: cx, y: lidY }, tail: { x: cx + 10, y: lidY } });
   }
 
+  // orecchini pendenti: pezzo sull'osso orecchino (figlio della testa), perno sul gancio in alto
+  const earrings = rules.cuts.earrings ? findEarrings({
+    eyesC: decision.eyes && eyes.length === 2 ? ["sx", "dx"].map((sd) => { const b = eyes.find((e) => e.side === sd).box; return { x: (b.x0 + b.x1 + 1) / 2, y: (b.y0 + b.y1 + 1) / 2 }; }) : [landmarks[2], landmarks[5]],
+    W, H, rgba, fg, categories, skin: eyes[0]?.skin || [200, 150, 120], shoulderY: Math.min(by.omero_sx.head.y, by.omero_dx.head.y)
+  }) : [];
+  for (const er of earrings) {
+    bones.push({ name: `orecchino_${er.side}`, parent: "testa", head: er.top, tail: er.bot });
+    decision.reasons.push(`orecchino_${er.side}: PENDENTE, pezzo che oscilla (${er.idx.length} px)`);
+  }
+  if (rules.cuts.earrings && !earrings.length) decision.reasons.push("orecchini: nessuno pendente");
   // bocca: ossa agli angoli (figlie di "viso"), solo se richiesto il sorriso
   // con la bocca ridisegnata da Gemini (smilePatch, R10) niente deformazione: il pezzo compare in dissolvenza
   const mouth = rules.smile && rules.smile !== "no" && !smilePatch ? findMouth(landmarks, ipd, W, H, rgba, fg) : null;
@@ -731,6 +856,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const main = sizes.reduce((b, c, k) => (c.n > sizes[b].n ? k : b), 0);
     for (let i = 0; i < W * H; i++) { const c = comp[i]; if (c >= 0 && c !== main && sizes[c].touch && sizes[c].n < 0.02 * fgN) { armMask[i] = 1; const s = decision.arms[0]; if (lab[i] !== L_[`braccio_${s}`]) lab[i] = L_[`oggetto_${s}`]; } }
   }
+  const earMask = new Uint8Array(W * H);
+  for (const er of earrings) for (const i of er.idx) earMask[i] = 1;
   const holeMask = new Uint8Array(W * H);
   for (const e of decision.eyes ? eyes : []) for (let i = 0; i < e.w * e.h; i++) if (e.hole[i]) holeMask[(Math.floor(i / e.w) + e.y0) * W + (i % e.w) + e.x0] = 1;
   // corpo: originale meno braccio tagliato, capelli dietro e buchi degli occhi; dietro il braccio,
@@ -738,7 +865,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const body = new Uint8ClampedArray(W * H * 4);
   const known = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) {
-    if (!fg[i] || armMask[i] || hair[i] || holeMask[i]) continue;
+    if (!fg[i] || armMask[i] || hair[i] || holeMask[i] || earMask[i]) continue;
     body.set(rgba.subarray(i * 4, i * 4 + 4), i * 4); known[i] = 1;
   }
   const fillR = rules.fillBand * shoulderW;
@@ -762,6 +889,29 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       if (!((side(1, 0) && side(-1, 0)) || (side(0, 1) && side(0, -1)))) continue;
     }
     holes.push(i);
+  }
+  // dietro l'orecchino: riga per riga, sfumatura fra il pixel del corpo a sinistra e quello a destra (capelli, collo:
+  // l'orecchino pende in verticale). Il riempimento "dai vicini" portava la pelle del mento sopra i capelli (macchia
+  // arancio che si vedeva quando l'orecchino oscilla). Contro lo sfondo da un lato: resta vuoto.
+  for (const er of earrings) {
+    const rows = new Map();
+    for (const i of er.idx) { const y = (i / W) | 0, x = i % W; const r = rows.get(y) || [x, x]; r[0] = Math.min(r[0], x); r[1] = Math.max(r[1], x); rows.set(y, r); }
+    const R = Math.ceil(0.2 * shoulderW);
+    for (const [y, [xa, xb]] of rows) {
+      let L = -1, Rr = -1;
+      for (let x = xa - 1; x >= Math.max(0, xa - R); x--) { const j = y * W + x; if (known[j]) { L = x; break; } if (!fg[j]) break; }
+      for (let x = xb + 1; x <= Math.min(W - 1, xb + R); x++) { const j = y * W + x; if (known[j]) { Rr = x; break; } if (!fg[j]) break; }
+      if (L < 0 || Rr < 0) continue;
+      let cl = rgba.subarray((y * W + L) * 4, (y * W + L) * 4 + 4), cr = rgba.subarray((y * W + Rr) * 4, (y * W + Rr) * 4 + 4);
+      // capelli da un lato e pelle (collo, mento) dall'altro: dietro l'orecchino ci sono i capelli, non una sfumatura
+      if (categories) { const hl = categories[y * W + L] === SEG.hair, hr = categories[y * W + Rr] === SEG.hair; if (hl && !hr) cr = cl; else if (hr && !hl) cl = cr; }
+      for (let x = L + 1; x < Rr; x++) {
+        const j = y * W + x; if (known[j] || !earMask[j]) continue;
+        const t = (x - L) / (Rr - L);
+        for (let k = 0; k < 3; k++) body[j * 4 + k] = cl[k] * (1 - t) + cr[k] * t;
+        body[j * 4 + 3] = 255;
+      }
+    }
   }
   fillHoles(body, known, W, H, holes);
   const crop = (src, bx0, by0, bw, bh) => { const out = new Uint8ClampedArray(bw * bh * 4); for (let y = 0; y < bh; y++) out.set(src.subarray(((y + by0) * W + bx0) * 4, ((y + by0) * W + bx0 + bw) * 4), y * bw * 4); return out; };
@@ -1001,6 +1151,13 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const b = world[boneName], cxy = toS({ x: bx0 + bw / 2, y: by0 + bh / 2 }), dx = cxy.x - b.x, dy = cxy.y - b.y, co = Math.cos(-b.a), si = Math.sin(-b.a);
     attachments[name] = { x: +(dx * co - dy * si).toFixed(2), y: +(dx * si + dy * co).toFixed(2), rotation: +deg(-b.a).toFixed(2), width: bw, height: bh };
   };
+  for (const er of earrings) {
+    let a = W, b = H, c = -1, d = -1;
+    for (const i of er.idx) { const x = i % W, y = (i / W) | 0; a = Math.min(a, x); c = Math.max(c, x); b = Math.min(b, y); d = Math.max(d, y); }
+    const bw = c - a + 1, bh = d - b + 1, px = new Uint8ClampedArray(bw * bh * 4);
+    for (const i of er.idx) { const x = (i % W) - a, y = ((i / W) | 0) - b; px.set(rgba.subarray(i * 4, i * 4 + 4), (y * bw + x) * 4); }
+    region(`orecchino_${er.side}`, `orecchino_${er.side}`, a, b, bw, bh, px);
+  }
   // PALPEBRA CHIUSA: forma del buco allargata di 2 px, colore della pelle sopra l'occhio (righe
   // senza ciglia), leggera ombra verso il basso, ciglia (colore più scuro sopra l'occhio) sul bordo basso.
   // PALPEBRA "PELLE" come la Domatrice (analisi 8 ott): un anello di vertici sul contorno dell'occhio
@@ -1170,6 +1327,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     slots.push({ ...slotFor("bocca_sorriso", "viso"), color: "ffffff00" });
   }
   for (const e of decision.eyes ? eyes : []) slots.push(rules.lid === "pelle" ? slotFor(`palpebra_${e.side}`, `occhio_${e.side}`) : { ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
+  for (const er of earrings) slots.push(slotFor(`orecchino_${er.side}`, `orecchino_${er.side}`));
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
 
@@ -1178,7 +1336,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     bones: jsonBones,
     slots,
     skins: [{ name: "default", attachments: skinAtt }],
-    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }, !!smilePatch) }
+    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }, !!smilePatch, earrings) }
   };
   return {
     json,
@@ -1219,7 +1377,7 @@ export function smoothKeys(T, fns, fields) {
 }
 
 /** Loop di 6 s sul modello della Domatrice. */
-function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn = false) {
+function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn = false, earrings = []) {
   const T = rules.loopSeconds, A = rules.amp;
   const wave = (k, ph = 0) => (t) => Math.sin(2 * Math.PI * (k * t / T + ph));
   const bump = (ph = 0) => (t) => 0.5 * (1 - Math.cos(2 * Math.PI * (t / T + ph)));
@@ -1238,6 +1396,8 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
     bones[`avambraccio_${s}`] = { rotate: rot(A.avambraccio, wave(1, ph + 0.12)) };
     bones[`mano_${s}`] = { rotate: rot(A.mano, wave(2, ph + 0.2)) };
   }
+  // orecchini: pendolo in ritardo sulla testa (follow-through), i due lati sfasati
+  for (const er of earrings) bones[`orecchino_${er.side}`] = { rotate: rot(A.orecchini ?? 7, wave(1, er.side === "sx" ? 0.3 : 0.38)) };
   if (decision.hair) {
     bones.capelli_1 = { rotate: rot(A.capelli, wave(1, 0.35)) };
     bones.capelli_2 = { rotate: rot(A.capelli * 1.3, wave(1, 0.45)) };

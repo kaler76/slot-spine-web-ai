@@ -216,7 +216,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         da una bocca all'ingiù). Esporta Spine 4.1.
       </div>
       <div className="row" style={{ gap: 16, alignItems: "center", flexWrap: "wrap", margin: "8px 0" }}>
-        {[["arm", "Taglia braccio con oggetto"], ["hair", "Taglia capelli lunghi"], ["eyes", "Occhi animati"]].map(([k, label]) => (
+        {[["arm", "Taglia braccio con oggetto"], ["hair", "Taglia capelli lunghi"], ["eyes", "Occhi animati"], ["earrings", "Orecchini pendenti"]].map(([k, label]) => (
           <label key={k} className="field-label-inline">
             <input type="checkbox" checked={cuts[k]} disabled={busy} onChange={(e) => setCuts({ ...cuts, [k]: e.target.checked })} /> {label}
           </label>

@@ -8,6 +8,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 
 | Tag | Data | Cosa | Perché / difetto risolto | Test |
 |---|---|---|---|---|
+| zeus-mesh-13.6 | 10 ott | **Orecchini pendenti**: trovati sotto le orecchie, pezzo sull'osso orecchino che oscilla | Rita: "questi orecchini non si possono far muovere?" | R1–R3 |
 | zeus-mesh-13.5 | 10 ott | Mano stimata (fuori dall'immagine / nascosta) = niente oggetto in mano | Rita: pezzo di pelliccia preso per oggetto, strappo nero | B6 |
 | zeus-mesh-13.4 | 10 ott | Iride a cerchio: buco limitato all'apertura dell'occhio, sguardo fermo | Rita: "gli occhi si chiudono male", "righe negli occhi" | O1 rita |
 | zeus-mesh-13.3 | 10 ott | Posa a mezzo busto (anche sotto il bordo, braccia nascoste stimate; pulsante "fuori dall'immagine" nella posa a mano); occhi cercati nel viso e iride di qualsiasi colore | Rita: "non riconosce posa", "non chiude gli occhi" | O1 rita, poseRecovery |

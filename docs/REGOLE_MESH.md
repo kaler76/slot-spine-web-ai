@@ -219,6 +219,20 @@ gli occhi".
   la palpebra stirava la pelle fin sotto l'occhio. Con l'iride a cerchio lo sguardo resta FERMO: spostandola scopriva
   il bianco dove il buco taglia l'iride o la rima (righe bianche).
 
+## R20 — Orecchini pendenti (R1–R3), zeus-mesh-13.6
+Rita (10 ott): "questi orecchini non si possono far muovere?". Casella "Orecchini pendenti" (di serie accesa).
+- **Dove**: per lato, sotto l'occhio (da 0,5 a 2,6 ipd) e verso l'esterno (da 0,4 ipd verso il centro a 1,6 ipd fuori),
+  sopra le spalle.
+- **Cosa**: pixel di gioiello = oro, verde, azzurro, viola saturi (tinta fuori da pelle/labbra/capelli castani, oppure
+  oro ramato con saturazione ≥ 0,8) o categoria "accessori"; MAI categoria capelli o pelle. Si tiene il gruppo più
+  grande più alto che largo (≥ 1,2), pieno (riempimento ≥ 0,38 contando le sfaccettature) e quasi tutto colore vivo;
+  si aggiungono i pezzi sopra nella stessa colonna (perla, montatura, gancio) e 4 px di bordo sfumato.
+- **Solo con categorie che distinguono i capelli**: senza (solo primo piano) niente orecchini — le ciocche ramate di
+  Domatrice e Robin e i capelli grigio-azzurri dell'avvocato erano presi per orecchini (R3).
+- **Rig**: pezzo davanti al corpo sull'osso `orecchino_sx/dx` (figlio della testa), perno sul gancio in alto; pendolo
+  ±7° in ritardo sulla testa, lati sfasati. Dietro, nel corpo: riga per riga il colore dei capelli ai lati (con capelli da
+  un lato e pelle dall'altro vince il lato capelli); contro lo sfondo resta vuoto. A riposo identico (R2).
+
 ## R4 — Pezzo del braccio tagliato (M4)
 Mesh propria (14 celle) sulle ossa del braccio; i vertici fuori sagoma seguono il pixel DEL PEZZO più vicino:
 l'oggetto in mano dipende solo dall'osso della mano ed è rigido.
