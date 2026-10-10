@@ -246,6 +246,11 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   (< 2% del braccio, senza oggetto) tornano al corpo.
 - **Dietro il braccio alzato**: riempimento per righe fra i pixel del corpo ai lati (capelli da preferire); con un lato
   solo che è capelli, i capelli continuano fino a 0,3 spalle. Niente riempimento "dai vicini" (macchia di pelle).
+- 13.11 (Jessica sul sito: il pezzo del braccio si portava via ciocche, spalla e un pezzo di corpetto → rettangoli
+  vuoti nei capelli): il braccio ALZATO non si prende più dalle etichette delle parti ma dalla FORMA e dal COLORE:
+  capsule attorno a omero (dal 10%), avambraccio e mano; dentro, solo i pixel coi colori campionati lungo l'asse del
+  braccio (tavolozza 512 colori, ≥ 1% dei campioni, ± un passo) e il contorno scuro a ridosso (3 px); più l'oggetto;
+  si tiene il pezzo collegato all'asse. Funziona anche senza la categoria "capelli" del segmentatore (J6).
 - 13.10 (Jessica: "il braccio non è tagliato??", con "Taglia braccio con oggetto" spenta): casella a parte
   **"Taglia braccio alzato"** (di serie accesa, `cuts.raisedArm`), indipendente dall'altra; il braccio alzato non si
   blocca con "Oggetto fermo" (si anima per conto suo), il blocco resta per gli altri bracci con oggetto (J5).

@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.10";
+export const MESH_RIG_VERSION = "2026-10-10.zeus-mesh-13.11";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -858,6 +858,54 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     decision.reasons.push(`braccio_${s} tagliato dal${armFrom[s] === "gomito" ? " GOMITO (omero lungo il fianco" : "la SPALLA (braccio staccato dal busto"}, ${down.toFixed(0)}°)`);
     const fore = PART[`avambraccio_${s}`], wr = by[`mano_${s}`].head;
     const dx = wr.x - el.x, dy = wr.y - el.y, len = Math.hypot(dx, dy) || 1, ov = (rules.elbowOverlap ?? 0.08) * shoulderW;
+    // BRACCIO ALZATO: il pezzo non si prende dalle etichette delle parti (sul sito comprendevano ciocche di capelli,
+    // spalla e un pezzo di corpetto di Jessica: buchi nei capelli a riposo) ma dalla FORMA del braccio: capsule attorno
+    // a omero (dal 10%), avambraccio e mano, solo i pixel coi COLORI del braccio (campionati lungo l'asse: guanto, pelle)
+    // o il contorno scuro, più l'oggetto; si tiene il pezzo collegato all'asse
+    if (free[s]?.free) {
+      const hd = by[`mano_${s}`].tail, hc = lerp(wr, hd, 0.5);
+      const caps = [[lerp(sh, el, 0.1), el, 0.2 * shoulderW], [el, wr, 0.18 * shoulderW], [wr, hd, 0.3 * shoulderW]];
+      const segD2 = (x, y, a, b) => { const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy || 1; const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / l2)); return Math.hypot(x - a.x - vx * t, y - a.y - vy * t); };
+      const inCaps = (x, y) => caps.some(([a, b, r]) => segD2(x, y, a, b) <= r);
+      const bin = (i) => ((rgba[i * 4] >> 5) << 6) | ((rgba[i * 4 + 1] >> 5) << 3) | (rgba[i * 4 + 2] >> 5);
+      const hist = new Map(); let ns = 0;
+      const sample = (p, r) => { for (let yy = -r; yy <= r; yy++) for (let xx = -r; xx <= r; xx++) { const X = Math.round(p.x + xx), Y = Math.round(p.y + yy); if (X < 0 || Y < 0 || X >= W || Y >= H) continue; const i = Y * W + X; if (!fg[i]) continue; const k = bin(i); hist.set(k, (hist.get(k) || 0) + 1); ns++; } };
+      const sr = Math.max(2, Math.round(0.05 * shoulderW));
+      for (let t = 0.3; t <= 1.0001; t += 0.1) sample(lerp(sh, el, t), sr);
+      for (let t = 0; t <= 1.0001; t += 0.1) sample(lerp(el, wr, t), sr);
+      sample(hc, sr);
+      const ok = new Uint8Array(512);
+      for (const [k, n] of hist) if (n >= 0.01 * ns) { const r0 = k >> 6, g0 = (k >> 3) & 7, b0 = k & 7; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) { const r1 = r0 + a, g1 = g0 + b, b1 = b0 + c; if (r1 >= 0 && r1 < 8 && g1 >= 0 && g1 < 8 && b1 >= 0 && b1 < 8 && Math.abs(a) + Math.abs(b) + Math.abs(c) <= 1) ok[(r1 << 6) | (g1 << 3) | b1] = 1; } }
+      const cand = new Uint8Array(W * H);
+      const R = Math.ceil(0.35 * shoulderW), bx0 = Math.max(0, Math.floor(Math.min(sh.x, el.x, wr.x, hd.x) - R)), bx1 = Math.min(W - 1, Math.ceil(Math.max(sh.x, el.x, wr.x, hd.x) + R));
+      const by0 = Math.max(0, Math.floor(Math.min(sh.y, el.y, wr.y, hd.y) - R)), by1 = Math.min(H - 1, Math.ceil(Math.max(sh.y, el.y, wr.y, hd.y) + R));
+      for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+        const i = y * W + x; if (!fg[i]) continue;
+        if (lab[i] === L_[`oggetto_${s}`]) { cand[i] = 1; continue; }
+        if (!inCaps(x, y)) continue;
+        if (categories && categories[i] === SEG.hair) continue;
+        if (ok[bin(i)]) cand[i] = 1;
+      }
+      // contorno scuro: solo a ridosso (3 px) dei pixel coi colori del braccio (le ombre dei capelli sono scure anche loro)
+      for (let k = 0; k < 3; k++) {
+        const add = [];
+        for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+          const i = y * W + x; if (cand[i] || !fg[i] || !inCaps(x, y) || luma(rgba[i * 4], rgba[i * 4 + 1], rgba[i * 4 + 2]) >= 60) continue;
+          if ((x > 0 && cand[i - 1]) || (x < W - 1 && cand[i + 1]) || (y > 0 && cand[i - W]) || (y < H - 1 && cand[i + W])) add.push(i);
+        }
+        for (const i of add) cand[i] = 1;
+      }
+      // pezzo collegato all'asse (avambraccio, gomito, mano)
+      const q = [];
+      for (const p of [lerp(el, wr, 0.5), el, hc, lerp(sh, el, 0.6)]) { const i = Math.round(p.y) * W + Math.round(p.x); if (cand[i] && !armMask[i]) { armMask[i] = 1; q.push(i); } }
+      for (let k = 0; k < q.length; k++) { const i = q[k], x = i % W, y = (i / W) | 0; for (let ddy = -1; ddy <= 1; ddy++) for (let ddx = -1; ddx <= 1; ddx++) { const nx = x + ddx, ny = y + ddy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (cand[j] && !armMask[j]) { armMask[j] = 1; q.push(j); } } }
+      // le etichette seguono il pezzo: fuori dal pezzo il "braccio" torna al corpo
+      for (let i = 0; i < W * H; i++) {
+        if (armMask[i]) { if (lab[i] !== L_[`oggetto_${s}`]) lab[i] = L_[`braccio_${s}`]; }
+        else if (lab[i] === L_[`braccio_${s}`] || lab[i] === L_[`oggetto_${s}`]) lab[i] = categories && categories[i] === SEG.hair ? L_.testa : L_.busto;
+      }
+      continue;
+    }
     for (let i = 0; i < W * H; i++) {
       if (lab[i] === L_[`oggetto_${s}`]) { armMask[i] = 1; continue; }
       if (lab[i] !== L_[`braccio_${s}`]) continue;

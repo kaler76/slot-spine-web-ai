@@ -31,6 +31,9 @@ test("J1 braccio alzato tagliato dalla SPALLA, l'altro (lungo il vestito) resta 
 test("J2 nel pezzo del braccio niente capelli (le ciocche restano al corpo) e c'è il fumo sopra il bocchino", () => {
   const im = images.braccio_dx;
   let hair = 0, n = 0, topOpaque = 0;
+  const L = (i) => ({ x: landmarks[i].x, y: landmarks[i].y }), sw = Math.hypot(L(11).x - L(12).x, L(11).y - L(12).y);
+  const seg = (x, y, a, b) => { const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy || 1, t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / l2)); return Math.hypot(x - a.x - vx * t, y - a.y - vy * t); };
+  const axisD = (x, y) => Math.min(seg(x, y, L(12), L(14)), seg(x, y, L(14), L(16)), seg(x, y, L(16), L(20)));
   // il pezzo è ritagliato sul riquadro del braccio: lo si confronta con le categorie rimettendolo nell'immagine
   let a = W, b = H; for (let i = 0; i < W * H; i++) if (false) a = 0; // (offset ricavato sotto)
   // offset: il pixel opaco più in alto a sinistra del pezzo coincide con un pixel opaco dell'originale
@@ -38,7 +41,7 @@ test("J2 nel pezzo del braccio niente capelli (le ciocche restano al corpo) e c'
   const f = renderFrame(only, images, "f", 0, { scale: 1, bg: [255, 0, 255, 255] });
   for (let y = 0; y < f.height; y++) for (let x = 0; x < f.width; x++) {
     const i = (y * f.width + x) * 4; if (f.data[i] === 255 && f.data[i + 1] === 0 && f.data[i + 2] === 255) continue;
-    n++; const g = (y + y0) * W + x + x0; if (categories[g] === SEG.hair) hair++;
+    n++; const g = (y + y0) * W + x + x0; if (categories[g] === SEG.hair && axisD(x + x0, y + y0) > 0.25 * sw) hair++;
     if (y + y0 < 120) topOpaque++;
   }
   assert.ok(n > 1000 && im.width > 0);
@@ -87,4 +90,26 @@ test("J5 braccio alzato tagliato anche con \"Taglia braccio con oggetto\" spento
   assert.ok(r.json.slots.some((s) => s.name === "braccio_dx"));
   const tr = r.json.animations.ambient.bones.omero_dx?.rotate || [];
   assert.ok(tr.length > 1 && Math.max(...tr.map((k) => Math.abs(k.value))) > 1, "omero animato");
+});
+
+test("J6 braccio alzato SENZA categoria capelli (come sul sito per Jessica): nel pezzo niente ciocche né corpetto", () => {
+  const cat2 = Uint8Array.from(categories, (c) => (c === SEG.hair ? SEG.clothes : c));
+  const rec2 = recognizeParts({ width: W, height: H, landmarks, categories: cat2, alpha, rgba });
+  const r = buildMeshRig({ width: W, height: H, rgba, fg, parts: rec2.parts, categories: cat2, landmarks, joints: rec2.joints });
+  const only = { ...r.json, slots: r.json.slots.filter((s) => s.name === "braccio_dx"), animations: { f: { bones: {} } } };
+  const f = renderFrame(only, r.images, "f", 0, { scale: 1, bg: [255, 0, 255, 255] });
+  let n = 0, hair = 0, red = 0;
+  const L = (i) => ({ x: landmarks[i].x, y: landmarks[i].y }), sw = Math.hypot(L(11).x - L(12).x, L(11).y - L(12).y);
+  const seg = (x, y, a, b) => { const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy || 1, t = Math.max(0, Math.min(1, ((x - a.x) * vx + (y - a.y) * vy) / l2)); return Math.hypot(x - a.x - vx * t, y - a.y - vy * t); };
+  const axisD = (x, y) => Math.min(seg(x, y, L(12), L(14)), seg(x, y, L(14), L(16)), seg(x, y, L(16), L(20)));
+  for (let y = 0; y < f.height; y++) for (let x = 0; x < f.width; x++) {
+    const i = (y * f.width + x) * 4; if (f.data[i] === 255 && f.data[i + 1] === 0 && f.data[i + 2] === 255) continue;
+    n++; const g = (y + y0) * W + x + x0, gx = x + x0, gy = y + y0;
+    // ciocche = "capelli" LONTANI dall'asse del braccio (le categorie della prova chiamano capelli anche l'arancio della
+    // punta e le ombre della pelle sul bordo del braccio)
+    if (categories[g] === SEG.hair && axisD(gx, gy) > 0.25 * sw) hair++;
+    const R = rgba[g * 4], G = rgba[g * 4 + 1], B = rgba[g * 4 + 2]; if (R > 150 && G < 60 && B < 60) red++; // paillettes rosse del corpetto
+  }
+  assert.ok(hair < 0.04 * n, `${hair} pixel di capelli nel pezzo su ${n}`);
+  assert.ok(red < 0.01 * n, `${red} pixel del corpetto nel pezzo`);
 });
