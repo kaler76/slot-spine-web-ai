@@ -86,3 +86,16 @@ test("G4 Gemini rende il fondo NERO invece del magenta: niente \"ombra\" nera ne
   assert.ok(inter / uni >= 0.85, `IoU ${(inter / uni).toFixed(3)}`);
   assert.ok(plateOut <= 0.03 * plateIn, `piastra fuori ${plateOut} / dentro ${plateIn}`);
 });
+
+test("G5 bordo sfumato verso il magenta nella risposta: nella piastra niente alone rosa", () => {
+  const g = geminiLike(box), w = box.width, h = box.height;
+  const isKey = (i) => g[i] === 255 && g[i + 1] === 0 && g[i + 2] === 255;
+  const edge = [];
+  for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = (y * w + x) * 4; if (isKey(i)) continue; if (isKey(i + 4) || isKey(i - 4) || isKey(i + w * 4) || isKey(i - w * 4)) edge.push(i); }
+  for (const i of edge) for (let k = 0; k < 3; k++) g[i + k] = 0.5 * g[i + k] + 0.5 * [255, 0, 255][k];
+  const r = armPartFromGemini({ orig: crop, gen: g, box, arm, W, H });
+  assert.equal(r.error, null, JSON.stringify(r.checks));
+  let pink = 0, n = 0;
+  for (let i = 0; i < W * H; i++) { if (r.plate[i * 4 + 3] < 128) continue; n++; const p = r.plate.subarray(i * 4, i * 4 + 3); if ((p[0] + p[2]) / 2 - p[1] > 125) pink++; }
+  assert.ok(pink <= 2, `pixel rosa ${pink} su ${n}`);
+});

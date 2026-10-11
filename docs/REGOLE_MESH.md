@@ -292,6 +292,11 @@ spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo 
   (prima l'azzeramento dipendeva dall'oggetto "original", ricreato a ogni aggiornamento della pagina: Gemini
   ripartiva). Gemini si richiama SOLO con "Ridisegna braccio (Gemini)", con un'immagine nuova o se cambia la posa
   del braccio; anche un rifiuto non si ritenta da solo. Vale anche per il sorriso.
+- 14.4 (Avventuriero con frusta, 11 ott): alone ROSA nella piastra attorno a viso e cappello (pixel della risposta
+  mezzi magenta sul bordo verso il fondo). Ora: sotto metà "personaggio" il pixel si scarta, sopra si toglie la quota
+  di fondo dal colore (c = (g − (1−a)·fondo)/a) e si scarta anche 1 px attaccato al fondo (G5). La miniatura
+  dell'inquadratura è il personaggio INTERO (corpo + braccia tagliate sopra + capelli dietro sotto), non più il solo
+  corpo (sembrava che le braccia mancassero).
 - Corretto insieme: con due braccia tagliate ogni pezzo conteneva anche l'altro braccio (maschera unica): ora ogni
   pixel della maschera va al braccio da cui è raggiungibile.
 

@@ -275,9 +275,18 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
     const j = y * w + x; if (!m[j]) continue;
     const X = x + box.x0, Y = y + box.y0; if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
     const g = Y * W + X, i = j * 4; mask[g] = 1;
-    const a = keyA(i); if (a <= 0.02) continue;
-    for (let k = 0; k < 3; k++) plate[g * 4 + k] = al[i + k] * gain[k] + off[k];
-    plate[g * 4 + 3] = Math.round(255 * a);
+    // bordo verso il fondo di Gemini: niente pixel mezzi magenta (alone rosa attorno a viso e cappello
+    // dell'Avventuriero, 11 ott). Sotto metà "personaggio" si scarta, sopra si toglie la parte di fondo dal colore
+    // (c = (g − (1−a)·fondo) / a) e si scarta anche il pixel attaccato al fondo (1 px)
+    const a = keyA(i); if (a < 0.5) continue;
+    let nearBg = false;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < w && yy < h && ok[yy * w + xx] && keyA((yy * w + xx) * 4) < 0.5) { nearBg = true; break; } }
+    if (nearBg) continue;
+    const dk = Math.abs(al[i] - PART_KEY[0]) + Math.abs(al[i + 1] - PART_KEY[1]) + Math.abs(al[i + 2] - PART_KEY[2]);
+    const db = Math.abs(al[i] - bgCol[0]) + Math.abs(al[i + 1] - bgCol[1]) + Math.abs(al[i + 2] - bgCol[2]);
+    const bg = dk <= db ? PART_KEY : bgCol;
+    for (let k = 0; k < 3; k++) plate[g * 4 + k] = ((al[i + k] - (1 - a) * bg[k]) / a) * gain[k] + off[k];
+    plate[g * 4 + 3] = 255;
   }
   return { mask, plate, n, shift: { dx: best.dx, dy: best.dy, s: best.s }, mismatch: best.e, checks, error: null };
 }

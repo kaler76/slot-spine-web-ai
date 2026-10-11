@@ -428,10 +428,23 @@ function FrameTool({ pkg, frame, onChange, clipPkg, onClipPkg }) {
   const TW = 200, sc = TW / cw, TH = Math.round(ch * sc);
   const [url, setUrl] = useState(null);
   const [drag, setDrag] = useState(null); // { x0, y0, x1, y1 } in pixel della miniatura
+  // miniatura = personaggio intero a riposo: corpo + pezzi tagliati (braccia sopra, capelli dietro sotto) nei loro
+  // riquadri. Prima era solo il corpo: le braccia tagliate mancavano e si vedeva il "dietro" (Avventuriero, 11 ott)
   useEffect(() => {
-    const u = URL.createObjectURL(pkg.pngs.corpo);
-    setUrl(u);
-    return () => URL.revokeObjectURL(u);
+    let alive = true, u = null;
+    (async () => {
+      const boxes = pkg.report?.pieceBoxes || {};
+      const c = document.createElement("canvas"); c.width = cw; c.height = ch;
+      const g = c.getContext("2d");
+      const put = async (name, b) => { const bm = await createImageBitmap(pkg.pngs[name]); g.drawImage(bm, b.x - sk.x, sk.y + ch - (b.y + b.height), b.width, b.height); };
+      for (const [name, b] of Object.entries(boxes)) if (name.startsWith("capelli") && pkg.pngs[name]) await put(name, b);
+      g.drawImage(await createImageBitmap(pkg.pngs.corpo), 0, 0, cw, ch);
+      for (const [name, b] of Object.entries(boxes)) if (name.startsWith("braccio_") && pkg.pngs[name]) await put(name, b);
+      const blob = await new Promise((r) => c.toBlob(r, "image/png"));
+      if (!alive) return;
+      u = URL.createObjectURL(blob); setUrl(u);
+    })().catch(() => { if (alive) { u = URL.createObjectURL(pkg.pngs.corpo); setUrl(u); } });
+    return () => { alive = false; if (u) URL.revokeObjectURL(u); };
   }, [pkg]);
   // pixel miniatura <-> skeleton (la miniatura è l'immagine del corpo = riquadro dello skeleton)
   const toSk = (px, py) => ({ x: px / sc + sk.x, y: sk.y + ch - py / sc });
