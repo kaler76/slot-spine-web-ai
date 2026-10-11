@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.5";
+export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.6";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -646,6 +646,26 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       if (nsx && nsx < px.length) { const k = nsx * 2 >= px.length ? L_.oggetto_sx : L_.oggetto_dx; for (const i of px) lab[i] = k; }
     }
   }
+  // TESTA RIGIDA (zeus-mesh-14.6, Avventuriero 11 ott: "il volto con l'oscillamento non dovrebbe deformarsi"): il
+  // riconoscimento delle parti può lasciare viso e cappello come "busto" (pesi della schiena: il viso si storceva).
+  // Tutto il personaggio SOPRA la base della testa (oltre il 15% fra collo alto e naso, lungo l'asse del collo) e
+  // collegato alla zona del viso è testa, tranne braccia e oggetti (una mano alzata vicino al viso resta braccio)
+  let headFixed = 0;
+  {
+    const nt = by.testa.head, ns = by.viso.head, ax = ns.x - by.collo.head.x, ay = ns.y - by.collo.head.y, al = Math.hypot(ax, ay) || 1;
+    const ux = ax / al, uy = ay / al, base = 0.15 * Math.hypot(ns.x - nt.x, ns.y - nt.y);
+    const above = (x, y) => (x - nt.x) * ux + (y - nt.y) * uy >= base;
+    const nearAxis = (x, y) => Math.abs((x - nt.x) * uy - (y - nt.y) * ux) <= 1.3 * shoulderW;
+    const ok = (i) => fg[i] && (lab[i] === L_.busto || lab[i] === L_.testa);
+    const seen = new Uint8Array(W * H), q = [];
+    const r0 = Math.max(2, Math.round(0.12 * shoulderW));
+    for (let dy = -r0; dy <= r0; dy++) for (let dx = -r0; dx <= r0; dx++) { const x = Math.round(ns.x + dx), y = Math.round(ns.y + dy); if (x < 0 || y < 0 || x >= W || y >= H) continue; const i = y * W + x; if (ok(i) && !seen[i]) { seen[i] = 1; q.push(i); } }
+    for (let k = 0; k < q.length; k++) {
+      const i = q[k], x = i % W, y = (i / W) | 0;
+      if (lab[i] === L_.busto) { lab[i] = L_.testa; headFixed++; }
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (!seen[j] && ok(j) && above(nx, ny) && nearAxis(nx, ny)) { seen[j] = 1; q.push(j); } }
+    }
+  }
   // MANO STIMATA (posa a mano "fuori dall'immagine" o braccio nascosto: visibilità del polso 0,3): niente oggetto in
   // quella mano. Rita (10 ott): braccio sotto la pelliccia, un pezzo di pelliccia preso per "oggetto" (5609 px) e
   // pesato rigido sulla mano stimata → strappo nero nella pelliccia quando si muove
@@ -747,6 +767,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const aiPatch = (s) => (partPatches && free[s]?.raised && partPatches[s]?.mask ? partPatches[s] : null);
   for (const s of ["sx", "dx"]) if (aiPatch(s)) free[s] = { ...free[s], free: true, frac: 1, upperFree: true, ai: true };
   const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
+  if (headFixed > 0.002 * fgN) decision.reasons.push(`testa: ${headFixed} px riconosciuti come corpo spostati sulla testa (si muove rigida, il viso non si deforma)`);
   if (eyeSmall) decision.reasons = decision.reasons.map((r) => (r.startsWith("occhi:") ? `occhi: troppo socchiusi per il battito (buco di ${eyeSmall}): restano come nel disegno` : r));
   decision.freeArms = decision.arms.filter((a) => free[a]?.free);
   for (const s of decision.arms) if (free[s]?.ai) decision.reasons.push(`braccio_${s}: ritagliato con GEMINI (immagine senza il braccio, differenza con l'originale)`);
@@ -1163,6 +1184,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   // attorno a ogni OCCHIO il corpo è viso al 100% (palpebra, bianco e pupilla stanno sulle ossa dell'occhio, figlie
   // di viso): nucleo fino all'anello esterno della palpebra, poi sfuma in 1,5 passi verso il peso normale (R18)
   const eyeRing = (decision.eyes ? eyes : []).map((e) => { const b = e.box, ew = b.x1 - b.x0 + 1, eh = b.y1 - b.y0 + 1; return { x: (b.x0 + b.x1 + 1) / 2, y: (b.y0 + b.y1 + 1) / 2, r: Math.max(ew / 2 + 0.55 * eh, eh / 2 + 0.9 * eh) }; });
+  const headT = (px, py) => { const a = by.testa.head, b = by.viso.head, vx = b.x - a.x, vy = b.y - a.y; return ((px - a.x) * vx + (py - a.y) * vy) / (vx * vx + vy * vy || 1); };
   const faceF = (px, py, step = 0) => {
     let f = smooth(1 - Math.hypot(px - face.x, py - face.y) / faceR);
     for (const e of eyeRing) { const d = Math.hypot(px - e.x, py - e.y) - e.r; f = Math.max(f, d <= 0 ? 1 : smooth(1 - d / Math.max(1, 1.5 * step))); }
@@ -1211,6 +1233,9 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
         if (f > 0) { for (const k in w) w[k] *= 1 - f; w.viso = (w.viso || 0) + f; }
       }
       let fixed = String(label).startsWith("oggetto_") || (label === "testa" && w.viso >= 0.999); // oggetto rigido (M4); pelle attorno agli occhi
+      // TESTA RIGIDA (14.6): sopra il mento (oltre il 40% fra collo alto e naso) la testa non prende pesi dal collo con
+      // la media dei vicini: il viso ruota intero, la sfumatura resta sul collo
+      if (label === "testa" && headT(px, py) >= 0.4) fixed = true;
       if (lockF && lockF(px, py) >= 0.999) fixed = true;
       WS.push(w); pin.push(fixed); XY.push(toS({ x: px, y: py })); PX.push({ x: px, y: py });
     }

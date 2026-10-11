@@ -259,6 +259,15 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R24 — Testa rigida (T1), zeus-mesh-14.6
+Avventuriero (11 ott): "il volto con l'oscillamento non dovrebbe deformarsi". Due cause: (1) il riconoscimento
+aveva lasciato viso e cappello come "busto" (pesi della schiena); (2) la media dei pesi coi vicini (R17) portava
+nella bocca e nelle guance i pesi del collo (vertici ogni ~40 px). Regole:
+- tutto il personaggio collegato alla zona del naso e OLTRE il 15% fra collo alto e naso (lungo l'asse del collo,
+  entro 1,3 spalle dall'asse) è testa, tranne braccia e oggetti; il riepilogo lo dice se i pixel spostati sono tanti;
+- i vertici della testa oltre il 40% fra collo alto e naso sono FISSI nella media dei pesi: il viso ruota intero,
+  la sfumatura testa↔collo resta su mento e collo.
+
 ## R23 — Occhi socchiusi: niente battito (S1–S2), zeus-mesh-14.5
 Avventuriero con frusta (11 ott): occhi socchiusi, iride scura come ciglia e ombre; il "buco" trovato era solo
 l'angolo bianco (21–24 px). Palpebra "pelle" costruita su quel buco: 18×21 px, nel battito si stirava in righe scure.
