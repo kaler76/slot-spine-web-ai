@@ -259,6 +259,13 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R23 — Occhi socchiusi: niente battito (S1–S2), zeus-mesh-14.5
+Avventuriero con frusta (11 ott): occhi socchiusi, iride scura come ciglia e ombre; il "buco" trovato era solo
+l'angolo bianco (21–24 px). Palpebra "pelle" costruita su quel buco: 18×21 px, nel battito si stirava in righe scure.
+Regola: se un buco ha superficie < 0,01 × (distanza fra gli occhi)² o larghezza < 0,15 × distanza, niente occhi
+animati (restano come nel disegno) e il riepilogo lo dice ("troppo socchiusi"). Casi di riferimento: minimo 0,0165 e
+0,24; Avventuriero ~0,005. Battito per occhi socchiusi (palpebra disegnata sulla fessura): da fare.
+
 ## R22 — Pezzo separato con GEMINI (G1–G3, GR1–GR3), zeus-mesh-14
 Fabio (10 ott): "deve essere standard, Jessica è uno dei mille character che passeranno da questo software". Separare
 per forma e colore fallisce quando il riconoscimento è sbagliato a monte (sul sito: lati scambiati, punti della posa

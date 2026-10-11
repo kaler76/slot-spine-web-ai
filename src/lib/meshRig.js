@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.4";
+export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.5";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -679,6 +679,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   }
 
   // occhi
+  let eyeSmall = null;
   const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
   let eyes = rules.cuts.eyes ? [["sx", landmarks[2]], ["dx", landmarks[5]]].map(([s, c]) => { const e = findEye(c, ipd, W, H, rgba, fg); return e && { side: s, ...e }; }).filter(Boolean) : [];
   // occhi STIMATI (posa a mano: visibilità < 0,5) o non trovati: si cercano nel viso (findEyePair)
@@ -703,6 +704,15 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       const found = [["sx", pair[0]], ["dx", pair[1]]].map(([s, c]) => { const e = best(c); return e && { side: s, ...e }; }).filter(Boolean);
       if (found.length === 2) eyes = found;
     }
+  }
+  // occhi SOCCHIUSI (Avventuriero, 11 ott): il "buco" trovato è solo l'angolo bianco di pochi pixel (iride scura come
+  // le ciglia). Battito costruito su un buco così: palpebra minuscola che si stira in righe scure. Sotto una superficie
+  // minima rispetto alla distanza fra gli occhi, niente occhi animati (restano come nel disegno)
+  const eyeStat = (e) => { let n = 0; for (let i = 0; i < e.w * e.h; i++) n += e.hole[i]; const C = (b) => [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2], ref = eyes.length === 2 ? Math.hypot(C(eyes[0].box)[0] - C(eyes[1].box)[0], C(eyes[0].box)[1] - C(eyes[1].box)[1]) || ipd : ipd; return { n, r: n / (ref * ref), bw: (e.box.x1 - e.box.x0 + 1) / ref }; };
+  const eyeInfo = eyes.map((e) => ({ side: e.side, ...eyeStat(e) }));
+  if (eyes.length === 2 && eyeInfo.some((s) => s.r < (rules.eyeMinArea ?? 0.01) || s.bw < 0.15)) {
+    eyes = [];
+    eyeSmall = eyeInfo.map((s) => `${s.side} ${s.n} px`).join(", ");
   }
 
   // braccio LIBERO: campioni lungo omero (dal 35%) e avambraccio; "a contatto" se entro 0,12 spalle c'è il busto
@@ -737,6 +747,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   const aiPatch = (s) => (partPatches && free[s]?.raised && partPatches[s]?.mask ? partPatches[s] : null);
   for (const s of ["sx", "dx"]) if (aiPatch(s)) free[s] = { ...free[s], free: true, frac: 1, upperFree: true, ai: true };
   const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
+  if (eyeSmall) decision.reasons = decision.reasons.map((r) => (r.startsWith("occhi:") ? `occhi: troppo socchiusi per il battito (buco di ${eyeSmall}): restano come nel disegno` : r));
   decision.freeArms = decision.arms.filter((a) => free[a]?.free);
   for (const s of decision.arms) if (free[s]?.ai) decision.reasons.push(`braccio_${s}: ritagliato con GEMINI (immagine senza il braccio, differenza con l'originale)`);
 
