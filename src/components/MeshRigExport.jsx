@@ -31,6 +31,10 @@ async function geminiEditMouth(cropCanvas, prompt, why = "ritocco della bocca") 
   if (!res.ok || data?.error || !data?.imageBase64) throw new Error(data?.error || `Errore HTTP ${res.status}`);
   return data.imageBase64;
 }
+// risultati di Gemini per il braccio, per IMMAGINE (chiave: i pixel dell'originale) e per lato, con la posa del braccio:
+// "Ricrea" e i cambi di caselle non richiamano Gemini (crediti); solo "Ridisegna braccio" o un'immagine/posa nuova
+const ARM_CACHE = new WeakMap();
+const armKey = (a) => [a.side, a.sh, a.el, a.wr, a.hd].map((p) => (typeof p === "string" ? p : `${Math.round(p.x / 4)},${Math.round(p.y / 4)}`)).join("|");
 function loadB64(b64) {
   return new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error("immagine di Gemini non leggibile")); im.src = `data:image/png;base64,${b64}`; });
 }
@@ -70,7 +74,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const base = (fileName || "character").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_").toLowerCase() || "character";
 
   // a nuova analisi il pacchetto precedente non vale più
-  useEffect(() => { setPkg(null); setGem(null); setArmGem({}); setFrame(null); }, [original, parts]);
+  // (dipende dai PIXEL e dalle parti, non dall'oggetto "original": la pagina lo ricrea a ogni aggiornamento e così si
+  // azzeravano pacchetto e risultati di Gemini, che a "Ricrea" veniva richiamato)
+  useEffect(() => { setPkg(null); setGem(null); setArmGem(ARM_CACHE.get(original.rgba)?.shown || {}); setFrame(null); }, [original.rgba, parts]);
 
   /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
   async function makeGeminiSmile(fg) {
@@ -190,17 +196,22 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       let partPatches = null;
       if (armAi && (cuts.raisedArm || cuts.arm)) {
         const first = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
-        const got = { ...(forceArm ? {} : armGem) };
+        const store = ARM_CACHE.get(rgba) || { byKey: {}, shown: {} };
+        const got = {};
         for (const arm of first.report.raisedArms || []) {
-          if (!got[arm.side]) {
-            try { got[arm.side] = await makeGeminiArm(arm, fg); }
-            catch (e) { got[arm.side] = { error: e.message || String(e) }; }
+          const key = armKey(arm);
+          if (forceArm || !store.byKey[key]) {
+            try { store.byKey[key] = await makeGeminiArm(arm, fg); }
+            catch (e) { store.byKey[key] = { error: e.message || String(e) }; }
           }
+          got[arm.side] = store.byKey[key];
           const r = got[arm.side];
           const err = r.error || r.patch?.error;
           if (err) fallbackNote += ` ⚠️ Braccio alzato con Gemini non usato (${err}): taglio senza AI.`;
           else (partPatches ||= {})[arm.side] = r.patch;
         }
+        store.shown = got;
+        ARM_CACHE.set(rgba, store);
         setArmGem(got);
         setStatus("⏳ Creo il rig mesh...");
       }

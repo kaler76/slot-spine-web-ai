@@ -287,6 +287,11 @@ spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo 
   Ora la trasparenza del ritaglio viene dalla sagoma riconosciuta (fg), non dal PNG. In più, se Gemini cambia il fondo
   (nero, grigio): per allinearsi il suo colore di fondo torna magenta; la piastra è trasparente anche su quel colore;
   il contorno del braccio dello stesso colore del fondo (4 px attaccati al pezzo) va nel pezzo (G4).
+- 14.3 (11 ott: "una volta usato Gemini non dovrebbe rifarlo se faccio Ricrea, consuma crediti"): risultato di Gemini
+  tenuto per immagine (pixel dell'originale) + lato + posa del braccio, anche se la pagina ridisegna il componente
+  (prima l'azzeramento dipendeva dall'oggetto "original", ricreato a ogni aggiornamento della pagina: Gemini
+  ripartiva). Gemini si richiama SOLO con "Ridisegna braccio (Gemini)", con un'immagine nuova o se cambia la posa
+  del braccio; anche un rifiuto non si ritenta da solo. Vale anche per il sorriso.
 - Corretto insieme: con due braccia tagliate ogni pezzo conteneva anche l'altro braccio (maschera unica): ora ogni
   pixel della maschera va al braccio da cui è raggiungibile.
 
