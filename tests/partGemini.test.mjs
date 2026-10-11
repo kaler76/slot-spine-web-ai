@@ -99,3 +99,26 @@ test("G5 bordo sfumato verso il magenta nella risposta: nella piastra niente alo
   for (let i = 0; i < W * H; i++) { if (r.plate[i * 4 + 3] < 128) continue; n++; const p = r.plate.subarray(i * 4, i * 4 + 3); if ((p[0] + p[2]) / 2 - p[1] > 125) pink++; }
   assert.ok(pink <= 2, `pixel rosa ${pink} su ${n}`);
 });
+
+test("G6 manica dello stesso colore del vestito: con la risposta \"solo braccio\" il pezzo è pulito (IoU ≥ 0,9)", async () => {
+  const { armOnlyPrompts } = await import("../src/lib/partGemini.js");
+  assert.equal(armOnlyPrompts("left").length, 3);
+  // originale con l'omero colorato come il corpo sotto (manica = giacca): la differenza non lo vede
+  const o2 = new Uint8ClampedArray(orig);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const g = y * W + x; if (truth[g] && inBody(x, y) && segD(x, y, sh, el) < segD(x, y, el, wr) && armD(x, y) < -3) o2.set([...bodyCol(x, y), 255], g * 4); }
+  const w = box.width, h = box.height, c2 = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const X = x + box.x0, Y = y + box.y0; if (X >= 0 && Y >= 0 && X < W && Y < H) c2.set(o2.subarray((Y * W + X) * 4, (Y * W + X) * 4 + 4), (y * w + x) * 4); }
+  // "solo braccio": il braccio dell'originale su magenta, spostato (4, 3)
+  const iso = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const sx = x - 4, sy = y - 3, X = sx + box.x0, Y = sy + box.y0, o = (y * w + x) * 4;
+    if (X >= 0 && Y >= 0 && X < W && Y < H && truth[Y * W + X]) iso.set(o2.subarray((Y * W + X) * 4, (Y * W + X) * 4 + 4), o); else iso.set([255, 0, 255, 255], o);
+  }
+  const iou = (r) => { let a = 0, u = 0; for (let g = 0; g < W * H; g++) { if (r.mask[g] && truth[g]) a++; if (r.mask[g] || truth[g]) u++; } return a / u; };
+  const without = armPartFromGemini({ orig: c2, gen: geminiLike(box), box, arm, W, H });
+  const withIso = armPartFromGemini({ orig: c2, gen: geminiLike(box), iso, box, arm, W, H });
+  assert.equal(withIso.error, null, JSON.stringify(withIso.checks));
+  assert.ok(withIso.checks.iso && !withIso.checks.iso.error, JSON.stringify(withIso.checks.iso));
+  assert.ok(iou(withIso) >= 0.9, `IoU con "solo braccio" ${iou(withIso).toFixed(3)} (senza ${without.error ? "errore" : iou(without).toFixed(3)})`);
+  assert.ok(without.error || iou(without) < iou(withIso), "senza la seconda risposta il pezzo è peggiore");
+});

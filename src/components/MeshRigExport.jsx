@@ -4,7 +4,7 @@ import { SpinePlayer } from "@esotericsoftware/spine-player";
 import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { buildMeshRig, packAtlas, findMouth, applyFrameClip, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
 import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
-import { armRemovalPrompts, armCropBox, flattenOnKey, armPartFromGemini } from "../lib/partGemini.js";
+import { armRemovalPrompts, armOnlyPrompts, armCropBox, flattenOnKey, armPartFromGemini } from "../lib/partGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { poseAt } from "../lib/animationSim.js";
 
@@ -137,16 +137,28 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       catch (e) { lastErr = e; if (!isGeminiRefusal(e.message)) throw e; }
     }
     if (!b64) throw new Error(`Gemini ha rifiutato ${prompts.length} volte (${lastErr?.message || "nessuna immagine"})`);
-    const im = await loadB64(b64);
-    const small = document.createElement("canvas");
-    small.width = box.width; small.height = box.height;
-    const sg = small.getContext("2d");
-    sg.imageSmoothingQuality = "high";
-    sg.drawImage(im, 0, 0, box.width, box.height);
-    const gen = sg.getImageData(0, 0, box.width, box.height).data;
-    const patch = armPartFromGemini({ orig, gen, box, arm, W, H });
+    const toCrop = async (data) => {
+      const im = await loadB64(data);
+      const c = document.createElement("canvas");
+      c.width = box.width; c.height = box.height;
+      const g = c.getContext("2d");
+      g.imageSmoothingQuality = "high";
+      g.drawImage(im, 0, 0, box.width, box.height);
+      return { canvas: c, data: g.getImageData(0, 0, box.width, box.height).data };
+    };
+    const { canvas: small, data: gen } = await toCrop(b64);
+    // seconda risposta: SOLO il braccio su magenta (sagoma pulita del pezzo, 14.7). Se Gemini rifiuta si va avanti
+    // con la sola differenza
+    let isoC = null, iso = null;
+    const p2 = armOnlyPrompts(arm.imageSide);
+    for (let k = 0; k < p2.length && !iso; k++) {
+      setStatus(`⏳ Gemini isola il braccio (sagoma pulita, 20-60 s)${k ? ` — tentativo ${k + 1} di ${p2.length}` : ""}...`);
+      try { const b2 = await geminiEditMouth(canvasOf(flat, box.width, box.height), p2[k], "braccio da isolare"); ({ canvas: isoC, data: iso } = await toCrop(b2)); }
+      catch (e) { if (!isGeminiRefusal(e.message)) throw e; }
+    }
+    const patch = armPartFromGemini({ orig, gen, iso, box, arm, W, H });
     const url = (c) => c.toDataURL("image/png");
-    const previews = { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small) };
+    const previews = { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small), iso: isoC ? url(isoC) : null };
     if (!patch.error) {
       // pezzo (pixel dell'originale) e corpo senza braccio (con la piastra dietro), nel riquadro
       const piece = new Uint8ClampedArray(box.width * box.height * 4).fill(60), back = new Uint8ClampedArray(flat);
@@ -362,14 +374,14 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       )}
       {armAi && Object.entries(armGem).map(([side, r]) => (
         <div key={side} className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0" }}>
-          {r.previews && [["Originale", r.previews.orig], ["Gemini (senza braccio)", r.previews.gen], ["Pezzo", r.previews.piece], ["Dietro", r.previews.back]].filter(([, u]) => u).map(([t, u]) => (
+          {r.previews && [["Originale", r.previews.orig], ["Gemini (senza braccio)", r.previews.gen], ["Gemini (solo braccio)", r.previews.iso], ["Pezzo", r.previews.piece], ["Dietro", r.previews.back]].filter(([, u]) => u).map(([t, u]) => (
             <figure key={t} style={{ margin: 0, textAlign: "center", fontSize: 12 }}>
               <img src={u} alt={t} style={{ width: 220, borderRadius: 4, border: "1px solid #333" }} />
               <figcaption>{t}</figcaption>
             </figure>
           ))}
           <div style={{ fontSize: 12, opacity: 0.8 }}>
-            braccio_{side}: {r.error || r.patch?.error ? <span style={{ color: "#ffb347" }}>⚠️ {r.error || r.patch.error}</span> : <>pezzo di {r.patch.n} px, scarto {r.patch.checks.mismatch}, grandezza ×{r.patch.checks.ratio}</>}
+            braccio_{side}: {r.error || r.patch?.error ? <span style={{ color: "#ffb347" }}>⚠️ {r.error || r.patch.error}</span> : <>pezzo di {r.patch.n} px, scarto {r.patch.checks.mismatch}, grandezza ×{r.patch.checks.ratio}{r.patch.checks.iso ? (r.patch.checks.iso.error ? ` · sagoma: ${r.patch.checks.iso.error}` : " · sagoma pulita da \"solo braccio\"") : " · sagoma dalla sola differenza"}</>}
             <div>
               <button type="button" className="btn secondary" disabled={busy} onClick={() => build(false, true)} style={{ marginTop: 6 }}>🔄 Ridisegna braccio (Gemini)</button>
             </div>

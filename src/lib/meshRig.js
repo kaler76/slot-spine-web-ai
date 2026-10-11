@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.6";
+export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.7";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -1169,12 +1169,20 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
         added += inHull;
       }
     }
+    // BLOCCO TROPPO ESTESO (Avventuriero, 11 ott): fondina e frusta degli stessi marroni di giacca e pantaloni; il
+    // contorno convesso dell'oggetto copriva il busto e bloccava mezzo personaggio (+337 mila px): il corpo restava
+    // fermo e solo la testa si muoveva. Oltre il 12% del personaggio il blocco si toglie (braccio animato come gli altri)
+    if (added > (rules.lockMaxFrac ?? 0.12) * fgN) {
+      decision.lockOff = true;
+      decision.reasons.push(`oggetto FERMO non applicato: avrebbe bloccato ${Math.round((100 * added) / fgN)}% del personaggio (l'oggetto ha gli stessi colori del vestito)`);
+    } else {
     // nucleo fermo largo una cella della griglia (i vertici distano fino a mezza cella dai pixel bloccati), poi sfumatura
     const core = Math.max(cw, ch) / rules.cells, R = rules.lockBand * shoulderW, dist = new Float32Array(W * H).fill(Infinity), dq = [];
     for (let i = 0; i < W * H; i++) if (seed[i]) { dist[i] = 0; dq.push(i); }
     for (let k = 0; k < dq.length; k++) { const i = dq[k]; if (dist[i] >= R + core) continue; const x = i % W, y = (i / W) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue; const j = ny * W + nx; if (dist[j] !== Infinity) continue; dist[j] = dist[i] + 1; dq.push(j); } }
     lockAt = (px, py) => { const d = dist[Math.min(H - 1, Math.max(0, Math.round(py))) * W + Math.min(W - 1, Math.max(0, Math.round(px)))]; return d === Infinity ? 0 : d <= core ? 1 : smooth(1 - (d - core) / R); };
     decision.reasons.push(`oggetto FERMO: braccio e oggetto bloccati, maschera di ${Math.round(R)} px attorno (+${added} px d'oggetto rimasti nel corpo)`);
+    }
   }
 
   // ---- mesh generica su un riquadro ----
@@ -1609,7 +1617,7 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
     viso: { translate: xy((t) => -A.visoSlide * height * bump(0.1)(t), zero) }
   };
   for (const [s, ph] of [["sx", 0], ["dx", 0.3]]) {
-    if (rules.lockObject && decision.arms.includes(s) && !decision.freeArms?.includes(s)) continue; // braccio con oggetto FERMO: niente rotazioni (non quello alzato)
+    if (rules.lockObject && !decision.lockOff && decision.arms.includes(s) && !decision.freeArms?.includes(s)) continue; // braccio con oggetto FERMO: niente rotazioni (non quello alzato)
     bones[`omero_${s}`] = { rotate: rot(A.omero, wave(1, ph)) };
     bones[`avambraccio_${s}`] = { rotate: rot(A.avambraccio, wave(1, ph + 0.12)) };
     bones[`mano_${s}`] = { rotate: rot(A.mano, wave(2, ph + 0.2)) };

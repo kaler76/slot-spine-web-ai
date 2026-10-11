@@ -313,6 +313,16 @@ spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo 
   di fondo dal colore (c = (g − (1−a)·fondo)/a) e si scarta anche 1 px attaccato al fondo (G5). La miniatura
   dell'inquadratura è il personaggio INTERO (corpo + braccia tagliate sopra + capelli dietro sotto), non più il solo
   corpo (sembrava che le braccia mancassero).
+- 14.7 (Avventuriero, 11 ott: "il taglio in tutte le immagini deve essere pulito"; la risposta "senza braccio" di
+  Gemini era "perfetta", il pezzo no): la sola differenza lasciava schegge e buchi dove la manica ha il colore della
+  giacca. Ora una SECONDA richiesta a Gemini: solo il braccio con l'oggetto su magenta (`armOnlyPrompts`). La sua
+  sagoma, riallineata sui pixel del braccio (scarto ≤ 35), È il pezzo: chiusura 2 px, componenti < 5% via, buchi
+  chiusi pieni solo se piccoli (< 2%: l'anello della frusta racchiude il corpo, che resta al corpo); della differenza
+  si tiene solo ciò che sta entro 3 px dalla sagoma (G6). Se Gemini rifiuta la seconda richiesta si va avanti con la
+  differenza. Due chiamate per braccio, solo la prima volta (poi resta in memoria). Anche nella maschera dalla
+  differenza i buchi chiusi si riempiono solo se piccoli (< 5%).
+- 14.7: "Oggetto fermo" che bloccherebbe oltre il 12% del personaggio non si applica (fondina e frusta degli stessi
+  marroni della giacca: il contorno convesso dell'oggetto bloccava tutto il busto, +337 mila px); il braccio si anima.
 - Corretto insieme: con due braccia tagliate ogni pezzo conteneva anche l'altro braccio (maschera unica): ora ogni
   pixel della maschera va al braccio da cui è raggiungibile.
 

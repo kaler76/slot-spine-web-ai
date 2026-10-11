@@ -71,7 +71,7 @@ const lum = (a, i) => 0.3 * a[i] + 0.59 * a[i + 1] + 0.11 * a[i + 2];
  *   orig = ritaglio dell'originale (RGBA, trasparente fuori dal personaggio); arm in coordinate immagine
  * @returns {{ mask: Uint8Array, plate: Uint8ClampedArray, n, shift, mismatch, checks, error }} mask/plate a misura d'immagine
  */
-export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
+export function armPartFromGemini({ orig, gen, iso = null, box, arm, W, H }) {
   const w = box.width, h = box.height, sw = arm.shoulderW;
   const P = (p) => ({ x: p.x - box.x0, y: p.y - box.y0 });
   const sh = P(arm.sh), el = P(arm.el), wr = P(arm.wr), hd = P(arm.hd);
@@ -229,14 +229,8 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
   }
   const big = Math.max(0, ...sizes);
   for (let j = 0; j < w * h; j++) if (m[j] && sizes[comp[j]] < 0.1 * big) m[j] = 0;
-  // buchi chiusi dentro il pezzo (riflessi, righe uguali nelle due immagini): pieni
-  {
-    const out = new Uint8Array(w * h), q = [];
-    for (let x = 0; x < w; x++) for (const y of [0, h - 1]) { const j = y * w + x; if (!m[j] && !out[j]) { out[j] = 1; q.push(j); } }
-    for (let y = 0; y < h; y++) for (const x of [0, w - 1]) { const j = y * w + x; if (!m[j] && !out[j]) { out[j] = 1; q.push(j); } }
-    for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!m[j] && !out[j]) { out[j] = 1; q.push(j); } } }
-    for (let j = 0; j < w * h; j++) if (!out[j]) m[j] = 1;
-  }
+  // buchi chiusi dentro il pezzo (riflessi, righe uguali nelle due immagini): pieni, ma solo se piccoli
+  fillSmallHoles(m, w, h, 0.05, () => true);
   // contorno del braccio contro un fondo dello STESSO colore (contorno nero, fondo di Gemini nero): la differenza non
   // lo vede; fino a 4 px attaccati al pezzo dove la risposta è fondo e l'originale è personaggio, vanno nel pezzo
   for (let k = 0; k < 4; k++) {
@@ -246,6 +240,18 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
       if ((x > 0 && m[j - 1]) || (x < w - 1 && m[j + 1]) || (y > 0 && m[j - w]) || (y < h - 1 && m[j + w])) add.push(j);
     }
     for (const j of add) m[j] = 1;
+  }
+  // SAGOMA PULITA dal "solo braccio" di Gemini (14.7, Avventuriero: "il taglio deve essere pulito"): la differenza da
+  // sola lascia schegge (giacca dello stesso marrone della manica) e buchi. Se c'è la seconda risposta (braccio da
+  // solo su magenta), la sua sagoma riallineata È il pezzo; della differenza si tiene solo il bordo entro 3 px
+  checks.iso = null;
+  if (iso) {
+    const I = isoMaskOnCrop({ orig: flat, origA: orig, iso, w, h, morph });
+    checks.iso = I.checks;
+    if (I.m) {
+      const near = morph(I.m, 3, true);
+      for (let j = 0; j < w * h; j++) m[j] = I.m[j] || (m[j] && near[j]) ? 1 : 0;
+    }
   }
   // + 1 px di bordo (antialias del contorno), solo dove l'originale è opaco
   m = morph(m, 1, true);
@@ -289,4 +295,73 @@ export function armPartFromGemini({ orig, gen, box, arm, W, H }) {
     plate[g * 4 + 3] = 255;
   }
   return { mask, plate, n, shift: { dx: best.dx, dy: best.dy, s: best.s }, mismatch: best.e, checks, error: null };
+}
+
+
+/** Riempie i buchi CHIUSI del pezzo solo se piccoli (< frac del pezzo): un anello della frusta o un braccio piegato
+ *  racchiudono pezzi di corpo che non vanno nel pezzo. */
+function fillSmallHoles(m, w, h, frac, okPx) {
+  let n = 0; for (let j = 0; j < w * h; j++) n += m[j];
+  const lab = new Int32Array(w * h).fill(-1);
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (m[s0] || lab[s0] >= 0) continue;
+    const st = [s0], px = []; lab[s0] = s0; let border = false;
+    while (st.length) { const i = st.pop(); px.push(i); const x = i % w, y = (i / w) | 0; if (x === 0 || y === 0 || x === w - 1 || y === h - 1) border = true; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!m[j] && lab[j] < 0) { lab[j] = s0; st.push(j); } } }
+    if (!border && px.length < frac * n) for (const i of px) if (okPx(i)) m[i] = 1;
+  }
+}
+
+/** Prompt per la seconda risposta: SOLO il braccio (con l'oggetto) su magenta, nella stessa posizione. */
+export function armOnlyPrompts(side) {
+  const where = side === "left" ? "on the LEFT side of the image" : "on the RIGHT side of the image";
+  return [
+    CONTEXT + `Edit the illustration: keep ONLY the character's raised arm ${where} — the whole arm from the shoulder to the fingers, with its sleeve — and the object held in that hand. ` +
+      "Replace EVERYTHING else (head, hair, body, clothes, other arm, background) with flat pure magenta (#FF00FF). Do not move, resize or redraw the arm: same position, same pixels. Same image size. No text, no borders.",
+    CONTEXT + `Cut-out of this game artwork: only the raised arm ${where} with the held object, unchanged and in the same place; everything else flat magenta #FF00FF. Same framing, same size.`,
+    `Game art cut-out: isolate the raised arm ${where} with the held object, same position and size; all the rest flat magenta. Same framing.`
+  ];
+}
+
+/**
+ * Sagoma del braccio dalla risposta "solo braccio su magenta", riallineata al ritaglio dell'originale.
+ * L'allineamento usa i pixel NON magenta della risposta: risposta(g) ≈ originale((g − c − d)/s + c).
+ */
+function isoMaskOnCrop({ orig, origA, iso, w, h, morph }) {
+  const kd = (a, i) => Math.abs(a[i] - PART_KEY[0]) + Math.abs(a[i + 1] - PART_KEY[1]) + Math.abs(a[i + 2] - PART_KEY[2]);
+  const s0 = new Uint8Array(w * h);
+  for (let j = 0; j < w * h; j++) if (kd(iso, j * 4) > 150) s0[j] = 1;
+  const pts = [], step = Math.max(1, Math.round(w / 200));
+  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) if (s0[y * w + x]) pts.push([x, y, lum(iso, (y * w + x) * 4)]);
+  if (pts.length < 40) return { m: null, checks: { error: "nella risposta non c'è il braccio" } };
+  const LO = new Float32Array(w * h); for (let j = 0; j < w * h; j++) LO[j] = lum(orig, j * 4);
+  const smp = (x, y) => { if (x < 0 || y < 0 || x > w - 1 || y > h - 1) return -1; const x0 = Math.floor(x), y0 = Math.floor(y), x1 = Math.min(w - 1, x0 + 1), y1 = Math.min(h - 1, y0 + 1), fx = x - x0, fy = y - y0; return (LO[y0 * w + x0] * (1 - fx) + LO[y0 * w + x1] * fx) * (1 - fy) + (LO[y1 * w + x0] * (1 - fx) + LO[y1 * w + x1] * fx) * fy; };
+  const cost = (dx, dy, s) => { let e = 0, n = 0; for (const [gx, gy, l] of pts) { const v = smp((gx - w / 2 - dx) / s + w / 2, (gy - h / 2 - dy) / s + h / 2); if (v < 0) { e += 60; n++; continue; } e += Math.abs(v - l); n++; } return e / n; };
+  let best = { dx: 0, dy: 0, s: 1, e: cost(0, 0, 1) };
+  const R = Math.round(0.06 * w), st0 = Math.max(1, R >> 3);
+  for (const s of [0.94, 0.97, 1, 1.03, 1.06]) for (let dy = -R; dy <= R; dy += st0) for (let dx = -R; dx <= R; dx += st0) { const e = cost(dx, dy, s); if (e < best.e) best = { dx, dy, s, e }; }
+  for (let it = 0; it < 4; it++) {
+    const st = Math.max(0.5, st0 / 2 ** (it + 1)), ss = 0.015 / 2 ** it;
+    for (let rep = 0; rep < 3; rep++) { const b0 = best; for (const s of [b0.s - ss, b0.s, b0.s + ss]) for (const dy of [-st, 0, st]) for (const dx of [-st, 0, st]) { const e = cost(b0.dx + dx, b0.dy + dy, s); if (e < best.e) best = { dx: b0.dx + dx, dy: b0.dy + dy, s, e }; } if (best === b0) break; }
+  }
+  const checks = { mismatch: +best.e.toFixed(1), shift: { dx: best.dx, dy: best.dy, s: +best.s.toFixed(4) } };
+  if (best.e > 35) return { m: null, checks: { ...checks, error: "braccio di Gemini diverso dall'originale" } };
+  let m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const gx = Math.round((x - w / 2) * best.s + w / 2 + best.dx), gy = Math.round((y - h / 2) * best.s + h / 2 + best.dy);
+    if (gx >= 0 && gy >= 0 && gx < w && gy < h && s0[gy * w + gx] && origA[(y * w + x) * 4 + 3] >= 8) m[y * w + x] = 1;
+  }
+  // pulizia: chiusura 2 px, componenti piccole via (< 5% della più grande), buchi chiusi pieni
+  m = morph(morph(m, 2, true), 2, false);
+  const comp = new Int32Array(w * h).fill(-1), sizes = [];
+  for (let s1 = 0; s1 < w * h; s1++) {
+    if (!m[s1] || comp[s1] >= 0) continue;
+    const id = sizes.length, st = [s1]; comp[s1] = id; let n = 0;
+    while (st.length) { const i = st.pop(); n++; const x = i % w, y = (i / w) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (m[j] && comp[j] < 0) { comp[j] = id; st.push(j); } } }
+    sizes.push(n);
+  }
+  const big = Math.max(0, ...sizes);
+  for (let j = 0; j < w * h; j++) if (m[j] && sizes[comp[j]] < 0.05 * big) m[j] = 0;
+  fillSmallHoles(m, w, h, 0.02, (j) => origA[j * 4 + 3] >= 8);
+  let n = 0; for (let j = 0; j < w * h; j++) n += m[j];
+  return { m, checks: { ...checks, pixels: n } };
 }
