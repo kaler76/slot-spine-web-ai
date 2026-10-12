@@ -123,3 +123,15 @@ test("H7 Domatrice: tutte le mesh sulla sagoma, nessun ripiego nel riepilogo", (
   for (const [n, i] of Object.entries(report.meshInfo)) assert.equal(i.metodo, "sagoma", `${n}: ${i.motivo}`);
   assert.ok(!report.decision.some((d) => /GRIGLIA rettangolare/.test(d)));
 });
+
+// BARRIERA ANATOMICA nella media dei pesi (zeus-mesh-15.1, analisi 12 ott P1), di serie SPENTA: confronto col metodo attuale
+test("W2 barriera: tagliati solo lati nel trasparente o fra parti incompatibili; pesi ancora morbidi; senza barriera tutto uguale", () => {
+  const cut = [];
+  const on = buildMeshRig(input, { ...MESH_RIG_RULES, smoothBarrier: true, __cut: cut });
+  const st = on.report.smoothStats.corpo;
+  assert.ok(st && st.tagliati > 0, JSON.stringify(st));
+  for (const k of Object.keys(st.motivi)) assert.ok(k === "trasparente" || /braccio_sx\+braccio_dx|braccio_.+\+testa|oggetto_.+\+testa/.test(k), k);
+  const off = weightJumps(buildMeshRig(input, { ...MESH_RIG_RULES, weightSmooth: 0 }).json), w = weightJumps(on.json);
+  assert.ok(w.big < off.big / 3, `salti > 0,6 con barriera: ${w.big} (senza media ${off.big})`);
+  assert.deepEqual(report.smoothStats, {}, "di serie spenta: nessuna statistica, risultato identico a prima");
+});

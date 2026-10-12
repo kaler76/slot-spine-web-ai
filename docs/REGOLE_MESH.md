@@ -260,6 +260,16 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R26 — Barriera anatomica nella media dei pesi (W2), zeus-mesh-15.1 — PROVA, di serie spenta
+Analisi 12 ott P1: la media dei pesi (R17) correva su tutti i lati dei triangoli, anche attraverso il trasparente
+(corridoi della sagoma, buchi riempiti: dentro un cerchio, fra braccio sul fianco e busto). Con `smoothBarrier` (casella
+"🧪 Pesi con barriera") la media usa un grafo a parte: tolti i lati con una tratta ≥ 3 px fuori dai pixel visibili
+allargati di 4 px (i lati del contorno restano), e i lati fra parti incompatibili (braccio sinistro ↔ destro, testa ↔
+braccio/oggetto). Il grafo per disegnare non cambia. `report.smoothStats[mesh] = { lati, tagliati, motivi }`.
+Confronto sui casi di riferimento (vertici con pesi cambiati > 5%): avvocato 12, Domatrice 18, Jessica 64, Rita 0,
+Robin 16, Robin arco 11; vertici con ossa di entrambe le braccia e viso con ossa del braccio: invariati (già quasi
+assenti). Da approvare guardando i loop prima di accenderla di serie.
+
 ## R25 — Memoria delle risposte di Gemini (C1–C7) e diagnostica delle mesh (H6–H7), zeus-mesh-15
 Analisi tecnica del 12 ott (revisione 8afad55), punti P1 "crediti Gemini" e P2 "ripiego poco osservabile".
 - **Risposta generativa memorizzata per CONTENUTO della richiesta** (`src/lib/geminiCache.js`): chiave = tipo

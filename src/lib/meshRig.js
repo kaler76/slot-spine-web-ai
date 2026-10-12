@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.1";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -1200,7 +1200,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   };
   const meshW = {}; // pesi finali per mesh (per saldare le palpebre al corpo)
   // DIAGNOSTICA (analisi 12 ott): per ogni mesh, metodo usato e motivo del ripiego sulla griglia rettangolare
-  const meshInfo = {};
+  const meshInfo = {}, smoothStats = {};
   function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
     let order, hull, triangles = null, U, V, edges = null;
@@ -1264,13 +1264,44 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     }
     // PESI MORBIDI (R17): media coi vicini lungo i lati dei triangoli (solo DENTRO la mesh: due parti vicine ma
     // staccate non si scambiano pesi), più passate; oggetto rigido e zona bloccata restano come sono
+    // BARRIERA ANATOMICA (zeus-mesh-15, analisi 12 ott, P1): con rules.smoothBarrier la media usa un grafo a parte,
+    // senza i lati che attraversano il trasparente (la sagoma unisce le parti staccate con corridoi) e senza i lati
+    // fra parti che non si toccano anatomicamente (braccio sinistro ↔ destro, testa ↔ braccio). Il grafo per disegnare
+    // resta lo stesso. Di serie spenta finché il confronto col metodo attuale non è approvato.
+    let nbS = nb, cutEdges = 0, allEdges = 0;
+    if (rules.smoothBarrier) {
+      const ok = (a, b) => {
+        if (a === b) return true;
+        const base = (l) => String(l).replace(/_(sx|dx)$/, ""), side = (l) => (String(l).match(/_(sx|dx)$/) || [])[1];
+        if (side(a) && side(b) && side(a) !== side(b)) return false;
+        const pair = [base(a), base(b)].sort().join("+");
+        return ["braccio+busto", "busto+testa", "braccio+oggetto", "capelli+testa", "busto+capelli"].includes(pair);
+      };
+      const im = images[name];
+      // pixel visibili allargati di 4 px (il contorno della sagoma sta 3 px fuori dai pixel: R16)
+      let dil = null;
+      if (im && im.width === bw && im.height === bh) {
+        const d = new Uint8Array(bw * bh), q = [];
+        for (let i = 0; i < bw * bh; i++) if (im.rgba[i * 4 + 3] >= 128) { d[i] = 1; q.push(i); }
+        for (let k = 0; k < q.length; k++) { const i = q[k]; if (d[i] > 4) continue; const x = i % bw, y = (i / bw) | 0; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= bw || Y >= bh) continue; const j = Y * bw + X; if (!d[j]) { d[j] = d[i] + 1; q.push(j); } } }
+        dil = d;
+      }
+      const opaque = (x, y) => { if (!dil) return true; const X = Math.round(x - bx0), Y = Math.round(y - by0); if (X < 0 || Y < 0 || X >= bw || Y >= bh) return false; return dil[Y * bw + X] > 0; };
+      // un lato "attraversa il trasparente" se una TRATTA di almeno 3 px consecutivi è fuori dai pixel visibili
+      // allargati (i lati del contorno tagliano gli angoli concavi per 1–2 px: non contano)
+      const through = (p, q) => { const L = Math.hypot(q.x - p.x, q.y - p.y), n = Math.max(2, Math.ceil(L)); let run = 0; for (let k = 1; k < n; k++) { const t = k / n; if (opaque(p.x + (q.x - p.x) * t, p.y + (q.y - p.y) * t)) run = 0; else if (++run * (L / n) >= 3) return false; } return true; };
+      const why = {};
+      nbS = nb.map((set, i) => new Set([...set].filter((j) => { allEdges++; const onHull = i < hull && j < hull && (Math.abs(i - j) === 1 || Math.abs(i - j) === hull - 1); // lato del contorno: corre lungo la sagoma
+        const a = ok(LB[i], LB[j]), b = a && (onHull || through(PX[i], PX[j])); if (!b) { if (rules.__cut && i < j) rules.__cut.push([PX[i], PX[j], a]); cutEdges++; const k = a ? "trasparente" : [LB[i], LB[j]].sort().join("+"); why[k] = (why[k] || 0) + 0.5; } return b; })));
+      smoothStats[name] = { lati: allEdges / 2, tagliati: cutEdges / 2, motivi: why };
+    }
     for (let it = 0; it < (rules.weightSmooth ?? 0); it++) {
       const next = WS.map((w, i) => {
-        if (pin[i] || !nb[i].size) return w;
+        if (pin[i] || !nbS[i].size) return w;
         const acc = {};
         for (const k in w) acc[k] = 0.5 * w[k];
-        const share = 0.5 / nb[i].size;
-        for (const j of nb[i]) for (const k in WS[j]) acc[k] = (acc[k] || 0) + share * WS[j][k];
+        const share = 0.5 / nbS[i].size;
+        for (const j of nbS[i]) for (const k in WS[j]) acc[k] = (acc[k] || 0) + share * WS[j][k];
         return acc;
       });
       for (let i = 0; i < WS.length; i++) WS[i] = next[i];
@@ -1572,7 +1603,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   return {
     json,
     images,
-    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes, raisedArms, aiArms: decision.arms.filter((a) => free[a]?.ai), meshInfo }
+    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes, raisedArms, aiArms: decision.arms.filter((a) => free[a]?.ai), meshInfo, smoothStats }
   };
 }
 

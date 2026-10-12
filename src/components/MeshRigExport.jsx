@@ -62,6 +62,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   const [gem, setGem] = useState(null); // { kind, patch, previews: { orig, gen, result } }
   // braccio alzato separato con Gemini (R22): immagine senza il braccio → maschera e "dietro"
   const [armAi, setArmAi] = useState(true);
+  const [smoothBarrier, setSmoothBarrier] = useState(false); // prova: media dei pesi con barriera anatomica (R26)
   const [armGem, setArmGem] = useState({}); // { [lato]: { patch, previews } | { error } }
   const [pkg, setPkg] = useState(null);
   const [status, setStatus] = useState("");
@@ -184,6 +185,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         cuts,
         smile,
         lockObject,
+        smoothBarrier,
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
       let smilePatch = null, fallbackNote = "";
@@ -304,6 +306,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         ))}
         <label className="field-label-inline" title="Gemini ridisegna l'immagine senza il braccio alzato: il pezzo è la differenza (pixel dell'originale), dietro c'è quello che Gemini ha ridisegnato">
           <input type="checkbox" checked={armAi && (cuts.arm || cuts.raisedArm)} disabled={busy} onChange={(e) => { setArmAi(e.target.checked); if (e.target.checked && !cuts.arm && !cuts.raisedArm) setCuts({ ...cuts, raisedArm: true }); }} /> 🤖 Braccio alzato con AI
+        </label>
+        <label className="field-label-inline" title="Prova: nella media dei pesi niente passaggi attraverso il trasparente né fra parti che non si toccano (braccio destro ↔ sinistro, testa ↔ braccio). Confronta con la casella spenta.">
+          <input type="checkbox" checked={smoothBarrier} disabled={busy} onChange={(e) => setSmoothBarrier(e.target.checked)} /> 🧪 Pesi con barriera
         </label>
         <label className="field-label-inline" title="Braccio e oggetto (arco, spada...) restano fermi; il resto del personaggio si muove">
           <input type="checkbox" checked={lockObject} disabled={busy || !(cuts.arm || cuts.raisedArm)} onChange={(e) => setLockObject(e.target.checked)} /> 🔒 Oggetto fermo
