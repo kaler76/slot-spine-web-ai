@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.2";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.3";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -164,6 +164,8 @@ export function decideCuts({ counts, fgN, eyes, hairN, free = {} }, rules = MESH
   const arms = [];
   for (const s of ["sx", "dx"]) {
     const n = counts[`oggetto_${s}`] || 0;
+    // taglio annullato dal controllo del pezzo (buildMeshRig, 15.3): il braccio resta in mesh
+    if (rules.noCutArms?.includes(s)) { reasons.push(`braccio_${s}: mesh (taglio annullato: ${rules.noCutWhy?.[s] || "pezzo non affidabile"})`); continue; }
     // braccio ALZATO e libero: casella a parte, vale anche col taglio "braccio con oggetto" spento (Jessica, 10 ott:
     // "il braccio non è tagliato??" con l'altra casella spenta)
     if ((rules.cuts.raisedArm ?? rules.cuts.arm) && free[s]?.free) { arms.push(s); reasons.push(`braccio_${s}: TAGLIO, braccio alzato e libero (staccato dal busto per il ${Math.round(100 * free[s].frac)}%)${n >= rules.objectMin * fgN ? `, con l'oggetto (${n} px)` : ""}`); continue; }
@@ -617,7 +619,44 @@ export function findMouth(landmarks, ipd, W, H, rgba, fg) {
  * @param {{ width, height, rgba, fg: Uint8Array, parts: Uint8Array, categories?: Uint8Array, landmarks, joints }} input
  * @returns {{ json, images: { [nome]: {width,height,rgba} }, report }}
  */
-export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch = null, partPatches = null }, rules = MESH_RIG_RULES) {
+/**
+ * Rig mesh con CONTROLLO AUTOMATICO dei tagli del braccio (zeus-mesh-15.3, Avventuriero 12 ott: "dover scegliere io
+ * andando a tentativi non è opportuno"). Un pezzo del braccio tagliato bene è UN corpo unico (casi approvati: parte
+ * principale ≥ 99% del pezzo, al massimo 4 parti da 30 px); se il riconoscimento dell'oggetto sbaglia (borsa sul fianco
+ * presa per oggetto in mano, completamento per colore che entra in giacca e pantaloni) il pezzo esce a SCHEGGE
+ * (Avventuriero: 18 parti, principale 63%). In quel caso il taglio di quel braccio si annulla da solo (resta in mesh col
+ * corpo) e il riepilogo lo dice. Non vale per i bracci separati con Gemini (sagoma già pulita).
+ */
+export function buildMeshRig(input, rules = MESH_RIG_RULES) {
+  const first = buildMeshRigOnce(input, rules);
+  if (rules.pieceCheck === false) return first;
+  const bad = {};
+  for (const s of ["sx", "dx"]) {
+    const im = first.images[`braccio_${s}`];
+    if (!im || first.report.aiArms?.includes(s)) continue;
+    const f = pieceFragments(im, 30);
+    if (f.parts > (rules.pieceMaxParts ?? 6) || f.main < (rules.pieceMinMain ?? 0.9)) bad[s] = `pezzo a schegge: ${f.parts} parti, la principale è il ${Math.round(100 * f.main)}%`;
+  }
+  if (!Object.keys(bad).length) return first;
+  const again = buildMeshRigOnce(input, { ...rules, noCutArms: [...(rules.noCutArms || []), ...Object.keys(bad)], noCutWhy: { ...(rules.noCutWhy || {}), ...bad } });
+  again.report.pieceCheck = bad;
+  return again;
+}
+
+/** Parti di un pezzo (pixel opachi collegati, 8 vicini): quante ≥ min px e quota della più grande. */
+export function pieceFragments(im, min = 30) {
+  const { width: w, height: h, rgba } = im, seen = new Uint8Array(w * h), sizes = [];
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (seen[s0] || rgba[s0 * 4 + 3] < 128) continue;
+    const st = [s0]; seen[s0] = 1; let n = 0;
+    while (st.length) { const i = st.pop(); n++; const x = i % w, y = (i / w) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (!seen[j] && rgba[j * 4 + 3] >= 128) { seen[j] = 1; st.push(j); } } }
+    sizes.push(n);
+  }
+  const tot = sizes.reduce((a, b) => a + b, 0) || 1;
+  return { parts: sizes.filter((v) => v >= min).length, main: Math.max(0, ...sizes) / tot };
+}
+
+function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch = null, partPatches = null }, rules = MESH_RIG_RULES) {
   let x0 = W, y0 = H, x1 = -1, y1 = -1, fgN = 0;
   for (let i = 0; i < W * H; i++) if (fg[i]) { fgN++; const x = i % W, y = (i / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
   x0 = Math.max(0, x0 - rules.pad); y0 = Math.max(0, y0 - rules.pad); x1 = Math.min(W - 1, x1 + rules.pad); y1 = Math.min(H - 1, y1 + rules.pad);

@@ -260,6 +260,14 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R28 — Controllo automatico dei tagli del braccio (P1–P3), zeus-mesh-15.3
+Avventuriero (12 ott): "dover scegliere io andando a tentativi non è opportuno". Dopo il rig, ogni pezzo del braccio
+NON separato con Gemini si controlla: un taglio buono è un corpo unico (casi approvati: parte principale ≥ 99%, al
+massimo 4 parti da ≥ 30 px); la borsa dell'Avventuriero presa per oggetto in mano dava 18 parti con la principale al
+63%. Se il pezzo ha più di 6 parti o la principale sotto il 90%, il taglio di quel braccio si ANNULLA da solo (resta in
+mesh col corpo), il rig si rifà e il riepilogo lo dice ("taglio annullato: pezzo a schegge …"). `report.pieceCheck`.
+Pezzi reali dell'Avventuriero in `tests/fixtures/pieces/`. Le caselle dei tagli possono restare accese di serie.
+
 ## R27 — Raccordo della spalla (GR4), zeus-mesh-15.2
 Avventuriero (12 ott): "la spalla si spezza". Il pezzo del braccio tagliato dalla SPALLA era tutto sulle ossa del
 braccio: quando l'omero ruota, l'attacco si staccava a scalino dal busto. Ora nel pezzo i vertici vicini all'attacco
