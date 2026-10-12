@@ -352,6 +352,14 @@ Ogni traccia torna al valore iniziale a fine loop.
 legge il pacchetto, nessun valore non valido, vertici uguali al simulatore entro 0,64 px.
 Comando: `node scripts/verifySpineRuntime.mjs <cartella con spine-core> <json> <atlas>`.
 
+## Cache Gemini — risultati e rifiuti nella sessione
+
+- `Ricrea` riusa risultati, rifiuti ed errori del braccio e del sorriso con gli stessi input.
+- Chiave SHA-256 del contenuto di immagine e sagoma, dimensioni e parametri effettivi: posa precisa, lato, spalle, oggetto/crop, bocca/tipo di sorriso, prompt e risoluzione richiesta. Le opzioni di animazione non invalidano la cache.
+- `Ridisegna bocca (Gemini)` resta disponibile dopo un rifiuto. `Ridisegna braccio (Gemini)` rigenera soltanto il lato selezionato. Richieste simultanee identiche condividono quella in corso.
+- Cache in memoria della pagina: sopravvive alla ricreazione dei componenti e degli array, ma non al ricaricamento della pagina o alla chiusura della scheda. Non è un archivio permanente degli asset.
+- Test: `tests/geminiCache.test.mjs`, senza chiamate esterne. Prompt e algoritmi grafici invariati.
+
 ## Strumenti
 - `scripts/zeusMesh.mjs [cartella] [ampiezze×] [fotogrammi]`: genera Zeus + fotogrammi di controllo.
 - `scripts/meshCase.mjs <nome> [cartella] [fotogrammi]`: stesso metodo su un caso di `tests/fixtures/recognition/<nome>/`

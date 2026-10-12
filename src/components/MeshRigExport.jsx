@@ -7,6 +7,7 @@ import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromG
 import { armRemovalPrompts, armOnlyPrompts, armCropBox, flattenOnKey, armPartFromGemini } from "../lib/partGemini.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { poseAt } from "../lib/animationSim.js";
+import { geminiCache, imageCacheKey, editCacheKey } from "../lib/geminiCache.js";
 
 // Gemini (gemini-3-pro-image-preview) tramite la funzione edge già in produzione: prompt personalizzato +
 // immagine di riferimento; nessuna nuova funzione da pubblicare. Formato di uscita della funzione: 16:9, 1K.
@@ -31,10 +32,6 @@ async function geminiEditMouth(cropCanvas, prompt, why = "ritocco della bocca") 
   if (!res.ok || data?.error || !data?.imageBase64) throw new Error(data?.error || `Errore HTTP ${res.status}`);
   return data.imageBase64;
 }
-// risultati di Gemini per il braccio, per IMMAGINE (chiave: i pixel dell'originale) e per lato, con la posa del braccio:
-// "Ricrea" e i cambi di caselle non richiamano Gemini (crediti); solo "Ridisegna braccio" o un'immagine/posa nuova
-const ARM_CACHE = new WeakMap();
-const armKey = (a) => [a.side, a.sh, a.el, a.wr, a.hd].map((p) => (typeof p === "string" ? p : `${Math.round(p.x / 4)},${Math.round(p.y / 4)}`)).join("|");
 function loadB64(b64) {
   return new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error("immagine di Gemini non leggibile")); im.src = `data:image/png;base64,${b64}`; });
 }
@@ -76,13 +73,11 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   // a nuova analisi il pacchetto precedente non vale più
   // (dipende dai PIXEL e dalle parti, non dall'oggetto "original": la pagina lo ricrea a ogni aggiornamento e così si
   // azzeravano pacchetto e risultati di Gemini, che a "Ricrea" veniva richiamato)
-  useEffect(() => { setPkg(null); setGem(null); setArmGem(ARM_CACHE.get(original.rgba)?.shown || {}); setFrame(null); }, [original.rgba, parts]);
+  useEffect(() => { setPkg(null); setGem(null); setArmGem({}); setFrame(null); }, [original.rgba, parts]);
 
   /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
-  async function makeGeminiSmile(fg) {
+  async function makeGeminiSmile(mouth) {
     const { width: W, height: H, rgba } = original;
-    const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
-    const mouth = findMouth(landmarks, ipd, W, H, rgba, fg);
     const box = mouthCropBox(mouth);
     const orig = cropRgba(rgba, W, H, box);
     // sfondo grigio medio sotto il trasparente: Gemini lavora meglio su un'immagine piena
@@ -115,7 +110,6 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     }
     const url = (c) => c.toDataURL("image/png");
     const g = { kind: smileKind, patch, previews: { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small), result: url(canvasOf(result, box.width, box.height)) } };
-    setGem(g);
     return g;
   }
 
@@ -191,15 +185,23 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         amp: Object.fromEntries(Object.entries(MESH_RIG_RULES.amp).map(([k, v]) => [k, v * boost]))
       };
       let smilePatch = null, fallbackNote = "";
+      // Hash del contenuto, non identità dell'array: anche una nuova analisi degli stessi pixel riusa la risposta.
+      const imageKey = (smile !== "no" && smileHow === "gemini") || (armAi && (cuts.raisedArm || cuts.arm))
+        ? await imageCacheKey(original, fg) : null;
       if (smile !== "no" && smileHow === "gemini") {
         try {
-          const g = gem && gem.kind === smileKind && !forceGemini ? gem : await makeGeminiSmile(fg);
+          const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
+          const mouth = findMouth(landmarks, ipd, W, H, rgba, fg);
+          const key = editCacheKey(imageKey, "smile", { mouth, box: mouthCropBox(mouth), smileKind, prompts: SMILE_PROMPTS[smileKind], requestSide: GEMINI_SIDE });
+          const g = await geminiCache.run(key, () => makeGeminiSmile(mouth), { force: forceGemini });
+          setGem(g);
           smilePatch = g.patch;
         } catch (e) {
+          setGem(null);
           if (!e.refused) throw e;
           // Gemini non disegna questo viso (filtro: spesso volti che sembrano persone reali): si usa la deformazione
           rules.smile = smile;
-          fallbackNote = ` ⚠️ ${e.message}: usata la deformazione (senza AI). Per riprovare con Gemini premi di nuovo "Ricrea".`;
+          fallbackNote = ` ⚠️ ${e.message}: usata la deformazione (senza AI). Per riprovare premi "Ridisegna bocca (Gemini)".`;
         }
         setStatus("⏳ Creo il rig mesh...");
       }
@@ -208,22 +210,16 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       let partPatches = null;
       if (armAi && (cuts.raisedArm || cuts.arm)) {
         const first = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
-        const store = ARM_CACHE.get(rgba) || { byKey: {}, shown: {} };
         const got = {};
         for (const arm of first.report.raisedArms || []) {
-          const key = armKey(arm);
-          if (forceArm || !store.byKey[key]) {
-            try { store.byKey[key] = await makeGeminiArm(arm, fg); }
-            catch (e) { store.byKey[key] = { error: e.message || String(e) }; }
-          }
-          got[arm.side] = store.byKey[key];
+          const key = editCacheKey(imageKey, "arm", { arm, box: armCropBox(arm), prompts: armRemovalPrompts(arm.imageSide), isolationPrompts: armOnlyPrompts(arm.imageSide), requestSide: GEMINI_SIDE });
+          try { got[arm.side] = await geminiCache.run(key, () => makeGeminiArm(arm, fg), { force: forceArm === arm.side }); }
+          catch (e) { got[arm.side] = { error: e.message || String(e) }; }
           const r = got[arm.side];
           const err = r.error || r.patch?.error;
           if (err) fallbackNote += ` ⚠️ Braccio alzato con Gemini non usato (${err}): taglio senza AI.`;
           else (partPatches ||= {})[arm.side] = r.patch;
         }
-        store.shown = got;
-        ARM_CACHE.set(rgba, store);
         setArmGem(got);
         setStatus("⏳ Creo il rig mesh...");
       }
@@ -350,6 +346,9 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
         <button type="button" className="btn" disabled={busy} onClick={() => build(false)}>
           {pkg ? "🔄 Ricrea" : "▶️ Crea character"}
         </button>
+        {smile !== "no" && smileHow === "gemini" && (
+          <button type="button" className="btn secondary" disabled={busy} onClick={() => build(true)}>🔄 Ridisegna bocca (Gemini)</button>
+        )}
         {pkg && (
           <button type="button" className="btn secondary" onClick={download}>⬇️ Scarica pacchetto Spine 4.1</button>
         )}
@@ -366,9 +365,6 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             Riallineamento: {gem.patch.shift.dx.toFixed(1)}, {gem.patch.shift.dy.toFixed(1)} px, scala {gem.patch.shift.s.toFixed(3)}
             {gem.patch.mismatch > 22 && <div style={{ color: "#ffb347" }}>⚠️ Gemini ha cambiato anche il resto del viso: meglio ridisegnare.</div>}
-            <div>
-              <button type="button" className="btn secondary" disabled={busy} onClick={() => build(true)} style={{ marginTop: 6 }}>🔄 Ridisegna bocca (Gemini)</button>
-            </div>
           </div>
         </div>
       )}
@@ -383,7 +379,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
           <div style={{ fontSize: 12, opacity: 0.8 }}>
             braccio_{side}: {r.error || r.patch?.error ? <span style={{ color: "#ffb347" }}>⚠️ {r.error || r.patch.error}</span> : <>pezzo di {r.patch.n} px, scarto {r.patch.checks.mismatch}, grandezza ×{r.patch.checks.ratio}{r.patch.checks.iso ? (r.patch.checks.iso.error ? ` · sagoma: ${r.patch.checks.iso.error}` : " · sagoma pulita da \"solo braccio\"") : " · sagoma dalla sola differenza"}</>}
             <div>
-              <button type="button" className="btn secondary" disabled={busy} onClick={() => build(false, true)} style={{ marginTop: 6 }}>🔄 Ridisegna braccio (Gemini)</button>
+              <button type="button" className="btn secondary" disabled={busy} onClick={() => build(false, side)} style={{ marginTop: 6 }}>🔄 Ridisegna braccio (Gemini)</button>
             </div>
           </div>
         </div>
