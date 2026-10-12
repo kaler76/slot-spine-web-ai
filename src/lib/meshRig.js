@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.3";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.4";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -643,6 +643,84 @@ export function buildMeshRig(input, rules = MESH_RIG_RULES) {
   return again;
 }
 
+/**
+ * FESSURA di un occhio socchiuso (15.4): componente scura (ciglia + iride, luma < 60% della pelle sotto l'occhio) più
+ * vicina al punto della posa, dentro 0,32 × 0,14 distanze fra gli occhi. Restituisce la PALPEBRA CHIUSA disegnata:
+ * per colonna, sfumatura fra la pelle sopra e quella sotto la fessura, linea delle ciglia (colore della fessura) al 60%
+ * dell'altezza, bordi morbidi a ellisse. null se la fessura non c'è o è troppo grande/piccola.
+ */
+export function findSlit(c, ipd, W, H, rgba, fg) {
+  if (!c) return null;
+  const rx = Math.round(0.3 * ipd), ry = Math.round(0.1 * ipd);
+  const x0 = Math.max(4, Math.round(c.x - rx)), x1 = Math.min(W - 5, Math.round(c.x + rx)), y0 = Math.max(4, Math.round(c.y - ry)), y1 = Math.min(H - 5, Math.round(c.y + ry));
+  if (x1 <= x0 || y1 <= y0) return null;
+  // pelle: mediana per canale della fascia sotto l'occhio
+  const ch = [[], [], []];
+  for (let y = y1 + 2; y < Math.min(H, y1 + 2 + 1.5 * ry); y++) for (let x = Math.round(c.x - rx / 2); x < c.x + rx / 2; x++) { const i = y * W + x; if (x >= 0 && x < W && fg[i]) for (let k = 0; k < 3; k++) ch[k].push(rgba[i * 4 + k]); }
+  if (ch[0].length < 10) return null;
+  const skin = ch.map((a) => a.sort((p, q) => p - q)[a.length >> 1]);
+  const dist = (i) => Math.abs(rgba[i * 4] - skin[0]) + Math.abs(rgba[i * 4 + 1] - skin[1]) + Math.abs(rgba[i * 4 + 2] - skin[2]);
+  // APERTURA dell'occhio: si parte dal BIANCO (chiaro e poco saturo: in un occhio socchiuso è quasi tutto ciò che si
+  // vede oltre l'iride), poi righe e colonne attorno; dentro, i pixel lontani dal colore della pelle (ciglia, iride)
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const skinL = 0.3 * skin[0] + 0.59 * skin[1] + 0.11 * skin[2];
+  const white = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = (y + y0) * W + x + x0, r = rgba[i * 4], g = rgba[i * 4 + 1], bb = rgba[i * 4 + 2]; if (fg[i] && 0.3 * r + 0.59 * g + 0.11 * bb > 0.85 * skinL && Math.max(r, g, bb) - Math.min(r, g, bb) < 0.45 * Math.max(r, g, bb) && dist(i) > 60) white[y * w + x] = 1; }
+  const lab = new Int32Array(w * h).fill(-1); let wb = null;
+  for (let s0 = 0; s0 < w * h; s0++) {
+    if (!white[s0] || lab[s0] >= 0) continue;
+    const st = [s0], px = []; lab[s0] = s0;
+    while (st.length) { const i = st.pop(); px.push(i); const x = i % w, y = (i / w) | 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= w || Y >= h) continue; const j = Y * w + X; if (white[j] && lab[j] < 0) { lab[j] = s0; st.push(j); } } }
+    if (px.length < 4) continue;
+    let mx = 0, my = 0; for (const i of px) { mx += i % w; my += (i / w) | 0; } mx /= px.length; my /= px.length;
+    const d = Math.hypot(mx + x0 - c.x, my + y0 - c.y) - 0.5 * Math.sqrt(px.length);
+    if (!wb || d < wb.d) wb = { px, d };
+  }
+  if (!wb) return null;
+  let wa = w, wbT = h, wc = -1, wd = -1; for (const i of wb.px) { const x = i % w, y = (i / w) | 0; wa = Math.min(wa, x); wc = Math.max(wc, x); wbT = Math.min(wbT, y); wd = Math.max(wd, y); }
+  // APERTURA = mandorla (ellisse) sulle righe del bianco; di lato si estende fin dove, su quelle righe, ci sono pixel
+  // scuri (iride, ciglia, angolo interno) entro 0,2 ipd dal bianco. Niente crescita libera: la piega scura sopra
+  // l'occhio la portava sulle sopracciglia (forme a blocchi)
+  const ay0 = Math.max(0, wbT - Math.round(0.065 * ipd)), ay1 = Math.min(h - 1, wd + Math.round(0.015 * ipd)); // sopra: anche le ciglia alte
+  let ax0 = wa, ax1 = wc;
+  const reach = Math.round(0.2 * ipd);
+  for (let y = ay0; y <= ay1; y++) for (let x = Math.max(0, wa - reach); x <= Math.min(w - 1, wc + reach); x++) {
+    const i = (y + y0) * W + x + x0; if (!fg[i] || dist(i) <= 70) continue;
+    if (x < ax0) ax0 = x; if (x > ax1) ax1 = x;
+  }
+  const sw = ax1 - ax0 + 1, shh = ay1 - ay0 + 1;
+  if (sw < 0.12 * ipd || sw > 0.62 * ipd || sw < 1.6 * shh) return null; // non è una fessura orizzontale
+  const m = 3, bx0 = ax0 + x0 - m, by0 = ay0 + y0 - m, bw = sw + 2 * m, bh = shh + 2 * m;
+  const ecx = (bw - 1) / 2, ecy = (bh - 1) / 2, erx = sw / 2 + 1.5, ery = shh / 2 + 1.5;
+  const M = new Uint8Array(bw * bh), colTop = new Int32Array(bw).fill(-1), colBot = new Int32Array(bw).fill(-1);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) if (((x - ecx) / erx) ** 2 + ((y - ecy) / ery) ** 2 <= 1) { M[y * bw + x] = 1; if (colTop[x] < 0) colTop[x] = y; colBot[x] = y; }
+  const best = { px: [] };
+  for (let y = ay0; y <= ay1; y++) for (let x = ax0; x <= ax1; x++) { const j = y * w + x; if (dist((y + y0) * W + x + x0) > 70) best.px.push(j); }
+  if (best.px.length < 6) return null;
+  // colore delle ciglia: media dei pixel più scuri della fessura
+  const dk = best.px.map((i) => { const x = (i % w) + x0, y = ((i / w) | 0) + y0, k = (y * W + x) * 4; return [rgba[k], rgba[k + 1], rgba[k + 2]]; }).sort((p, q) => p[0] + p[1] + p[2] - (q[0] + q[1] + q[2])).slice(0, Math.max(1, best.px.length >> 2));
+  const lash = [0, 1, 2].map((k) => dk.reduce((s, p) => s + p[k], 0) / dk.length);
+  const out = new Uint8ClampedArray(bw * bh * 4), ccx = (bw - 1) / 2;
+  for (let x = 0; x < bw; x++) {
+    if (colTop[x] < 0) continue;
+    const t0 = colTop[x], t1 = colBot[x], ex = Math.abs(x - ccx) / (ccx + 0.5);
+    for (let y = t0; y <= t1; y++) {
+      const o = (y * bw + x) * 4, t = (y - t0) / Math.max(1, t1 - t0);
+      // pelle della palpebra: più chiara in alto, appena più scura verso le ciglia
+      const sh = 1.02 - 0.12 * t;
+      for (let k = 0; k < 3; k++) out[o + k] = skin[k] * sh;
+      // ciglia sul bordo basso (palpebra chiusa), più sottili alle estremità
+      const lw = 1.6 * (1 - ex * ex) + 0.4, dl = t1 - 1 - y;
+      if (dl >= 0 && dl < lw) { const f = Math.min(1, lw - dl); for (let k = 0; k < 3; k++) out[o + k] = out[o + k] * (1 - f) + lash[k] * f; }
+      // bordo sfumato: 1 px dal contorno della maschera
+      let edge = 1;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const r = Math.hypot(dx, dy); if (r > 2.2 || r === 0) continue; const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= bw || Y >= bh || !M[Y * bw + X]) edge = Math.min(edge, 0.35 + 0.3 * (r - 1)); }
+      out[o + 3] = Math.round(255 * edge);
+    }
+  }
+  return { cx: bx0 + bw / 2, cy: by0 + bh / 2, x0: bx0, y0: by0, w: bw, h: bh, rgba: out };
+}
+
 /** Parti di un pezzo (pixel opachi collegati, 8 vicini): quante ≥ min px e quota della più grande. */
 export function pieceFragments(im, min = 30) {
   const { width: w, height: h, rgba } = im, seen = new Uint8Array(w * h), sizes = [];
@@ -739,6 +817,7 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
 
   // occhi
   let eyeSmall = null;
+  const squint = []; // occhi socchiusi: fessura da coprire con una palpebra disegnata nel battito
   const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
   let eyes = rules.cuts.eyes ? [["sx", landmarks[2]], ["dx", landmarks[5]]].map(([s, c]) => { const e = findEye(c, ipd, W, H, rgba, fg); return e && { side: s, ...e }; }).filter(Boolean) : [];
   // occhi STIMATI (posa a mano: visibilità < 0,5) o non trovati: si cercano nel viso (findEyePair)
@@ -772,6 +851,8 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
   if (eyes.length === 2 && eyeInfo.some((s) => s.r < (rules.eyeMinArea ?? 0.01) || s.bw < 0.15)) {
     eyes = [];
     eyeSmall = eyeInfo.map((s) => `${s.side} ${s.n} px`).join(", ");
+    // BATTITO PER OCCHI SOCCHIUSI (15.4): la fessura scura dell'occhio vicino al punto della posa
+    if (rules.squintBlink !== false) for (const [sd, c] of [["sx", landmarks[2]], ["dx", landmarks[5]]]) { const sl = findSlit(c, ipd, W, H, rgba, fg); if (sl) squint.push({ side: sd, ...sl }); }
   }
 
   // braccio LIBERO: campioni lungo omero (dal 35%) e avambraccio; "a contatto" se entro 0,12 spalle c'è il busto
@@ -807,7 +888,7 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
   for (const s of ["sx", "dx"]) if (aiPatch(s)) free[s] = { ...free[s], free: true, frac: 1, upperFree: true, ai: true };
   const decision = decideCuts({ counts, fgN, eyes, hairN, free }, rules);
   if (headFixed > 0.002 * fgN) decision.reasons.push(`testa: ${headFixed} px riconosciuti come corpo spostati sulla testa (si muove rigida, il viso non si deforma)`);
-  if (eyeSmall) decision.reasons = decision.reasons.map((r) => (r.startsWith("occhi:") ? `occhi: troppo socchiusi per il battito (buco di ${eyeSmall}): restano come nel disegno` : r));
+  if (eyeSmall) decision.reasons = decision.reasons.map((r) => (r.startsWith("occhi:") ? (squint.length ? `occhi: socchiusi (buco di ${eyeSmall}): battito con palpebra disegnata sulla fessura (${squint.map((q) => q.side).join(", ")})` : `occhi: troppo socchiusi per il battito (buco di ${eyeSmall}): restano come nel disegno`) : r));
   decision.freeArms = decision.arms.filter((a) => free[a]?.free);
   for (const s of decision.arms) if (free[s]?.ai) decision.reasons.push(`braccio_${s}: ritagliato con GEMINI (immagine senza il braccio, differenza con l'originale)`);
 
@@ -819,6 +900,7 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
     bones.push({ name: "capelli_1", parent: "testa", head: top, tail: m1 }, { name: "capelli_2", parent: "capelli_1", head: m1, tail: bot });
     for (let i = 0; i < W * H; i++) if (hair[i]) lab[i] = L_.capelli;
   } else hair.fill(0);
+  for (const q of squint) bones.push({ name: `palpebra_${q.side}`, parent: "viso", head: { x: q.cx, y: q.cy }, tail: { x: q.cx + 10, y: q.cy } });
   // occhi: ossa pupilla e palpebra
   for (const e of decision.eyes ? eyes : []) {
     const b = e.box, cx = (b.x0 + b.x1 + 1) / 2, cy = (b.y0 + b.y1 + 1) / 2;
@@ -1636,6 +1718,10 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
     slots.push({ ...slotFor("bocca_sorriso", "viso"), color: "ffffff00" });
   }
   for (const e of decision.eyes ? eyes : []) slots.push(rules.lid === "pelle" ? slotFor(`palpebra_${e.side}`, `occhio_${e.side}`) : { ...slotFor(`palpebra_${e.side}`, `palpebra_${e.side}`), color: "ffffff00" });
+  for (const q of squint) {
+    region(`palpebra_${q.side}`, `palpebra_${q.side}`, q.x0, q.y0, q.w, q.h, q.rgba);
+    slots.push({ ...slotFor(`palpebra_${q.side}`, `palpebra_${q.side}`), color: "ffffff00" }); // invisibile, compare nel battito
+  }
   for (const er of earrings) slots.push(slotFor(`orecchino_${er.side}`, `orecchino_${er.side}`));
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
@@ -1646,7 +1732,7 @@ function buildMeshRigOnce({ width: W, height: H, rgba, fg, parts, categories, la
     bones: jsonBones,
     slots,
     skins: [{ name: "default", attachments: skinAtt }],
-    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }, !!smilePatch, earrings) }
+    animations: { ambient: loopAnimation(rules, ch, decision, eyes, ipd, mouth && { ...mouth, visoA: world.viso.a }, !!smilePatch, earrings, squint) }
   };
   return {
     json,
@@ -1687,7 +1773,7 @@ export function smoothKeys(T, fns, fields) {
 }
 
 /** Loop di 6 s sul modello della Domatrice. */
-function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn = false, earrings = []) {
+function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn = false, earrings = [], squint = []) {
   const T = rules.loopSeconds, A = rules.amp;
   const wave = (k, ph = 0) => (t) => Math.sin(2 * Math.PI * (k * t / T + ph));
   const bump = (ph = 0) => (t) => 0.5 * (1 - Math.cos(2 * Math.PI * (t / T + ph)));
@@ -1753,6 +1839,11 @@ function loopAnimation(rules, height, decision, eyes, ipd, mouth, smileRedrawn =
       bones[`palpebra_${e.side}`] = { scale: [{ time: 0, x: 1, y: 0.05 }, { time: t0, x: 1, y: 0.05 }, { time: r3(t0 + 0.1), x: 1, y: 1 }, { time: r3(t0 + 0.167), x: 1, y: 1 }, { time: r3(t0 + 0.333), x: 1, y: 0.05 }, { time: T, x: 1, y: 0.05 }] };
       slotsAnim[`palpebra_${e.side}`] = { rgba: [{ time: 0, color: "ffffff00" }, { time: r3(t0 - 0.001), color: "ffffff00" }, { time: t0, color: "ffffffff" }, { time: r3(t0 + 0.333), color: "ffffffff" }, { time: r3(t0 + 0.334), color: "ffffff00" }] };
     }
+  }
+  // occhi socchiusi: la palpebra disegnata compare in dissolvenza rapida (0,07 s), resta 0,12 s, sparisce (0,1 s)
+  for (const q of squint) {
+    const t0 = rules.blinkAt, r3 = (v) => +v.toFixed(3);
+    slotsAnim[`palpebra_${q.side}`] = { rgba: [{ time: 0, color: "ffffff00" }, { time: t0, color: "ffffff00" }, { time: r3(t0 + 0.07), color: "ffffffff" }, { time: r3(t0 + 0.19), color: "ffffffff" }, { time: r3(t0 + 0.29), color: "ffffff00" }] };
   }
   return { bones, slots: slotsAnim };
 }

@@ -21,6 +21,7 @@ Ultimo in alto. Le regole valide sono sempre quelle del documento indicato; qui 
 | zeus-mesh-15.1 | 12 ott | Barriera anatomica nella media dei pesi, PROVA di serie spenta (casella "🧪 Pesi con barriera") con statistiche dei lati tagliati | Analisi 12 ott P1 (smoothing senza barriera) | W2 |
 | zeus-mesh-15.2 | 12 ott | Raccordo della spalla: l'attacco del braccio tagliato dalla spalla segue il petto | Avventuriero: "la spalla si spezza" | GR4 |
 | zeus-mesh-15.3 | 12 ott | Controllo automatico dei pezzi del braccio: pezzo a schegge = taglio annullato da solo | Avventuriero: borsa presa per oggetto, l'utente doveva spegnere caselle a tentativi | P1–P3 |
+| zeus-mesh-15.4 | 12 ott | Battito per occhi socchiusi: palpebra disegnata a mandorla sulla fessura, compare nel battito | Avventuriero: "ho messo animazione occhi ma non va" | S3 |
 | zeus-mesh-13.10 | 10 ott | Casella "Taglia braccio alzato" indipendente; il braccio alzato si anima anche con "Oggetto fermo" | Jessica: "il braccio non è tagliato??" (casella del braccio con oggetto spenta) | J5 |
 | zeus-mesh-13.9 | 10 ott | Inquadratura "Viso": da sopra la testa all'attacco del petto, larga come capelli e spalle, con le braccia tagliate che salgono fin lì | Jessica: "questo è il viso corretto" | build |
 | zeus-mesh-13.8 | 10 ott | Fumo vicino all'oggetto col braccio; inquadratura Busto che comprende il braccio alzato | Jessica: bocchino e fumo tagliati fuori nell'anteprima | J4 |

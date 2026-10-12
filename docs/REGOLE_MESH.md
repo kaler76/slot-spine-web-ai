@@ -260,6 +260,17 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R29 — Battito per occhi socchiusi (S3), zeus-mesh-15.4 — da approvare
+Avventuriero (12 ott): "ho messo animazione occhi ma non va" (R23 li lasciava fermi). Quando il buco è troppo piccolo
+(R23), `findSlit` cerca la fessura vicino al punto della posa: il BIANCO (chiaro, poco saturo) più vicino, le righe
+del bianco (-0,065 ipd sopra per le ciglia alte, +0,015 sotto), di lato fin dove su quelle righe ci sono pixel lontani
+dal colore della pelle entro 0,2 ipd (iride, angolo). Palpebra = mandorla (ellisse) color pelle (mediana sotto
+l'occhio, appena più scura verso il basso) con le ciglia sul bordo basso (colore dei pixel più scuri della fessura,
+più sottili alle estremità), bordo sfumato 2 px. Region su osso `palpebra_<lato>` (figlio di viso), invisibile a
+riposo; nel battito compare in 0,07 s, resta 0,12 s, sparisce in 0,1 s. Niente buco, niente bianco/pupilla. Scartata
+se la fessura non è orizzontale (larghezza < 1,6 × altezza) o fuori misura. `squintBlink: false` per spegnerla.
+Prima versione: una crescita libera lungo la piega scura saliva sulle sopracciglia (forme a blocchi) → mandorla.
+
 ## R28 — Controllo automatico dei tagli del braccio (P1–P3), zeus-mesh-15.3
 Avventuriero (12 ott): "dover scegliere io andando a tentativi non è opportuno". Dopo il rig, ogni pezzo del braccio
 NON separato con Gemini si controlla: un taglio buono è un corpo unico (casi approvati: parte principale ≥ 99%, al

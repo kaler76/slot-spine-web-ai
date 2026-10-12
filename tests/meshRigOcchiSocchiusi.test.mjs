@@ -21,10 +21,23 @@ const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, 
 const fg = Uint8Array.from(alpha, (a) => (a >= 128 ? 1 : 0));
 const input = { width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints };
 
-test("S1 buco degli occhi sotto la soglia: niente occhi animati, motivo nel riepilogo, nessun pezzo occhio", () => {
-  const { images, report } = buildMeshRig(input, { ...MESH_RIG_RULES, eyeMinArea: 0.5 });
+test("S1 buco degli occhi sotto la soglia: niente buco/bianco/pupilla; senza battito per socchiusi nessun pezzo occhio", () => {
+  const { images, report } = buildMeshRig(input, { ...MESH_RIG_RULES, eyeMinArea: 0.5, squintBlink: false });
   assert.ok(report.decision.some((d) => /troppo socchiusi/.test(d)), report.decision.join(" | "));
   assert.ok(!Object.keys(images).some((n) => /^(palpebra|bianco|pupilla)_/.test(n)), Object.keys(images).join(","));
+});
+
+test("S3 occhi socchiusi (15.4): palpebra disegnata sulla fessura, invisibile a riposo, compare nel battito", () => {
+  const { images, report, json } = buildMeshRig(input, { ...MESH_RIG_RULES, eyeMinArea: 0.5 });
+  assert.ok(report.decision.some((d) => /battito con palpebra disegnata/.test(d)), report.decision.join(" | "));
+  assert.ok(!Object.keys(images).some((n) => /^(bianco|pupilla)_/.test(n)));
+  for (const sd of ["sx", "dx"]) {
+    const im = images[`palpebra_${sd}`]; assert.ok(im, `palpebra_${sd}`);
+    const sl = json.slots.find((s) => s.name === `palpebra_${sd}`); assert.equal(sl.color, "ffffff00");
+    const k = json.animations.ambient.slots[`palpebra_${sd}`].rgba; assert.ok(k.some((x) => x.color === "ffffffff"));
+    const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
+    assert.ok(im.width < 0.75 * ipd && im.height < 0.35 * ipd, `palpebra ${im.width}×${im.height} (distanza occhi ${ipd.toFixed(0)})`);
+  }
 });
 
 test("S2 con la soglia normale gli occhi di Jessica restano animati", () => {
