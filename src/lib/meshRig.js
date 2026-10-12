@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.1";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.2";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -1200,7 +1200,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   };
   const meshW = {}; // pesi finali per mesh (per saldare le palpebre al corpo)
   // DIAGNOSTICA (analisi 12 ott): per ogni mesh, metodo usato e motivo del ripiego sulla griglia rettangolare
-  const meshInfo = {}, smoothStats = {};
+  const meshInfo = {}, smoothStats = {}, shoulderJoint = {};
   function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
     let order, hull, triangles = null, U, V, edges = null;
@@ -1239,6 +1239,14 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       uvs.push(+U(p).toFixed(5), +V(p).toFixed(5));
       const label = labelAt(px, py, step);
       const w = chainWeights({ x: px, y: py }, C[label] || C.busto);
+      // RACCORDO DELLA SPALLA (zeus-mesh-15.2, Avventuriero 12 ott: "la spalla si spezza"): nel pezzo del braccio
+      // tagliato dalla SPALLA i vertici vicini all'attacco seguono il petto (sfumatura su 0,35 spalle), come una manica
+      // cucita al corpo: quando l'omero ruota, l'attacco resta sul busto invece di staccarsi a scalino
+      const sj = shoulderJoint[name];
+      if (sj && String(label).startsWith("braccio_")) {
+        const f = smooth(1 - Math.hypot(px - sj.p.x, py - sj.p.y) / sj.r);
+        if (f > 0) { for (const k in w) w[k] *= 1 - f; w.petto = (w.petto || 0) + f; }
+      }
       LB.push(label);
       if (label === "testa") {
         const f = faceF(px, py, step);
@@ -1402,6 +1410,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     const own = (k) => k === L_[`braccio_${s}`] || k === L_[`oggetto_${s}`];
     const maskS = new Uint8Array(W * H); for (let i = 0; i < W * H; i++) if (armMask[i] && armOwner[i] === k) maskS[i] = 1;
     const fallback = nearIn(maskS);
+    if (armFrom[s] === "spalla" && !(lockAt && lockedArms.includes(s)) && rules.shoulderBlend !== false) shoulderJoint[`braccio_${s}`] = { p: by[`omero_${s}`].head, r: 0.35 * shoulderW };
     pieceOf(maskS, `braccio_${s}`, (px, py, step) => majority(own, fallback)(px, py, step), rules.pieceCells, lockAt && lockedArms.includes(s) ? () => 1 : null);
   }
   if (decision.hair) pieceOf(hair, "capelli_dietro", () => "capelli", 8);

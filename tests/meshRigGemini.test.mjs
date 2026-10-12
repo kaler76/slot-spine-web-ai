@@ -63,3 +63,12 @@ test("GR3 piastra per un braccio NON alzato: ignorata (stesso risultato di prima
   assert.deepEqual(report.aiArms, []);
   assert.deepEqual(report.decision, first.report.decision);
 });
+
+test("GR4 raccordo della spalla (15.2): nel pezzo tagliato dalla spalla l'attacco segue il petto (più peso sul petto che senza raccordo)", () => {
+  const petto = (json) => { const names = json.bones.map((b) => b.name), at = json.skins[0].attachments.braccio_dx.braccio_dx, V = at.vertices; let k = 0, tot = 0, n = 0;
+    for (let i = 0; i < at.uvs.length / 2; i++) { const c = V[k++]; let p = 0; for (let j = 0; j < c; j++) { const b = names[V[k++]]; k += 2; const wt = V[k++]; if (b === "petto") p += wt; } tot += p; if (p >= 0.3) n++; }
+    return { tot, n }; };
+  const on = petto(first.json), off = petto(buildMeshRig(input, { ...MESH_RIG_RULES, shoulderBlend: false }).json);
+  assert.ok(on.tot > off.tot + 1, `peso sul petto: ${on.tot.toFixed(2)} contro ${off.tot.toFixed(2)} senza raccordo`);
+  assert.ok(on.n >= 3, `vertici all'attacco sul petto: ${on.n}`);
+});

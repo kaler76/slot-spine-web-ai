@@ -260,6 +260,13 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R27 — Raccordo della spalla (GR4), zeus-mesh-15.2
+Avventuriero (12 ott): "la spalla si spezza". Il pezzo del braccio tagliato dalla SPALLA era tutto sulle ossa del
+braccio: quando l'omero ruota, l'attacco si staccava a scalino dal busto. Ora nel pezzo i vertici vicini all'attacco
+(entro 0,35 spalle dalla testa dell'omero) sfumano sul PETTO, come una manica cucita al corpo (non per i bracci
+bloccati da "Oggetto fermo"; `shoulderBlend: false` per tornare a prima). Trovato con la diagnostica (R25): su Jessica
+il pezzo del braccio alzato ripiega sulla GRIGLIA ("lati del contorno non recuperati"): da correggere.
+
 ## R26 — Barriera anatomica nella media dei pesi (W2), zeus-mesh-15.1 — PROVA, di serie spenta
 Analisi 12 ott P1: la media dei pesi (R17) correva su tutti i lati dei triangoli, anche attraverso il trasparente
 (corridoi della sagoma, buchi riempiti: dentro un cerchio, fra braccio sul fianco e busto). Con `smoothBarrier` (casella
