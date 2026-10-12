@@ -44,3 +44,16 @@ test("S2 con la soglia normale gli occhi di Jessica restano animati", () => {
   const { report } = buildMeshRig(input);
   assert.ok(report.decision.some((d) => /^occhi: buco \+ bianco/.test(d)), report.decision.join(" | "));
 });
+
+// Viso REALE dell'Avventuriero (pacchetto del 12 ott, ritaglio 230×180 da x 330, y 120). Fabio: "calcolare da A a B
+// l'inclinazione per definire gli occhi": l'occhio sinistro (nell'immagine) scende verso l'angolo interno (~17°).
+test("S4 Avventuriero: angoli A e B sulla rima, inclinazione dell'occhio, palpebra che copre il bianco", async () => {
+  const { findSlit } = await import("../src/lib/meshRig.js");
+  const p = PNG.sync.read(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/pieces/avventuriero_viso.png")));
+  const Wf = p.width, Hf = p.height, fgf = new Uint8Array(Wf * Hf); for (let i = 0; i < Wf * Hf; i++) fgf[i] = p.data[i * 4 + 3] >= 128 ? 1 : 0;
+  const sx = findSlit({ x: 416 - 330, y: 185 - 120 }, 71, Wf, Hf, p.data, fgf), dx = findSlit({ x: 485 - 330, y: 201 - 120 }, 71, Wf, Hf, p.data, fgf);
+  assert.ok(sx && dx, "fessure trovate");
+  assert.ok(sx.tilt >= 10 && sx.tilt <= 25, `inclinazione occhio sinistro ${sx.tilt}°`);
+  assert.ok(dx.tilt >= 0 && dx.tilt <= 15, `inclinazione occhio destro ${dx.tilt}°`);
+  for (const l of [sx, dx]) { const L = Math.hypot(l.B[0] - l.A[0], l.B[1] - l.A[1]); assert.ok(L > 0.35 * 71 && L < 0.65 * 71, `A→B ${JSON.stringify([l.A, l.B])}`); }
+});

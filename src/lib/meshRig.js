@@ -17,7 +17,7 @@ import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
 import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.4";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15.5";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -678,47 +678,69 @@ export function findSlit(c, ipd, W, H, rgba, fg) {
   }
   if (!wb) return null;
   let wa = w, wbT = h, wc = -1, wd = -1; for (const i of wb.px) { const x = i % w, y = (i / w) | 0; wa = Math.min(wa, x); wc = Math.max(wc, x); wbT = Math.min(wbT, y); wd = Math.max(wd, y); }
-  // APERTURA = mandorla (ellisse) sulle righe del bianco; di lato si estende fin dove, su quelle righe, ci sono pixel
-  // scuri (iride, ciglia, angolo interno) entro 0,2 ipd dal bianco. Niente crescita libera: la piega scura sopra
-  // l'occhio la portava sulle sopracciglia (forme a blocchi)
-  const ay0 = Math.max(0, wbT - Math.round(0.065 * ipd)), ay1 = Math.min(h - 1, wd + Math.round(0.015 * ipd)); // sopra: anche le ciglia alte
-  let ax0 = wa, ax1 = wc;
-  const reach = Math.round(0.2 * ipd);
-  for (let y = ay0; y <= ay1; y++) for (let x = Math.max(0, wa - reach); x <= Math.min(w - 1, wc + reach); x++) {
-    const i = (y + y0) * W + x + x0; if (!fg[i] || dist(i) <= 70) continue;
-    if (x < ax0) ax0 = x; if (x > ax1) ax1 = x;
+  // ASSE DELL'OCCHIO da A a B (Fabio, 12 ott: "calcolare da A a B l'inclinazione per definire gli occhi"): dal bianco
+  // si allarga sui pixel dell'occhio (bianco, oppure SCURI: iride e ciglia, luma < 65% della pelle) dentro una finestra
+  // di ± 0,35 ipd in orizzontale e ± 0,1 ipd in verticale attorno al bianco (le sopracciglia restano fuori). A e B =
+  // il punto più a sinistra e quello più a destra (angoli dell'occhio): la loro retta dà l'inclinazione.
+  const lumI = (i) => 0.3 * rgba[i * 4] + 0.59 * rgba[i * 4 + 1] + 0.11 * rgba[i * 4 + 2];
+  let wcx = 0, wcy = 0; for (const i of wb.px) { wcx += (i % w) + x0; wcy += ((i / w) | 0) + y0; } wcx /= wb.px.length; wcy /= wb.px.length;
+  // finestra: ± 0,35 ipd in orizzontale; in verticale non oltre 0,05 ipd sopra il bianco (le ciglia alte sì, la piega e
+  // le sopracciglia no: sull'Avventuriero l'angolo B finiva sulla coda del sopracciglio) e 0,06 ipd sotto
+  let wTop = Infinity, wBot = -Infinity; for (const i of wb.px) { const Y = ((i / w) | 0) + y0; wTop = Math.min(wTop, Y); wBot = Math.max(wBot, Y); }
+  const inWin = (X, Y) => Math.abs(X - wcx) <= 0.35 * ipd && Y >= wTop - 0.05 * ipd && Y <= wBot + 0.06 * ipd;
+  const isEye = (X, Y) => { if (X < 0 || Y < 0 || X >= W || Y >= H || !inWin(X, Y)) return false; const i = Y * W + X; if (!fg[i]) return false; const xx = X - x0, yy = Y - y0; if (xx >= 0 && yy >= 0 && xx < w && yy < h && white[yy * w + xx]) return true; return lumI(i) < 0.5 * skinL; };
+  const seenE = new Set(), qe = [], P = [];
+  for (const i of wb.px) { const X = (i % w) + x0, Y = ((i / w) | 0) + y0, k = Y * W + X; seenE.add(k); qe.push(k); }
+  for (let k = 0; k < qe.length; k++) { const g = qe[k], X = g % W, Y = (g / W) | 0; P.push([X + 0.5, Y + 0.5]); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const nX = X + dx, nY = Y + dy, nk = nY * W + nX; if (seenE.has(nk) || !isEye(nX, nY)) continue; seenE.add(nk); qe.push(nk); } }
+  if (P.length < 6) return null;
+  // ANGOLI = estremi della RIMA INFERIORE (bordo basso dell'apertura, colonna per colonna) percorsa dal bianco verso i due
+  // lati finché resta continua (salti ≤ 3 px): una coda di sopracciglio o un'ombra staccata non è continua con la rima
+  const botOf = new Map(); for (const [x, y] of P) { const X = Math.floor(x); if (!botOf.has(X) || y > botOf.get(X)) botOf.set(X, y); }
+  let wx0 = Infinity, wx1 = -Infinity; for (const i of wb.px) { const X = (i % w) + x0; wx0 = Math.min(wx0, X); wx1 = Math.max(wx1, X); }
+  const run = (from, dir) => { let x = from, prev = botOf.get(x); if (prev == null) return [from, botOf.get(from) ?? wcy]; let gap = 0, lastX = x, lastY = prev;
+    const y0r = lastY; for (;;) { x += dir; const y = botOf.get(x); if (y == null) { if (++gap > 3) break; continue; } if (Math.abs(y - lastY) > 4.5 + 0.5 * gap) break; const trend = lastY - y0r; if ((trend >= 2 && y < lastY - 2.5) || (trend <= -2 && y > lastY + 2.5)) break; /* la rima inverte la direzione: angolo raggiunto (oltre c'è altro, es. coda del sopracciglio) */ gap = 0; lastX = x; lastY = y; }
+    return [lastX + 0.5, lastY]; };
+  const A = run(wx0, -1), B = run(wx1, 1);
+  if (globalThis.__SLIT) console.log("BOT", wx0, wx1, [...botOf.entries()].sort((p, q) => p[0] - q[0]).map(([x, y]) => x + ":" + y.toFixed(1)).join(" "));
+  for (let k = P.length - 1; k >= 0; k--) if (P[k][0] < A[0] - 1 || P[k][0] > B[0] + 1) P.splice(k, 1); // fuori dagli angoli: non è occhio
+  const len = Math.hypot(B[0] - A[0], B[1] - A[1]);
+  if (globalThis.__SLIT) { console.log("AB", A, B, len, P.length); (globalThis.__P ||= []).push(P); }
+  if (len < 0.12 * ipd || len > 0.75 * ipd) return null;
+  const ux = (B[0] - A[0]) / len, uy = (B[1] - A[1]) / len, nx = -uy, ny = ux; // normale verso il basso (ny > 0)
+  const tOf = (x, y) => ((x - A[0]) * ux + (y - A[1]) * uy) / len, dOf = (x, y) => (x - A[0]) * nx + (y - A[1]) * ny;
+  const prof = (t) => Math.pow(Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, t)))), 0.6);
+  // altezza sopra e sotto l'asse: 90° percentile dell'apertura nella parte centrale, diviso per il profilo
+  const ups = [], dns = [];
+  for (const [x, y] of P) { const t = tOf(x, y); if (t < 0.15 || t > 0.85) continue; const d = dOf(x, y), f = prof(t); if (d < 0) ups.push(-d / f); else dns.push(d / f); }
+  const pct = (a, q) => (a.length ? a.sort((p, r) => p - r)[Math.min(a.length - 1, Math.floor(q * a.length))] : 0);
+  const up = Math.min(0.12 * ipd, pct(ups, 0.9) + 1.5), dn = Math.min(0.08 * ipd, pct(dns, 0.9) + 1);
+  if (globalThis.__SLIT) console.log("UPDN", up, dn, len);
+  if (up + dn > 0.45 * len + 3) return null; // non è una fessura
+  // riquadro dell'immagine
+  const corners = []; for (const t of [0, 0.25, 0.5, 0.75, 1]) for (const d of [-up, dn]) corners.push([A[0] + ux * len * t + nx * d, A[1] + uy * len * t + ny * d]);
+  const bx0 = Math.floor(Math.min(...corners.map((c) => c[0]))) - 2, by0 = Math.floor(Math.min(...corners.map((c) => c[1]))) - 2;
+  const bw = Math.ceil(Math.max(...corners.map((c) => c[0]))) + 2 - bx0, bh = Math.ceil(Math.max(...corners.map((c) => c[1]))) + 2 - by0;
+  if (bx0 < 1 || by0 < 1 || bx0 + bw >= W - 1 || by0 + bh >= H - 1) return null;
+  // colore delle ciglia: media del quarto più scuro dell'apertura
+  const dk = P.map(([x, y]) => { const k = ((y | 0) * W + (x | 0)) * 4; return [rgba[k], rgba[k + 1], rgba[k + 2]]; }).sort((p, q) => p[0] + p[1] + p[2] - (q[0] + q[1] + q[2])).slice(0, Math.max(1, P.length >> 2));
+  const lash = [0, 1, 2].map((k) => dk.reduce((a, p) => a + p[k], 0) / dk.length);
+  const out = new Uint8ClampedArray(bw * bh * 4);
+  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
+    const X = x + bx0 + 0.5, Y = y + by0 + 0.5, t = tOf(X, Y), d = dOf(X, Y);
+    if (t < -0.02 || t > 1.02) continue;
+    const f = prof(t), u = up * f, v = dn * f;
+    if (d < -u - 1 || d > v + 1) continue;
+    // bordo sfumato ~1,5 px (sopra, sotto e verso gli angoli)
+    const edge = Math.max(0, Math.min(1, (Math.min(d + u, v - d) + 1) / 1.5, (Math.min(t, 1 - t) * len + 1) / 1.5));
+    if (edge <= 0) continue;
+    const o = (y * bw + x) * 4, tt = (d + u) / Math.max(1, u + v);
+    for (let k = 0; k < 3; k++) out[o + k] = skin[k] * (1.03 - 0.13 * tt);
+    // ciglia lungo l'asse A→B, poco sotto, più sottili verso gli angoli
+    const dl = Math.abs(d - 0.35 * v), lw = 1.5 * f + 0.4;
+    if (dl < lw) { const g = Math.min(1, lw - dl); for (let k = 0; k < 3; k++) out[o + k] = out[o + k] * (1 - g) + lash[k] * g; }
+    out[o + 3] = Math.round(255 * edge);
   }
-  const sw = ax1 - ax0 + 1, shh = ay1 - ay0 + 1;
-  if (sw < 0.12 * ipd || sw > 0.62 * ipd || sw < 1.6 * shh) return null; // non è una fessura orizzontale
-  const m = 3, bx0 = ax0 + x0 - m, by0 = ay0 + y0 - m, bw = sw + 2 * m, bh = shh + 2 * m;
-  const ecx = (bw - 1) / 2, ecy = (bh - 1) / 2, erx = sw / 2 + 1.5, ery = shh / 2 + 1.5;
-  const M = new Uint8Array(bw * bh), colTop = new Int32Array(bw).fill(-1), colBot = new Int32Array(bw).fill(-1);
-  for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) if (((x - ecx) / erx) ** 2 + ((y - ecy) / ery) ** 2 <= 1) { M[y * bw + x] = 1; if (colTop[x] < 0) colTop[x] = y; colBot[x] = y; }
-  const best = { px: [] };
-  for (let y = ay0; y <= ay1; y++) for (let x = ax0; x <= ax1; x++) { const j = y * w + x; if (dist((y + y0) * W + x + x0) > 70) best.px.push(j); }
-  if (best.px.length < 6) return null;
-  // colore delle ciglia: media dei pixel più scuri della fessura
-  const dk = best.px.map((i) => { const x = (i % w) + x0, y = ((i / w) | 0) + y0, k = (y * W + x) * 4; return [rgba[k], rgba[k + 1], rgba[k + 2]]; }).sort((p, q) => p[0] + p[1] + p[2] - (q[0] + q[1] + q[2])).slice(0, Math.max(1, best.px.length >> 2));
-  const lash = [0, 1, 2].map((k) => dk.reduce((s, p) => s + p[k], 0) / dk.length);
-  const out = new Uint8ClampedArray(bw * bh * 4), ccx = (bw - 1) / 2;
-  for (let x = 0; x < bw; x++) {
-    if (colTop[x] < 0) continue;
-    const t0 = colTop[x], t1 = colBot[x], ex = Math.abs(x - ccx) / (ccx + 0.5);
-    for (let y = t0; y <= t1; y++) {
-      const o = (y * bw + x) * 4, t = (y - t0) / Math.max(1, t1 - t0);
-      // pelle della palpebra: più chiara in alto, appena più scura verso le ciglia
-      const sh = 1.02 - 0.12 * t;
-      for (let k = 0; k < 3; k++) out[o + k] = skin[k] * sh;
-      // ciglia sul bordo basso (palpebra chiusa), più sottili alle estremità
-      const lw = 1.6 * (1 - ex * ex) + 0.4, dl = t1 - 1 - y;
-      if (dl >= 0 && dl < lw) { const f = Math.min(1, lw - dl); for (let k = 0; k < 3; k++) out[o + k] = out[o + k] * (1 - f) + lash[k] * f; }
-      // bordo sfumato: 1 px dal contorno della maschera
-      let edge = 1;
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const r = Math.hypot(dx, dy); if (r > 2.2 || r === 0) continue; const X = x + dx, Y = y + dy; if (X < 0 || Y < 0 || X >= bw || Y >= bh || !M[Y * bw + X]) edge = Math.min(edge, 0.35 + 0.3 * (r - 1)); }
-      out[o + 3] = Math.round(255 * edge);
-    }
-  }
-  return { cx: bx0 + bw / 2, cy: by0 + bh / 2, x0: bx0, y0: by0, w: bw, h: bh, rgba: out };
+  return { cx: bx0 + bw / 2, cy: by0 + bh / 2, x0: bx0, y0: by0, w: bw, h: bh, rgba: out, A, B, tilt: +((Math.atan2(uy, ux) * 180) / Math.PI).toFixed(1) };
 }
 
 /** Parti di un pezzo (pixel opachi collegati, 8 vicini): quante ≥ min px e quota della più grande. */

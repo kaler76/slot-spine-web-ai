@@ -271,6 +271,15 @@ riposo; nel battito compare in 0,07 s, resta 0,12 s, sparisce in 0,1 s. Niente b
 se la fessura non è orizzontale (larghezza < 1,6 × altezza) o fuori misura. `squintBlink: false` per spegnerla.
 Prima versione: una crescita libera lungo la piega scura saliva sulle sopracciglia (forme a blocchi) → mandorla.
 
+- 15.5 (Fabio, 12 ott, con schizzo: "calcolare da A a B l'inclinazione per definire gli occhi"; la mandorla dritta
+  copriva male gli occhi inclinati): la palpebra è orientata sull'asse A→B degli ANGOLI dell'occhio. Apertura = bianco
+  + pixel scuri (luma < 50% della pelle) collegati, in una finestra ±0,35 ipd orizzontale, da 0,05 ipd sopra il bianco
+  a 0,06 sotto. A e B = estremi della RIMA INFERIORE (bordo basso dell'apertura colonna per colonna) percorsa dal
+  bianco verso i lati finché resta continua (salti ≤ 4,5 px) e finché non INVERTE direzione di oltre 2,5 px (oltre
+  l'angolo interno la coda del sopracciglio dava un falso B). Altezze sopra/sotto l'asse dal 90° percentile
+  dell'apertura; profilo a mandorla; ciglia lungo l'asse. Avventuriero: occhio sinistro 17° (come lo schizzo), destro
+  8° (S4, viso reale in `tests/fixtures/pieces/avventuriero_viso.png`).
+
 ## R28 — Controllo automatico dei tagli del braccio (P1–P3), zeus-mesh-15.3
 Avventuriero (12 ott): "dover scegliere io andando a tentativi non è opportuno". Dopo il rig, ogni pezzo del braccio
 NON separato con Gemini si controlla: un taglio buono è un corpo unico (casi approvati: parte principale ≥ 99%, al
