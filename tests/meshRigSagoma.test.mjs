@@ -20,7 +20,7 @@ const landmarks = JSON.parse(fs.readFileSync(path.join(D, "landmarks.json"), "ut
 const rec = recognizeParts({ width: W, height: H, landmarks, categories, alpha, rgba });
 const fg = Uint8Array.from(alpha, (a) => (a >= 128 ? 1 : 0));
 const input = { width: W, height: H, rgba, fg, parts: rec.parts, categories, landmarks, joints: rec.joints };
-const { json, images } = buildMeshRig(input);
+const { json, images, report } = buildMeshRig(input);
 const meshes = Object.entries(json.skins[0].attachments).flatMap(([, a]) => Object.entries(a)).filter(([n, a]) => a.type === "mesh" && !n.startsWith("palpebra"));
 
 // pixel visibili del pezzo coperti dalla mesh? distanza di un punto UV dal pixel visibile più vicino?
@@ -108,4 +108,18 @@ test("W1 pesi morbidi: fra vertici vicini niente salti netti; ≤ 4 ossa per ver
   const off = weightJumps(buildMeshRig(input, { ...MESH_RIG_RULES, weightSmooth: 0 }).json), on = weightJumps(json);
   assert.ok(on.big < off.big / 3, `salti > 0,6: ${on.big} (prima ${off.big})`);
   assert.ok(on.p99 < off.p99, `99° percentile ${on.p99} contro ${off.p99}`);
+});
+
+// DIAGNOSTICA (zeus-mesh-15, analisi 12 ott): metodo di ogni mesh nel report e motivo del ripiego sulla griglia
+test("H6 report.meshInfo: metodo per ogni mesh; sagoma che fallisce = motivo leggibile", async () => {
+  const { silhouetteMesh, silhouetteFailReason } = await import("../src/lib/silhouetteMesh.js");
+  assert.equal(silhouetteMesh(new Uint8Array(100), 10, 10, 3), null);
+  assert.match(silhouetteFailReason(), /sagoma vuota/);
+  const a = new Uint8Array(40 * 40); for (let y = 5; y < 35; y++) for (let x = 5; x < 35; x++) a[y * 40 + x] = 255;
+  assert.ok(silhouetteMesh(a, 40, 40, 6)); assert.equal(silhouetteFailReason(), "");
+});
+
+test("H7 Domatrice: tutte le mesh sulla sagoma, nessun ripiego nel riepilogo", () => {
+  for (const [n, i] of Object.entries(report.meshInfo)) assert.equal(i.metodo, "sagoma", `${n}: ${i.motivo}`);
+  assert.ok(!report.decision.some((d) => /GRIGLIA rettangolare/.test(d)));
 });

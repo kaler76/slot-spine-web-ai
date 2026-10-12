@@ -5,6 +5,7 @@ import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { buildMeshRig, packAtlas, findMouth, applyFrameClip, MESH_RIG_RULES, MESH_RIG_VERSION } from "../lib/meshRig.js";
 import { SMILE_PROMPTS, isGeminiRefusal, mouthCropBox, cropRgba, smilePatchFromGemini } from "../lib/mouthGemini.js";
 import { armRemovalPrompts, armOnlyPrompts, armCropBox, flattenOnKey, armPartFromGemini } from "../lib/partGemini.js";
+import { createGeminiCache, cachedGemini, requestKey, indexedDbStore } from "../lib/geminiCache.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import { poseAt } from "../lib/animationSim.js";
 
@@ -31,10 +32,10 @@ async function geminiEditMouth(cropCanvas, prompt, why = "ritocco della bocca") 
   if (!res.ok || data?.error || !data?.imageBase64) throw new Error(data?.error || `Errore HTTP ${res.status}`);
   return data.imageBase64;
 }
-// risultati di Gemini per il braccio, per IMMAGINE (chiave: i pixel dell'originale) e per lato, con la posa del braccio:
-// "Ricrea" e i cambi di caselle non richiamano Gemini (crediti); solo "Ridisegna braccio" o un'immagine/posa nuova
-const ARM_CACHE = new WeakMap();
-const armKey = (a) => [a.side, a.sh, a.el, a.wr, a.hd].map((p) => (typeof p === "string" ? p : `${Math.round(p.x / 4)},${Math.round(p.y / 4)}`)).join("|");
+// RISPOSTE DI GEMINI memorizzate per CONTENUTO della richiesta (pixel inviati + prompt + modello: R25), anche fra una
+// pagina e l'altra (IndexedDB). "Ricrea", nuova analisi della stessa immagine e cambi di caselle non richiamano Gemini;
+// i rifiuti restano memorizzati; solo i pulsanti "Ridisegna … (Gemini)" richiamano su una richiesta già fatta.
+const GEMINI = createGeminiCache(indexedDbStore());
 function loadB64(b64) {
   return new Promise((ok, ko) => { const im = new Image(); im.onload = () => ok(im); im.onerror = () => ko(new Error("immagine di Gemini non leggibile")); im.src = `data:image/png;base64,${b64}`; });
 }
@@ -76,10 +77,10 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   // a nuova analisi il pacchetto precedente non vale più
   // (dipende dai PIXEL e dalle parti, non dall'oggetto "original": la pagina lo ricrea a ogni aggiornamento e così si
   // azzeravano pacchetto e risultati di Gemini, che a "Ricrea" veniva richiamato)
-  useEffect(() => { setPkg(null); setGem(null); setArmGem(ARM_CACHE.get(original.rgba)?.shown || {}); setFrame(null); }, [original.rgba, parts]);
+  useEffect(() => { setPkg(null); setGem(null); setArmGem({}); setFrame(null); }, [original.rgba, parts]);
 
   /** Bocca ridisegnata da Gemini: ritaglio del viso → Gemini → riallineamento → pezzo con bordo sfumato. */
-  async function makeGeminiSmile(fg) {
+  async function makeGeminiSmile(fg, force = false) {
     const { width: W, height: H, rgba } = original;
     const ipd = Math.hypot(landmarks[2].x - landmarks[5].x, landmarks[2].y - landmarks[5].y);
     const mouth = findMouth(landmarks, ipd, W, H, rgba, fg);
@@ -90,13 +91,11 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     for (let i = 0; i < flat.length; i += 4) { const a = flat[i + 3] / 255; for (let k = 0; k < 3; k++) flat[i + k] = flat[i + k] * a + 128 * (1 - a); flat[i + 3] = 255; }
     // varianti del prompt in ordine: se Gemini rifiuta (IMAGE_OTHER...) si passa alla successiva
     const prompts = SMILE_PROMPTS[smileKind];
-    let b64 = null, lastErr = null;
-    for (let k = 0; k < prompts.length && !b64; k++) {
-      setStatus(`⏳ Gemini ridisegna la bocca (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`);
-      try { b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), prompts[k]); }
-      catch (e) { lastErr = e; if (!isGeminiRefusal(e.message)) throw e; }
-    }
-    if (!b64) throw Object.assign(new Error(`Gemini ha rifiutato ${prompts.length} volte (${lastErr?.message || "nessuna immagine"})`), { refused: true });
+    const res = await cachedGemini(GEMINI, requestKey(`sorriso-${smileKind}`, flat, box.width, box.height, prompts), prompts,
+      (p) => geminiEditMouth(canvasOf(flat, box.width, box.height), p),
+      { force, isRefusal: isGeminiRefusal, onTry: (k) => setStatus(`⏳ Gemini ridisegna la bocca (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`) });
+    if (res.status === "refused") throw Object.assign(new Error(res.message), { refused: true });
+    const b64 = res.b64;
     const im = await loadB64(b64);
     const small = document.createElement("canvas");
     small.width = box.width; small.height = box.height;
@@ -120,7 +119,7 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
   }
 
   /** Braccio alzato separato con Gemini: ritaglio 16:9 → Gemini lo toglie → differenza = pezzo, risposta = dietro. */
-  async function makeGeminiArm(arm, fg) {
+  async function makeGeminiArm(arm, fg, force = false) {
     const { width: W, height: H, rgba } = original;
     const box = armCropBox(arm);
     // trasparenza dalla SAGOMA riconosciuta (fg), non dal PNG: con un originale su fondo nero pieno (Jessica sul sito)
@@ -130,13 +129,11 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     const orig = cropRgba(src, W, H, box);
     const flat = flattenOnKey(orig);
     const prompts = armRemovalPrompts(arm.imageSide);
-    let b64 = null, lastErr = null;
-    for (let k = 0; k < prompts.length && !b64; k++) {
-      setStatus(`⏳ Gemini toglie il braccio alzato (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`);
-      try { b64 = await geminiEditMouth(canvasOf(flat, box.width, box.height), prompts[k], "braccio da separare"); }
-      catch (e) { lastErr = e; if (!isGeminiRefusal(e.message)) throw e; }
-    }
-    if (!b64) throw new Error(`Gemini ha rifiutato ${prompts.length} volte (${lastErr?.message || "nessuna immagine"})`);
+    const res = await cachedGemini(GEMINI, requestKey("senza-braccio", flat, box.width, box.height, prompts), prompts,
+      (p) => geminiEditMouth(canvasOf(flat, box.width, box.height), p, "braccio da separare"),
+      { force, isRefusal: isGeminiRefusal, onTry: (k) => setStatus(`⏳ Gemini toglie il braccio alzato (20-60 s)${k ? ` — tentativo ${k + 1} di ${prompts.length}, Gemini aveva rifiutato` : ""}...`) });
+    if (res.status === "refused") return { error: res.message };
+    const b64 = res.b64;
     const toCrop = async (data) => {
       const im = await loadB64(data);
       const c = document.createElement("canvas");
@@ -151,11 +148,10 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
     // con la sola differenza
     let isoC = null, iso = null;
     const p2 = armOnlyPrompts(arm.imageSide);
-    for (let k = 0; k < p2.length && !iso; k++) {
-      setStatus(`⏳ Gemini isola il braccio (sagoma pulita, 20-60 s)${k ? ` — tentativo ${k + 1} di ${p2.length}` : ""}...`);
-      try { const b2 = await geminiEditMouth(canvasOf(flat, box.width, box.height), p2[k], "braccio da isolare"); ({ canvas: isoC, data: iso } = await toCrop(b2)); }
-      catch (e) { if (!isGeminiRefusal(e.message)) throw e; }
-    }
+    const res2 = await cachedGemini(GEMINI, requestKey("solo-braccio", flat, box.width, box.height, p2), p2,
+      (p) => geminiEditMouth(canvasOf(flat, box.width, box.height), p, "braccio da isolare"),
+      { force, isRefusal: isGeminiRefusal, onTry: (k) => setStatus(`⏳ Gemini isola il braccio (sagoma pulita, 20-60 s)${k ? ` — tentativo ${k + 1} di ${p2.length}` : ""}...`) });
+    if (res2.status === "ok") ({ canvas: isoC, data: iso } = await toCrop(res2.b64));
     const patch = armPartFromGemini({ orig, gen, iso, box, arm, W, H });
     const url = (c) => c.toDataURL("image/png");
     const previews = { orig: url(canvasOf(flat, box.width, box.height)), gen: url(small), iso: isoC ? url(isoC) : null };
@@ -193,13 +189,14 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       let smilePatch = null, fallbackNote = "";
       if (smile !== "no" && smileHow === "gemini") {
         try {
-          const g = gem && gem.kind === smileKind && !forceGemini ? gem : await makeGeminiSmile(fg);
+          const g = await makeGeminiSmile(fg, forceGemini); // memorizzato: senza "Ridisegna bocca" non richiama
           smilePatch = g.patch;
         } catch (e) {
           if (!e.refused) throw e;
           // Gemini non disegna questo viso (filtro: spesso volti che sembrano persone reali): si usa la deformazione
           rules.smile = smile;
-          fallbackNote = ` ⚠️ ${e.message}: usata la deformazione (senza AI). Per riprovare con Gemini premi di nuovo "Ricrea".`;
+          setGem({ kind: smileKind, refused: e.message });
+          fallbackNote = ` ⚠️ ${e.message}: usata la deformazione (senza AI). Per riprovare con Gemini premi "Ridisegna bocca (Gemini)".`;
         }
         setStatus("⏳ Creo il rig mesh...");
       }
@@ -208,22 +205,16 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       let partPatches = null;
       if (armAi && (cuts.raisedArm || cuts.arm)) {
         const first = buildMeshRig({ width: W, height: H, rgba, fg, parts, categories, landmarks, joints, smilePatch }, rules);
-        const store = ARM_CACHE.get(rgba) || { byKey: {}, shown: {} };
         const got = {};
         for (const arm of first.report.raisedArms || []) {
-          const key = armKey(arm);
-          if (forceArm || !store.byKey[key]) {
-            try { store.byKey[key] = await makeGeminiArm(arm, fg); }
-            catch (e) { store.byKey[key] = { error: e.message || String(e) }; }
-          }
-          got[arm.side] = store.byKey[key];
+          // risposte memorizzate per contenuto (R25); un errore di rete non si memorizza e si riprova al prossimo Ricrea
+          try { got[arm.side] = await makeGeminiArm(arm, fg, forceArm); }
+          catch (e) { got[arm.side] = { error: `${e.message || e} (non memorizzato: si riprova al prossimo Ricrea)` }; }
           const r = got[arm.side];
           const err = r.error || r.patch?.error;
           if (err) fallbackNote += ` ⚠️ Braccio alzato con Gemini non usato (${err}): taglio senza AI.`;
           else (partPatches ||= {})[arm.side] = r.patch;
         }
-        store.shown = got;
-        ARM_CACHE.set(rgba, store);
         setArmGem(got);
         setStatus("⏳ Creo il rig mesh...");
       }
@@ -357,15 +348,16 @@ export default function MeshRigExport({ original, landmarks, joints, parts, cate
       {status && <div className="status">{status}</div>}
       {gem && smile !== "no" && smileHow === "gemini" && (
         <div className="row" style={{ gap: 10, alignItems: "flex-end", flexWrap: "wrap", margin: "8px 0" }}>
-          {[["Originale", gem.previews.orig], ["Gemini", gem.previews.gen], ["Risultato", gem.previews.result]].map(([t, u]) => (
+          {gem.previews && [["Originale", gem.previews.orig], ["Gemini", gem.previews.gen], ["Risultato", gem.previews.result]].map(([t, u]) => (
             <figure key={t} style={{ margin: 0, textAlign: "center", fontSize: 12 }}>
               <img src={u} alt={t} style={{ width: 220, borderRadius: 4, border: "1px solid #333" }} />
               <figcaption>{t}</figcaption>
             </figure>
           ))}
           <div style={{ fontSize: 12, opacity: 0.8 }}>
+            {gem.refused ? <div style={{ color: "#ffb347" }}>⚠️ {gem.refused} — usata la deformazione (rifiuto memorizzato: Ricrea non ritenta)</div> : <>
             Riallineamento: {gem.patch.shift.dx.toFixed(1)}, {gem.patch.shift.dy.toFixed(1)} px, scala {gem.patch.shift.s.toFixed(3)}
-            {gem.patch.mismatch > 22 && <div style={{ color: "#ffb347" }}>⚠️ Gemini ha cambiato anche il resto del viso: meglio ridisegnare.</div>}
+            {gem.patch.mismatch > 22 && <div style={{ color: "#ffb347" }}>⚠️ Gemini ha cambiato anche il resto del viso: meglio ridisegnare.</div>}</>}
             <div>
               <button type="button" className="btn secondary" disabled={busy} onClick={() => build(true)} style={{ marginTop: 6 }}>🔄 Ridisegna bocca (Gemini)</button>
             </div>

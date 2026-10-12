@@ -180,8 +180,9 @@ Zeus: corpo 920 vertici (prima 35×~41 su tutto il riquadro), Domatrice: cerchio
 ## R17 — Pesi MORBIDI (W1), zeus-mesh-13
 Richiesta (9 ott): "gestisci i pesi in maniera ottimale" (vista Weights a gradini). Dopo i pesi da catena/viso/blocco,
 4 passate di media coi vicini (`weightSmooth`; metà peso proprio, metà media dei vicini) lungo i lati dei triangoli:
-la media corre DENTRO la mesh, quindi due parti vicine ma staccate (braccio e fianco con lo sfondo in mezzo) non si
-scambiano pesi. Restano fissi: oggetto in mano (solo osso della mano, M4) e zona bloccata al 100% (R14).
+la media corre lungo i lati dei triangoli. **Correzione (analisi del 12 ott):** NON è garantito che parti staccate non
+si scambino pesi: la sagoma (R16) unisce le parti separate con corridoi, quindi i pesi possono passare anche attraverso
+il trasparente. Barriera anatomica nella media: da fare (dietro un'opzione, confrontata col metodo attuale). Restano fissi: oggetto in mano (solo osso della mano, M4) e zona bloccata al 100% (R14).
 Poi al massimo 4 ossa per vertice, pesi < 2% tolti, somma esattamente 1. W1: salti > 0,6 fra vertici vicini
 ridotti di oltre 3 volte, nessun vertice con più di 4 ossa.
 
@@ -259,6 +260,23 @@ Jessica (10 ott): "se c'è un braccio così dovrebbe essere tagliato BENE e anim
   bocchino e fumo di Jessica uscivano dal riquadro (`report.pieceBoxes` = riquadri dei pezzi nello skeleton).
 - Mesh: le briciole escluse dal contorno sono solo < 20 px (prima fino a 200: fili visibili scoperti).
 
+## R25 — Memoria delle risposte di Gemini (C1–C7) e diagnostica delle mesh (H6–H7), zeus-mesh-15
+Analisi tecnica del 12 ott (revisione 8afad55), punti P1 "crediti Gemini" e P2 "ripiego poco osservabile".
+- **Risposta generativa memorizzata per CONTENUTO della richiesta** (`src/lib/geminiCache.js`): chiave = tipo
+  (`senza-braccio`, `solo-braccio`, `sorriso-<tipo>`) + misure + hash dei pixel ESATTI inviati + testo di tutte le
+  varianti del prompt + modello. Stessi pixel in un altro array = stessa chiave; cambiano sagoma, oggetto, posa o
+  prompt = cambiano i pixel o il testo = chiave nuova. Memoria in RAM + IndexedDB (resta ricaricando la pagina).
+- **Stati**: "ok" e "refused" (tutte le varianti rifiutate) si memorizzano; errori di rete/server no (si riprova al
+  prossimo Ricrea). Richiamo su una richiesta già fatta SOLO coi pulsanti "Ridisegna braccio/bocca (Gemini)" (force).
+- **Elaborazione** (allineamento, maschera, piastra, pezzo) ricalcolata ogni volta dalla risposta: deterministica.
+- **Diagnostica**: `report.meshInfo[nome] = { metodo: "sagoma" | "griglia", motivo }`; se una mesh ripiega sulla
+  griglia rettangolare il riepilogo lo dice ("mesh X: GRIGLIA rettangolare … (motivo)"); `silhouetteFailReason()`.
+- Test: C1–C7 con API simulata (Ricrea, nuova analisi, nuovo array, cambio posa, rifiuto, errore di rete, Ridisegna,
+  pagina ricaricata); H6–H7.
+- Backend (analisi P1): `recognize-character-pose` NON è pubblicata su Supabase e usa OpenAI (`OPENAI_API_KEY`,
+  `OPENAI_POSE_MODEL`): pubblicarla senza quei secret risponderebbe 503 come oggi. Decisione rimandata (Gemini o
+  OpenAI). Il sorgente di `generate-sprite-sheet` v38 è ora nel repository (`supabase/functions/generate-sprite-sheet`).
+
 ## R24 — Testa rigida (T1), zeus-mesh-14.6
 Avventuriero (11 ott): "il volto con l'oscillamento non dovrebbe deformarsi". Due cause: (1) il riconoscimento
 aveva lasciato viso e cappello come "busto" (pesi della schiena); (2) la media dei pesi coi vicini (R17) portava
@@ -307,7 +325,9 @@ spostati, capelli senza categoria): nessuna regola sui colori lo ripara. Metodo 
   tenuto per immagine (pixel dell'originale) + lato + posa del braccio, anche se la pagina ridisegna il componente
   (prima l'azzeramento dipendeva dall'oggetto "original", ricreato a ogni aggiornamento della pagina: Gemini
   ripartiva). Gemini si richiama SOLO con "Ridisegna braccio (Gemini)", con un'immagine nuova o se cambia la posa
-  del braccio; anche un rifiuto non si ritenta da solo. Vale anche per il sorriso.
+  del braccio; anche un rifiuto non si ritenta da solo. **Correzione (analisi del 12 ott):** per il sorriso NON valeva (rifiuto
+  non memorizzato, Ricrea ritentava) e la chiave del braccio era fragile (oggetto JS dei pixel, chiave parziale).
+  Sostituita da R25 (zeus-mesh-15).
 - 14.4 (Avventuriero con frusta, 11 ott): alone ROSA nella piastra attorno a viso e cappello (pixel della risposta
   mezzi magenta sul bordo verso il fondo). Ora: sotto metà "personaggio" il pixel si scarta, sopra si toglie la quota
   di fondo dal colore (c = (g − (1−a)·fondo)/a) e si scarta anche 1 px attaccato al fondo (G5). La miniatura

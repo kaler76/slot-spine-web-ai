@@ -15,9 +15,9 @@
 
 import { PART, SEG } from "./partRecognition.js";
 import { fillHoles } from "./partExtraction.js";
-import { silhouetteMesh } from "./silhouetteMesh.js";
+import { silhouetteMesh, silhouetteFailReason } from "./silhouetteMesh.js";
 
-export const MESH_RIG_VERSION = "2026-10-11.zeus-mesh-14.7";
+export const MESH_RIG_VERSION = "2026-10-12.zeus-mesh-15";
 
 export const MESH_RIG_RULES = {
   cells: 26, // passo dei vertici del corpo: lato lungo / cells (34 fino al 13.1; meno vertici = meno calcolo per fotogramma)
@@ -1199,6 +1199,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
     return f;
   };
   const meshW = {}; // pesi finali per mesh (per saldare le palpebre al corpo)
+  // DIAGNOSTICA (analisi 12 ott): per ogni mesh, metodo usato e motivo del ripiego sulla griglia rettangolare
+  const meshInfo = {};
   function gridMesh(name, bx0, by0, bw, bh, cells, labelAt, lockF = null) {
     const step = Math.max(bw, bh) / cells;
     let order, hull, triangles = null, U, V, edges = null;
@@ -1207,6 +1209,8 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
       ? silhouetteMesh(Uint8Array.from({ length: bw * bh }, (_, i) => img.rgba[i * 4 + 3]), bw, bh, step,
           (x, y) => (denseAt.some((p, k) => Math.hypot(bx0 + x - p.x, by0 + y - p.y) < denseR[k]) ? rules.denseStep * step : step))
       : null;
+    meshInfo[name] = sil ? { metodo: "sagoma" }
+      : { metodo: "griglia", motivo: rules.meshShape === "griglia" ? "griglia scelta nelle regole" : !img ? "immagine del pezzo non disponibile" : img.width !== bw || img.height !== bh ? "misure dell'immagine diverse dal riquadro" : silhouetteFailReason() || "sagoma non riuscita" };
     if (sil) {
       // MESH SULLA SAGOMA: contorno sui pixel visibili, vertici solo dentro
       order = sil.points; hull = sil.hull; triangles = sil.triangles; edges = sil.edges;
@@ -1556,6 +1560,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   for (const er of earrings) slots.push(slotFor(`orecchino_${er.side}`, `orecchino_${er.side}`));
   for (const s of decision.arms) slots.push(slotFor(`braccio_${s}`, "root"));
   const skinAtt = Object.fromEntries(slots.map((s) => [s.name, { [s.name]: attachments[s.name] }]));
+  for (const [n, i] of Object.entries(meshInfo)) if (i.metodo === "griglia" && rules.meshShape !== "griglia") decision.reasons.push(`mesh ${n}: GRIGLIA rettangolare al posto della sagoma (${i.motivo})`);
 
   const json = {
     skeleton: { spine: "4.1.24", x: -cw / 2, y: 0, width: cw, height: ch, images: "./" },
@@ -1567,7 +1572,7 @@ export function buildMeshRig({ width: W, height: H, rgba, fg, parts, categories,
   return {
     json,
     images,
-    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes, raisedArms, aiArms: decision.arms.filter((a) => free[a]?.ai) }
+    report: { version: MESH_RIG_VERSION, decision: decision.reasons, bones: jsonBones.length, slots: slots.map((s) => s.name), bodyVertices: attachments.corpo.uvs.length / 2, filledBehindArm: holes.length, pieceBoxes, raisedArms, aiArms: decision.arms.filter((a) => free[a]?.ai), meshInfo }
   };
 }
 
