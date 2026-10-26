@@ -780,7 +780,44 @@ function evaluateQuality(regions, expectedCount) {
   return { pass, issues, correction, artCount: art.length };
 }
 
+// v39: provider immagini intercambiabile (stesso contratto di risposta {imageBase64, finishReason}).
+// AI_PROVIDER=openai (secret) -> usa OpenAI per primo; altrimenti Gemini con ripiego su OpenAI quando Gemini
+// risponde tetto di spesa / quota esaurita / blocco di sicurezza. Chiavi solo nei Secrets.
+async function callOpenAIImage(prompt, referenceImagesBase64 = []) {
+  const key = Deno.env.get("OPENAI_API_KEY");
+  if (!key) throw new Error("OPENAI_API_KEY non configurata come secret del progetto.");
+  const model = Deno.env.get("OPENAI_IMAGE_MODEL") || "gpt-image-2.5-flare";
+  const quality = Deno.env.get("OPENAI_IMAGE_QUALITY") || "high";
+  const common = { model, prompt, size: "1536x864", quality, output_format: "png" };
+  let res;
+  if (referenceImagesBase64.length) {
+    const fd = new FormData();
+    for (const [k, v] of Object.entries(common)) fd.append(k, String(v));
+    referenceImagesBase64.slice(0, 4).forEach((b64, i) => fd.append("image[]", new Blob([Buffer.from(b64, "base64")], { type: "image/png" }), `ref${i}.png`));
+    res = await fetch("https://api.openai.com/v1/images/edits", { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: fd });
+  } else {
+    res = await fetch("https://api.openai.com/v1/images/generations", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(common) });
+  }
+  if (!res.ok) throw new Error(`OpenAI API error ${res.status}: ${(await res.text()).slice(0, 400)}`);
+  const d = await res.json();
+  const b64 = d?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("Nessuna immagine nella risposta OpenAI.");
+  return { imageBase64: b64, finishReason: "STOP" };
+}
+
 async function callGemini(prompt, apiKey, referenceImagesBase64 = []) {
+  const hasOpenAI = !!Deno.env.get("OPENAI_API_KEY");
+  if ((Deno.env.get("AI_PROVIDER") || "").toLowerCase() === "openai" && hasOpenAI) return callOpenAIImage(prompt, referenceImagesBase64);
+  try {
+    return await callGeminiDirect(prompt, apiKey, referenceImagesBase64);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (hasOpenAI && /\b429\b|RESOURCE_EXHAUSTED|spending cap|quota|PROHIBITED_CONTENT|SAFETY/i.test(msg)) return callOpenAIImage(prompt, referenceImagesBase64);
+    throw e;
+  }
+}
+
+async function callGeminiDirect(prompt, apiKey, referenceImagesBase64 = []) {
   const parts = [
     ...referenceImagesBase64.map((b64) => ({ inlineData: { mimeType: "image/png", data: b64 } })),
     { text: prompt }
