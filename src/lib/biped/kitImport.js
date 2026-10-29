@@ -101,6 +101,60 @@ export function limbAxis(p) {
 }
 
 const mid = (p, q) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
+
+/**
+ * Palpebre chiuse dipinte sulla testa: tratti scuri (ciglia) nella fascia degli occhi, lontani dal
+ * contorno della testa. Restituisce per lato (dx = a sinistra per chi guarda) centro e larghezza.
+ */
+export function closedLids(head, targets) {
+  const W = head.width, H = head.height;
+  const out = {};
+  for (const sd of ["dx", "sx"]) {
+    // si cerca solo attorno alla zona dell'occhio accesa dalla differenza (rughe, orecchie e capelli
+    // hanno tratti scuri anche loro); poi si tiene il gruppo scuro più grande (la riga delle ciglia)
+    const t = targets[sd];
+    const cx = Math.round(t.cx - head.x), cy = Math.round(t.cy - head.y), R = Math.round(t.r * 1.6);
+    const dark = new Uint8Array(W * H);
+    for (let y = Math.max(0, cy - R); y < Math.min(H, cy + R); y++)
+      for (let x = Math.max(0, cx - R); x < Math.min(W, cx + R); x++) {
+        const i = (y * W + x) * 4;
+        const lum = 0.3 * head.rgba[i] + 0.59 * head.rgba[i + 1] + 0.11 * head.rgba[i + 2];
+        if (head.rgba[i + 3] > 200 && lum < 90) dark[y * W + x] = 1;
+      }
+    const seen = new Uint8Array(W * H);
+    let best = null;
+    for (let i = 0; i < W * H; i++) {
+      if (!dark[i] || seen[i]) continue;
+      const st = [i]; seen[i] = 1;
+      let n = 0, sx = 0, sy = 0, mnx = Infinity, mxx = -Infinity;
+      while (st.length) {
+        const j = st.pop(); const x = j % W, y = (j - x) / W;
+        n++; sx += x; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x);
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+          const k = (y + dy) * W + (x + dx);
+          if (x + dx >= 0 && x + dx < W && y + dy >= 0 && y + dy < H && dark[k] && !seen[k]) { seen[k] = 1; st.push(k); }
+        }
+      }
+      // la riga delle ciglia è larga e bassa; si preferisce il gruppo più largo vicino al centro
+      const score = (mxx - mnx) - 0.5 * Math.hypot(sx / n - cx, sy / n - cy);
+      if (n >= 10 && (!best || score > best.score)) best = { score, cx: head.x + sx / n, cy: head.y + sy / n, w: mxx - mnx, n };
+    }
+    if (!best) return null;
+    out[sd] = best;
+  }
+  return out;
+}
+
+/** Larghezza del bianco dell'occhio (da angolo ad angolo) nel pezzo occhio della tavola. */
+function eyeWhiteWidth(p) {
+  let mn = Infinity, mx = -Infinity;
+  for (let y = 0; y < p.height; y++)
+    for (let x = 0; x < p.width; x++) {
+      const i = (y * p.width + x) * 4;
+      if (p.rgba[i + 3] > 200 && p.rgba[i] > 200 && p.rgba[i + 1] > 200 && p.rgba[i + 2] > 200) { mn = Math.min(mn, x); mx = Math.max(mx, x); }
+    }
+  return mx > mn ? mx - mn : p.width * 0.8;
+}
 const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
 
 /**
@@ -256,9 +310,44 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       const t = z || all || { cx: headBox.x0 + (x0f + x1f) / 2 * hw, cy: headBox.y0 + (role === "eye" ? 0.42 : 0.33) * hh };
       tgt[`${role}_${sd}`] = { cx: t.cx, cy: t.cy, r: Math.max(10, 0.06 * hw), src: z ? "diff" : "stima" };
     }
-    for (const [role, ia, ib] of [["eye", 0, 1], ["brow", 2, 3]]) {
-      const b = findPair(row1[ia], row1[ib], tgt[`${role}_dx`], tgt[`${role}_sx`]);
-      for (const [sd, r] of [["dx", b.a], ["sx", b.b]]) faceParts.push({ role, side: sd, piece: r.sp, x: r.pos.x, y: r.pos.y, err: r.pos.err, scale: b.k, target: tgt[`${role}_${sd}`].src });
+    // GEOMETRIA DEL VISO (regole fisse):
+    //  R1 le palpebre chiuse dipinte sulla testa dicono dove stanno gli occhi: ogni occhio aperto è
+    //     centrato sulla sua palpebra (stesso centro), largo quanto la palpebra;
+    //  R2 i due occhi hanno la stessa altezza e sono simmetrici rispetto alla linea mediana del viso
+    //     (punto medio fra le palpebre); stessa scala per i due occhi;
+    //  R3 le sopracciglia stanno sopra gli occhi, alla stessa altezza fra loro, simmetriche rispetto
+    //     alla mediana, centrate sulla verticale del proprio occhio; stessa scala fra loro;
+    //  R4 la bocca è centrata sulla mediana.
+    const lids = closedLids(head, { dx: tgt.eye_dx, sx: tgt.eye_sx });
+    const eyeFit = findPair(row1[0], row1[1], tgt.eye_dx, tgt.eye_sx);
+    const browFit = findPair(row1[2], row1[3], tgt.brow_dx, tgt.brow_sx);
+    let mid, eyeY, half, eyeK = eyeFit.k;
+    if (lids) {
+      mid = (lids.dx.cx + lids.sx.cx) / 2;
+      eyeY = (lids.dx.cy + lids.sx.cy) / 2;
+      half = (lids.sx.cx - lids.dx.cx) / 2;
+      // larghezza: la palpebra chiusa copre l'occhio da angolo ad angolo (bianco compreso)
+      const lidW = (lids.dx.w + lids.sx.w) / 2;
+      eyeK = (1.08 * lidW) / eyeWhiteWidth(row1[0]) / s; // R1: un filo più largo della palpebra, così le ciglia chiuse non spuntano ai lati
+      report.face = { rule: "palpebre", lidW: Math.round(lidW), mid: Math.round(mid), eyeY: Math.round(eyeY), half: Math.round(half) };
+    } else {
+      const ca = { x: eyeFit.a.pos.x + eyeFit.a.sp.width / 2, y: eyeFit.a.pos.y + eyeFit.a.sp.height / 2 }, cb = { x: eyeFit.b.pos.x + eyeFit.b.sp.width / 2, y: eyeFit.b.pos.y + eyeFit.b.sp.height / 2 };
+      mid = (ca.x + cb.x) / 2; eyeY = (ca.y + cb.y) / 2; half = Math.abs(cb.x - ca.x) / 2;
+      report.warnings.push("Palpebre chiuse non trovate sulla testa: occhi posti per somiglianza e resi simmetrici.");
+      report.face = { rule: "simmetria" };
+    }
+    report.face.mid = Math.round(mid);
+    for (const [sd, i, sign] of [["dx", 0, -1], ["sx", 1, +1]]) {
+      const sp = scalePiece(row1[i], s * eyeK);
+      // la riga delle ciglia chiuse sta un po' sotto il centro dell'occhio aperto
+      faceParts.push({ role: "eye", side: sd, piece: sp, x: Math.round(mid + sign * half - sp.width / 2), y: Math.round(eyeY - (lids ? 0.12 * sp.height : 0) - sp.height / 2), err: 0, scale: +eyeK.toFixed(2), target: lids ? "palpebra" : "simmetria" });
+    }
+    // sopracciglia: altezza e distanza dalla mediana medie fra le due trovate, poi simmetriche
+    const bA = browFit.a, bB = browFit.b;
+    const byA = bA.pos.y + bA.sp.height / 2, byB = bB.pos.y + bB.sp.height / 2;
+    const browY = Math.min((byA + byB) / 2, eyeY - 0.55 * half); // sempre sopra l'occhio
+    for (const [sd, r, sign] of [["dx", bA, -1], ["sx", bB, +1]]) {
+      faceParts.push({ role: "brow", side: sd, piece: r.sp, x: Math.round(mid + sign * half - r.sp.width / 2), y: Math.round(browY - r.sp.height / 2), err: r.pos.err, scale: browFit.k, target: "simmetria" });
     }
   } else report.warnings.push(`Tavola del viso: ${row1.length} pezzi nella prima riga invece di 4.`);
   let mouth = null;
@@ -267,7 +356,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     const tgt = z || { cx: headBox.x0 + 0.5 * hw, cy: headBox.y0 + 0.65 * hh, w: 0 };
     // la bocca della tavola porta con sé baffi e barba: si allinea sulla barba della posa neutra
     const neutral = findIn(row2[0], { cx: tgt.cx, cy: tgt.cy + 0.08 * hh, r: 0.08 * hw });
-    const cx = neutral.pos.x + neutral.sp.width / 2, cyTop = neutral.pos.y;
+    const cx = report.face?.mid ?? neutral.pos.x + neutral.sp.width / 2, cyTop = neutral.pos.y; // R4: bocca sulla mediana
     const variants = {};
     row2.slice(0, 5).forEach((p, i) => {
       const sp = scalePiece(p, s * neutral.k);
