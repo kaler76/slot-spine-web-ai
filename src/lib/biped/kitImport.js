@@ -346,6 +346,37 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       const d = Math.abs(ref.rgba[gi] - head.rgba[li]) + Math.abs(ref.rgba[gi + 1] - head.rgba[li + 1]) + Math.abs(ref.rgba[gi + 2] - head.rgba[li + 2]);
       if (d > 110) diff[y * head.width + x] = 1;
     }
+  // maschera della differenza allargata di 3 px (comprende il contorno scuro dei tratti)
+  const diffWide = new Uint8Array(diff.length);
+  for (let y = 0; y < head.height; y++)
+    for (let x = 0; x < head.width; x++) {
+      if (!diff[y * head.width + x]) continue;
+      for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && yy >= 0 && xx < head.width && yy < head.height) diffWide[yy * head.width + xx] = 1;
+      }
+    }
+  /** Ritaglio dei pixel della POSA NEUTRA dove differiscono dalla testa, nel riquadro (coordinate posa). */
+  const cutFromRef = (box) => {
+    const x0 = Math.max(Math.floor(box.x0), head.x), y0 = Math.max(Math.floor(box.y0), head.y);
+    const x1 = Math.min(Math.ceil(box.x1), head.x + head.width - 1), y1 = Math.min(Math.ceil(box.y1), head.y + head.height - 1);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w < 4 || h < 4) return null;
+    const rgba = new Uint8ClampedArray(w * h * 4);
+    let n = 0;
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const lx = x + x0 - head.x, ly = y + y0 - head.y;
+        if (!diffWide[ly * head.width + lx]) continue;
+        // bordo morbido: quanti vicini (raggio 2) sono nella maschera
+        let k = 0, t = 0;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { t++; const xx = lx + dx, yy = ly + dy; if (xx >= 0 && yy >= 0 && xx < head.width && yy < head.height && diffWide[yy * head.width + xx]) k++; }
+        const gi = ((y + y0) * ref.width + x + x0) * 4, o = (y * w + x) * 4;
+        rgba[o] = ref.rgba[gi]; rgba[o + 1] = ref.rgba[gi + 1]; rgba[o + 2] = ref.rgba[gi + 2]; rgba[o + 3] = Math.round(255 * Math.min(1, (k / t) * 1.6));
+        n++;
+      }
+    return n < 30 ? null : { x: x0, y: y0, width: w, height: h, rgba };
+  };
   const zone = (x0f, x1f, y0f, y1f) => {
     // baricentro e riquadro dei pixel diversi nella zona (frazioni della testa)
     let n = 0, sx = 0, sy = 0, mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
@@ -408,8 +439,14 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     const cb = { x: eyeFit.b.pos.x + eyeFit.b.sp.width / 2, y: eyeFit.b.pos.y + eyeFit.b.sp.height / 2 };
     const mid = (ca.x + cb.x) / 2, eyeY = (ca.y + cb.y) / 2, half = Math.abs(cb.x - ca.x) / 2;
     report.face = { rule: "scala unica + simmetria", K: +K.toFixed(2), mid: Math.round(mid), eyeY: Math.round(eyeY), half: Math.round(half), eyeErr: Math.round(eyeFit.e / 2) };
+    // R6 (regola approvata nel progetto: "il viso migliore viene dalla testa originale"): occhi e
+    // sopracciglia si RITAGLIANO dalla posa neutra (stessi pixel, stesso punto), dove la posa differisce
+    // dalla testa a occhi chiusi; i pezzi della tavola servono solo a trovarli e a stimarne la misura.
     for (const [sd, r, sign] of [["dx", eyeFit.a, -1], ["sx", eyeFit.b, +1]]) {
-      faceParts.push({ role: "eye", side: sd, piece: r.sp, x: Math.round(mid + sign * half - r.sp.width / 2), y: Math.round(eyeY - r.sp.height / 2), err: r.pos.err, scale: K, target: "posa+simmetria" });
+      const cx = r.pos.x + r.sp.width / 2, cy = r.pos.y + r.sp.height / 2;
+      const cut = cutFromRef({ x0: cx - 0.75 * r.sp.width, x1: cx + 0.75 * r.sp.width, y0: cy - 0.75 * r.sp.height, y1: cy + 0.7 * r.sp.height });
+      if (cut) faceParts.push({ role: "eye", side: sd, piece: cut, x: cut.x, y: cut.y, err: 0, scale: K, target: "ritaglio dalla posa" });
+      else faceParts.push({ role: "eye", side: sd, piece: r.sp, x: Math.round(mid + sign * half - r.sp.width / 2), y: Math.round(eyeY - r.sp.height / 2), err: r.pos.err, scale: K, target: "posa+simmetria" });
     }
     // R1b le palpebre chiuse dipinte sulla testa: l'AI non le mette esattamente sotto gli occhi aperti,
     // e a riposo spunterebbero sotto l'occhio. Si STACCANO dalla testa come pezzi a sé (palpebra_dx/sx,
@@ -441,7 +478,10 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     const bA = browAt(row1[2], mid - half), bB = browAt(row1[3], mid + half);
     const browY = (bA.cy + bB.cy) / 2;
     for (const [sd, r, sign] of [["dx", bA, -1], ["sx", bB, +1]]) {
-      faceParts.push({ role: "brow", side: sd, piece: r.sp, x: Math.round(mid + sign * half - r.sp.width / 2), y: Math.round(browY - r.sp.height / 2), err: r.err, scale: K, target: "scala unica+simmetria" });
+      const cx = mid + sign * half;
+      const cut = cutFromRef({ x0: cx - 0.8 * r.sp.width, x1: cx + 0.8 * r.sp.width, y0: browY - 1.0 * r.sp.height, y1: Math.min(browY + 0.9 * r.sp.height, eyeY - 0.35 * half) });
+      if (cut) faceParts.push({ role: "brow", side: sd, piece: cut, x: cut.x, y: cut.y, err: 0, scale: K, target: "ritaglio dalla posa" });
+      else faceParts.push({ role: "brow", side: sd, piece: r.sp, x: Math.round(cx - r.sp.width / 2), y: Math.round(browY - r.sp.height / 2), err: r.err, scale: K, target: "scala unica+simmetria" });
     }
   } else report.warnings.push(`Tavola del viso: ${row1.length} pezzi nella prima riga invece di 4.`);
   let mouth = null;
@@ -473,6 +513,10 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       const sp = scalePiece(p, s * MK);
       variants[MOUTHS[i]] = { piece: sp, x: Math.round(mid - sp.width / 2), y: Math.round(best.y) };
     });
+    // R6 anche per la bocca a riposo: la neutra è ritagliata dalla posa (baffi e labbra originali);
+    // le altre bocche della tavola restano allineate sulle labbra (si vedono solo nelle espressioni)
+    const cutM = cutFromRef({ x0: mid - 1.5 * half, x1: mid + 1.5 * half, y0: eyeY + 0.95 * half, y1: eyeY + 3.0 * half });
+    if (cutM) variants.neutral = { piece: cutM, x: cutM.x, y: cutM.y };
     mouth = { variants, err: best.err, scale: +MK.toFixed(2) };
   } else report.warnings.push(`Tavola del viso: ${row2.length} bocche invece di 5.`);
   const eyes = faceParts.filter((p) => p.role === "eye");
