@@ -29,7 +29,7 @@ const DEFAULT_LAYER = {
   "chain:hair_back": 0, "chain:cape": 1, "chain:tail": 2,
   thigh: 10, shin: 11, foot: 12, pelvis: 13, torso: 20,
   upper_arm: 30, forearm: 31, hand: 32, prop: 33,
-  head: 40, eye: 41, brow: 42, mouth: 43, "chain:hair": 44, "chain:ribbon": 45, fx: 60
+  head: 40, eye: 41, lid: 41.5, brow: 42, mouth: 43, "chain:hair": 44, "chain:ribbon": 45, fx: 60
 };
 
 export function buildBipedSkeleton(kit) {
@@ -108,6 +108,12 @@ export function buildBipedSkeleton(kit) {
       bone = `${part.role === "eye" ? "occhio" : "sopracciglio"}_${part.side}`;
       addBone(bone, "viso", { x: part.x + part.width / 2, y: part.y + part.height / 2 }, null);
       attachments[part.name] = { [part.name]: regionAt(bone, part) };
+    } else if (part.role === "lid") {
+      // palpebra chiusa: pezzo a sé sopra l'occhio, invisibile a riposo, visibile solo nel battito
+      bone = `palpebra_${part.side}`;
+      addBone(bone, "viso", { x: part.x + part.width / 2, y: part.y + part.height / 2 }, null);
+      attachments[part.name] = { [part.name]: regionAt(bone, part) };
+      slot = { ...slot, color: "ffffff00" };
     } else if (part.role === "mouth") {
       bone = "bocca";
       const base = part.variants?.neutral || part;

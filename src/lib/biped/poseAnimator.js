@@ -182,6 +182,12 @@ export function buildAnimation(rig, spec) {
       const rg = ((anim.slots[slot.name] ||= {}).rgba ||= [{ time: 0, color: "ffffffff" }]);
       rg.push({ time: round(t0, 4), color: "ffffffff" }, { time: round(t0 + 0.04, 4), color: "ffffff00" }, { time: round(t0 + 0.12, 4), color: "ffffffff" });
     }
+    // palpebra a pezzo (se c'è): compare mentre l'occhio si chiude, sparisce quando si riapre
+    const lid = json.slots.find((s) => s.bone === eye.replace("occhio", "palpebra"));
+    if (lid) {
+      const rl = ((anim.slots[lid.name] ||= {}).rgba ||= [{ time: 0, color: "ffffff00" }]);
+      rl.push({ time: round(t0 + 0.02, 4), color: "ffffff00" }, { time: round(t0 + 0.04, 4), color: "ffffffff" }, { time: round(t0 + 0.1, 4), color: "ffffffff" }, { time: round(t0 + 0.12, 4), color: "ffffff00" });
+    }
   }
   for (const eye of facial.filter((n) => n.startsWith("occhio"))) {
     const sc = anim.bones[eye]?.scale;
@@ -189,6 +195,9 @@ export function buildAnimation(rig, spec) {
     const slot = json.slots.find((s) => s.bone === eye);
     const rg = slot && anim.slots[slot.name]?.rgba;
     if (rg && rg[rg.length - 1].time < duration) rg.push({ time: duration, color: "ffffffff" });
+    const lid = json.slots.find((s) => s.bone === eye.replace("occhio", "palpebra"));
+    const rl = lid && anim.slots[lid.name]?.rgba;
+    if (rl && rl[rl.length - 1].time < duration) rl.push({ time: duration, color: "ffffff00" });
   }
 
   json.animations[spec.name] = anim;
