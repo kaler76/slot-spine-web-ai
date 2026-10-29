@@ -484,7 +484,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       else faceParts.push({ role: "brow", side: sd, piece: r.sp, x: Math.round(cx - r.sp.width / 2), y: Math.round(browY - r.sp.height / 2), err: r.err, scale: K, target: "scala unica+simmetria" });
     }
   } else report.warnings.push(`Tavola del viso: ${row1.length} pezzi nella prima riga invece di 4.`);
-  let mouth = null;
+  let mouth = null, mouthCenterY = null;
   if (row2.length >= 5) {
     const K = report.face?.K ?? 1, mid = report.face?.mid ?? hcx, eyeY = report.face?.eyeY ?? head.y + 0.4 * hh, half = report.face?.half ?? 0.15 * hw;
     // la bocca della tavola porta con sé baffi e barba e non segue la scala R0. Si allinea la BOCCA
@@ -494,6 +494,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     const pm = coloredCore(row2[0]);
     let MK, mouthTop;
     if (zm && pm) {
+      mouthCenterY = zm.cy;
       MK = zm.w / pm.w / s;
       mouthTop = zm.cy - pm.cy * s * MK;
       report.face.mouth = { rule: "bocca su bocca", refW: Math.round(zm.w), k: +MK.toFixed(2) };
@@ -522,6 +523,43 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   const eyes = faceParts.filter((p) => p.role === "eye");
   P.face_center = eyes.length === 2 ? mid({ x: eyes[0].x + eyes[0].piece.width / 2, y: eyes[0].y + eyes[0].piece.height / 2 }, { x: eyes[1].x + eyes[1].piece.width / 2, y: eyes[1].y + eyes[1].piece.height / 2 }) : { x: hcx, y: head.y + hh * 0.45 };
 
+  // 4b) VISO IN MESH (regola dei tutorial: "mai lasciare il viso senza manipolazione della mesh"):
+  // occhi, sopracciglia e bocca a riposo, ritagliati dalla posa, si INCORPORANO nella testa, che
+  // diventa una mesh unica; le espressioni sono deformazioni della mesh (poseAnimator). Restano pezzi a
+  // sé solo le palpebre del battito e le bocche aperte (interno della bocca, con trasparenza).
+  let faceGeo = null;
+  if (opt.faceMesh !== false && faceParts.length === 4 && mouth?.variants.neutral) {
+    const paste = (pc, x0, y0) => {
+      for (let y = 0; y < pc.height; y++)
+        for (let x = 0; x < pc.width; x++) {
+          const a = pc.rgba[(y * pc.width + x) * 4 + 3] / 255;
+          if (a <= 0) continue;
+          const hx = x + x0 - head.x, hy = y + y0 - head.y;
+          if (hx < 0 || hy < 0 || hx >= head.width || hy >= head.height) continue;
+          const i = (hy * head.width + hx) * 4, o = (y * pc.width + x) * 4;
+          for (let c = 0; c < 3; c++) head.rgba[i + c] = head.rgba[i + c] * (1 - a) + pc.rgba[o + c] * a;
+          head.rgba[i + 3] = Math.max(head.rgba[i + 3], pc.rgba[o + 3]);
+        }
+    };
+    const center = (fp) => ({ x: fp.x + fp.piece.width / 2, y: fp.y + fp.piece.height / 2 });
+    for (const fp of faceParts) paste(fp.piece, fp.x, fp.y);
+    const mn = mouth.variants.neutral;
+    paste(mn.piece, mn.x, mn.y);
+    const eyesC = ["dx", "sx"].map((sd) => center(faceParts.find((f) => f.role === "eye" && f.side === sd)));
+    const browsC = ["dx", "sx"].map((sd) => center(faceParts.find((f) => f.role === "brow" && f.side === sd)));
+    const zm2 = report.face?.mouth;
+    const mid2 = report.face?.mid ?? (eyesC[0].x + eyesC[1].x) / 2, half2 = report.face?.half ?? Math.abs(eyesC[1].x - eyesC[0].x) / 2;
+    faceGeo = {
+      eyes: eyesC, brows: browsC,
+      // bocca: centro e larghezza delle labbra nella posa (dalla zona accesa dalla differenza)
+      mouth: { x: mid2, y: mouthCenterY ?? report.face.eyeY + 1.9 * half2, w: zm2?.refW ?? 1.6 * half2 },
+      u: 2 * half2
+    };
+    faceParts.length = 0;
+    delete mouth.variants.neutral;
+    report.face.mesh = true;
+  }
+
   // 5) kit
   const images = {};
   const parts = [];
@@ -536,7 +574,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       put("hair_back", p, { role: "chain", kind: "hair", layer: "hair_back", points: [top, { x: top.x, y: p.y + p.height * 0.55 }, { x: top.x, y: p.y + p.height * 0.97 }] });
     } else {
       const m = /^(.*)_(sx|dx)$/.exec(r);
-      put(r, p, m ? { role: m[1], side: m[2] } : { role: r });
+      put(r, p, m ? { role: m[1], side: m[2] } : { role: r, ...(r === "head" && faceGeo ? { mesh: true } : {}) });
     }
   }
   for (const fp of faceParts) {
@@ -551,7 +589,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       images[name] = { width: m.piece.width, height: m.piece.height, rgba: m.piece.rgba };
       variants[v] = { name, x: m.x, y: m.y, width: m.piece.width, height: m.piece.height };
     }
-    parts.push({ name: "mouth", role: "mouth", variants });
+    parts.push({ name: "mouth", role: "mouth", variants, ...(faceGeo ? { overlay: true } : {}) });
     report.pieces.push({ role: "mouth", err: Math.round(mouth.err) });
   }
   // bagliore della magia generato (additivo)
@@ -565,6 +603,6 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     images[`glow_${sd}`] = { width: 2 * R, height: 2 * R, rgba };
     parts.push({ name: `glow_${sd}`, role: "fx", side: sd, x: 0, y: 0, width: 2 * R, height: 2 * R });
   }
-  const kit = { name: opt.name || "personaggio", body: "bust", points: P, parts };
+  const kit = { name: opt.name || "personaggio", body: "bust", points: P, parts, ...(faceGeo ? { face: faceGeo } : {}) };
   return { kit, images, report, scale: s, work: f };
 }

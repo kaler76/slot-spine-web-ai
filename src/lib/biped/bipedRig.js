@@ -99,11 +99,17 @@ export function buildBipedSkeleton(kit) {
   };
 
   const chains = [];
+  let faceMesh = null;
   for (const part of kit.parts) {
     let bone, layerKey = part.role, slot = { name: part.name, attachment: part.name };
     if (PART_ROLES[part.role]) {
       bone = boneName(part.role, part.side);
-      attachments[part.name] = { [part.name]: regionAt(bone, part) };
+      if (part.mesh) {
+        // testa con il viso incorporato: mesh a griglia (le espressioni la deformano)
+        const m = gridMesh(part, world[bone], S, 14, 16);
+        attachments[part.name] = { [part.name]: m.att };
+        faceMesh = { slot: part.name, attachment: part.name, bone, imgPts: m.imgPts, rot: world[bone].rot };
+      } else attachments[part.name] = { [part.name]: regionAt(bone, part) };
     } else if (part.role === "eye" || part.role === "brow") {
       bone = `${part.role === "eye" ? "occhio" : "sopracciglio"}_${part.side}`;
       addBone(bone, "viso", { x: part.x + part.width / 2, y: part.y + part.height / 2 }, null);
@@ -116,12 +122,13 @@ export function buildBipedSkeleton(kit) {
       slot = { ...slot, color: "ffffff00" };
     } else if (part.role === "mouth") {
       bone = "bocca";
-      const base = part.variants?.neutral || part;
+      const base = part.variants?.neutral || Object.values(part.variants || {})[0] || part;
       addBone(bone, "viso", { x: base.x + base.width / 2, y: base.y + base.height / 2 }, null);
       const atts = {};
       for (const [v, img] of Object.entries(part.variants || { neutral: part })) atts[`bocca_${v}`] = regionAt(bone, img, img.name || `${part.name}_${v}`);
       attachments[part.name] = atts;
-      slot.attachment = "bocca_neutral";
+      if (part.overlay) delete slot.attachment; // bocche aperte sopra il viso in mesh: visibili solo nelle espressioni
+      else slot.attachment = "bocca_neutral";
     } else if (part.role === "prop") {
       bone = `oggetto_${part.side}`;
       addBone(bone, `mano_${part.side}`, part.grip, null);
@@ -171,7 +178,43 @@ export function buildBipedSkeleton(kit) {
     skins: [{ name: "default", attachments }],
     animations: {}
   };
-  return { json, meta: { rulesVersion: BIPED_RULES_VERSION, body, chains, world, origin: { x: ox, y: oy } } };
+  return { json, meta: { rulesVersion: BIPED_RULES_VERSION, body, chains, world, origin: { x: ox, y: oy }, ...(faceMesh && kit.face ? { faceMesh: { ...faceMesh, face: kit.face } } : {}) } };
+}
+
+/**
+ * Mesh a griglia NON pesata su un osso (vertici in coordinate dell'osso). imgPts = posizione di ogni
+ * vertice nell'immagine del personaggio (per calcolare le deformazioni delle espressioni).
+ */
+export function gridMesh(part, w, S, cols, rows) {
+  const co = Math.cos(-w.rot / R2D), si = Math.sin(-w.rot / R2D);
+  const uvs = [], vertices = [], imgPts = [], triangles = [];
+  const id = (r, c) => r * cols + c;
+  // ordine: prima il contorno (hull) in senso orario, poi l'interno
+  const order = [];
+  for (let c = 0; c < cols; c++) order.push([0, c]);
+  for (let r = 1; r < rows; r++) order.push([r, cols - 1]);
+  for (let c = cols - 2; c >= 0; c--) order.push([rows - 1, c]);
+  for (let r = rows - 2; r >= 1; r--) order.push([r, 0]);
+  const hull = order.length;
+  for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) order.push([r, c]);
+  const index = new Map(order.map(([r, c], i) => [id(r, c), i]));
+  for (const [r, c] of order) {
+    const u = c / (cols - 1), v = r / (rows - 1);
+    const px = part.x + u * part.width, py = part.y + v * part.height;
+    const sp = S({ x: px, y: py });
+    const dx = sp.x - w.x, dy = sp.y - w.y;
+    uvs.push(round(u, 5), round(v, 5));
+    vertices.push(round(dx * co - dy * si), round(dx * si + dy * co));
+    imgPts.push({ x: px, y: py });
+  }
+  for (let r = 0; r < rows - 1; r++)
+    for (let c = 0; c < cols - 1; c++) {
+      const a = index.get(id(r, c)), b = index.get(id(r, c + 1)), d = index.get(id(r + 1, c)), e = index.get(id(r + 1, c + 1));
+      triangles.push(a, d, b, b, d, e);
+    }
+  const edges = [];
+  for (let k = 0; k < hull; k++) edges.push(k * 2, ((k + 1) % hull) * 2);
+  return { att: { type: "mesh", name: part.name, uvs, triangles, vertices, hull, edges, width: part.width, height: part.height }, imgPts };
 }
 
 /** n punti equidistanti lungo la polilinea. */

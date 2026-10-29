@@ -79,6 +79,7 @@ export function buildAnimation(rig, spec) {
     channels.get(k).push({ t, v, ease });
   };
   const anatomical = Object.keys(rest).filter((n) => has.has(n));
+  const faceKeys = [];
   const facial = ["occhio_sx", "occhio_dx", "sopracciglio_sx", "sopracciglio_dx"].filter((n) => has.has(n));
   for (const k of keys) {
     const p = k.pose || {};
@@ -132,7 +133,14 @@ export function buildAnimation(rig, spec) {
       const f = p[`foot_${side}`] || { x: 0, y: 0 };
       push(`ik_piede_${side}`, "translate", k.t, { x: f.x, y: f.y }, k.ease);
     }
-    if (has.has("bocca")) push("bocca", "attachment", k.t, `bocca_${p.mouth || "neutral"}`, "hold"); // posa senza bocca = bocca a riposo
+    if (rig.meta.faceMesh) {
+      // viso in mesh: le espressioni deformano la testa; le bocche aperte (interno) compaiono sopra
+      const ex = { ...MOUTH_EXPR[p.mouth || "neutral"], ...(p.expr || {}) };
+      const b = p.brows ?? 0;
+      if (b > 0) ex.browsUp = Math.max(ex.browsUp || 0, b); else if (b < 0) ex.angry = Math.max(ex.angry || 0, -b);
+      faceKeys.push({ t: k.t, ex, ease: k.ease });
+      if (has.has("bocca")) push("bocca", "attachment", k.t, ["open", "o"].includes(p.mouth) ? `bocca_${p.mouth}` : null, "hold");
+    } else if (has.has("bocca")) push("bocca", "attachment", k.t, `bocca_${p.mouth || "neutral"}`, "hold"); // posa senza bocca = bocca a riposo
   }
 
   for (const [key, list] of channels) {
@@ -142,10 +150,11 @@ export function buildAnimation(rig, spec) {
     if (ch === "attachment") {
       const slot = json.slots.find((s) => s.bone === "bocca");
       if (slot) {
-        const out = []; let prev = null;
+        const rest0 = rig.meta.faceMesh ? null : "bocca_neutral";
+        const out = []; let prev;
         for (const k of timed) if (k.v !== prev) { out.push({ time: round(k.t, 4), name: k.v }); prev = k.v; }
-        if (out[0]?.time !== 0) out.unshift({ time: 0, name: "bocca_neutral" });
-        if (out.some((k) => k.name !== "bocca_neutral")) (anim.slots[slot.name] ||= {}).attachment = out;
+        if (out[0]?.time !== 0) out.unshift({ time: 0, name: rest0 });
+        if (out.some((k) => k.name !== rest0)) (anim.slots[slot.name] ||= {}).attachment = out;
       }
       continue;
     }
@@ -200,12 +209,73 @@ export function buildAnimation(rig, spec) {
     if (rl && rl[rl.length - 1].time < duration) rl.push({ time: duration, color: "ffffff00" });
   }
 
+  if (rig.meta.faceMesh && faceKeys.some((k) => Object.values(k.ex).some((v) => v))) {
+    const fm = rig.meta.faceMesh;
+    const keys = faceKeys.map((k, i) => {
+      const o = { time: round(k.t, 4), vertices: faceOffsets(fm, k.ex) };
+      const nx = faceKeys[i + 1];
+      if (nx) { const e = EASE[k.ease || "inOut"]; if (e === "stepped") o.curve = "stepped"; else if (e) o.curve = bez(e, k.t, nx.t, 0, 1); }
+      return o;
+    });
+    anim.deform = { default: { [fm.slot]: { [fm.attachment]: keys } } };
+  }
   json.animations[spec.name] = anim;
   if (!Object.keys(anim.slots).length) delete anim.slots;
   if (!Object.keys(anim.ik).length) delete anim.ik;
   // FOLLOW-THROUGH sulle catene (dopo: servono le ossa genitore già animate)
   if (spec.secondary !== false) for (const chain of rig.meta.chains) simulateChain(json, spec.name, chain, duration, !!spec.loop);
   return { name: spec.name, duration, clamped };
+}
+
+/** Espressione del viso associata a ogni bocca della libreria (il viso in mesh si deforma). */
+const MOUTH_EXPR = { neutral: {}, smile: { smile: 1 }, open: { laugh: 1 }, o: { surprise: 1 }, sad: { sad: 1 } };
+
+/**
+ * ESPRESSIONI come deformazione della mesh della testa (tutorial: "mai lasciare il viso senza
+ * manipolazione della mesh"). Campi di spostamento attorno ai punti del viso (angoli della bocca,
+ * sopracciglia, guance, mento), con caduta gaussiana; unità u = distanza fra gli occhi.
+ * Le zone lontane (contorno della testa, capelli) non si muovono.
+ * @returns offset dei vertici nelle coordinate dell'osso della testa [dx0, dy0, dx1, dy1, ...]
+ */
+export function faceOffsets(fm, ex) {
+  const { face, imgPts, rot } = fm;
+  const u = face.u, M = face.mouth;
+  const [eL, eR] = face.eyes, [bL, bR] = face.brows;
+  const ctrl = [];
+  const add = (x, y, dx, dy, R = 0.3) => ctrl.push({ x, y, dx: dx * u, dy: dy * u, R: R * u });
+  const w = (k) => ex[k] || 0;
+  const cl = { x: M.x - M.w / 2, y: M.y }, cr = { x: M.x + M.w / 2, y: M.y };
+  const sm = w("smile") + w("laugh");
+  if (sm) {
+    add(cl.x, cl.y, -0.05 * sm, -0.11 * sm, 0.3); add(cr.x, cr.y, 0.05 * sm, -0.11 * sm, 0.3);
+    add(eL.x, eL.y + 0.42 * u, 0, -0.06 * sm, 0.28); add(eR.x, eR.y + 0.42 * u, 0, -0.06 * sm, 0.28); // guance
+    add(eL.x, eL.y + 0.13 * u, 0, -0.03 * sm, 0.14); add(eR.x, eR.y + 0.13 * u, 0, -0.03 * sm, 0.14); // occhi che sorridono
+  }
+  if (w("laugh") || w("surprise")) add(M.x, M.y + 0.45 * u, 0, 0.1 * (w("laugh") + 1.3 * w("surprise")), 0.55); // mento giù
+  if (w("surprise")) {
+    add(cl.x, cl.y, 0.04 * w("surprise"), 0.02, 0.25); add(cr.x, cr.y, -0.04 * w("surprise"), 0.02, 0.25);
+    add(bL.x, bL.y, 0, -0.15 * w("surprise"), 0.32); add(bR.x, bR.y, 0, -0.15 * w("surprise"), 0.32);
+  }
+  if (w("sad")) {
+    add(cl.x, cl.y, 0.02 * w("sad"), 0.09 * w("sad"), 0.3); add(cr.x, cr.y, -0.02 * w("sad"), 0.09 * w("sad"), 0.3);
+    add(bL.x + 0.18 * u, bL.y, 0, -0.08 * w("sad"), 0.18); add(bR.x - 0.18 * u, bR.y, 0, -0.08 * w("sad"), 0.18); // interno su
+    add(bL.x - 0.2 * u, bL.y, 0, 0.04 * w("sad"), 0.16); add(bR.x + 0.2 * u, bR.y, 0, 0.04 * w("sad"), 0.16);
+  }
+  if (w("angry")) {
+    add(bL.x + 0.18 * u, bL.y, 0.03 * w("angry"), 0.09 * w("angry"), 0.18); add(bR.x - 0.18 * u, bR.y, -0.03 * w("angry"), 0.09 * w("angry"), 0.18);
+    add(bL.x - 0.2 * u, bL.y, 0, -0.03 * w("angry"), 0.16); add(bR.x + 0.2 * u, bR.y, 0, -0.03 * w("angry"), 0.16);
+  }
+  if (w("browsUp")) { add(bL.x, bL.y, 0, -0.12 * w("browsUp"), 0.3); add(bR.x, bR.y, 0, -0.12 * w("browsUp"), 0.3); }
+  const co = Math.cos(-rot / R2D), si = Math.sin(-rot / R2D);
+  const out = [];
+  for (const p of imgPts) {
+    let dx = 0, dy = 0;
+    for (const c of ctrl) { const g = Math.exp(-((p.x - c.x) ** 2 + (p.y - c.y) ** 2) / (c.R * c.R)); dx += c.dx * g; dy += c.dy * g; }
+    // immagine (y in giù) → Spine (y in su) → coordinate dell'osso
+    const sx = dx, sy = -dy;
+    out.push(round(sx * co - sy * si, 2), round(sx * si + sy * co, 2));
+  }
+  return out;
 }
 
 /** Bézier normalizzata → punti di controllo assoluti (tempo, valore) del formato Spine 4.x. */

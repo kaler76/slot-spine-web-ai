@@ -182,3 +182,18 @@ test("B8 occhi e bocca incollati alla testa: non scivolano fuori dalle palpebre 
   });
   assert.deepEqual(bad.slice(0, 6), []);
 });
+
+test("B9 viso in mesh: le espressioni muovono bocca e sopracciglia, non il contorno della testa", async () => {
+  const { faceOffsets } = await import("../src/lib/biped/poseAnimator.js");
+  // griglia 21x21 su una testa di 400 px, occhi a 100 px di distanza
+  const imgPts = []; for (let y = 0; y <= 400; y += 20) for (let x = 0; x <= 400; x += 20) imgPts.push({ x, y });
+  const fm = { rot: 90, imgPts, face: { u: 100, eyes: [{ x: 150, y: 180 }, { x: 250, y: 180 }], brows: [{ x: 150, y: 140 }, { x: 250, y: 140 }], mouth: { x: 200, y: 280, w: 90 } } };
+  const at = (off, x, y) => { const i = imgPts.findIndex((p) => p.x === x && p.y === y); return Math.hypot(off[2 * i], off[2 * i + 1]); };
+  const smile = faceOffsets(fm, { smile: 1 });
+  assert.ok(at(smile, 160, 280) > 5, "angolo della bocca si muove nel sorriso");
+  assert.ok(at(smile, 0, 0) < 0.01 && at(smile, 400, 400) < 0.01, "il contorno resta fermo");
+  const up = faceOffsets(fm, { browsUp: 1 });
+  assert.ok(at(up, 140, 140) > 5 && at(up, 200, 380) < 0.5, "sopracciglia su, mento fermo");
+  const none = faceOffsets(fm, {});
+  assert.ok(none.every((v) => v === 0), "nessuna espressione = nessuno spostamento");
+});
