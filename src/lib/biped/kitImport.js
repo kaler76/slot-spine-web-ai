@@ -510,8 +510,10 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       if (e < best.err) best = { err: e, y };
     }
     const variants = {};
+    // bocche della tavola un po' più grandi della misura sulle labbra (verifica dell'utente su Zeus: +12%)
+    const OPEN_K = opt.mouthScale ?? 1.12;
     row2.slice(0, 5).forEach((p, i) => {
-      const sp = scalePiece(p, s * MK);
+      const sp = scalePiece(p, s * MK * OPEN_K);
       const c = coloredCore(sp);
       // R7b centrata sulle LABBRA (non sul riquadro del pezzo, che con baffi e barba è asimmetrico)
       const x = Math.round(mid - (c ? c.cx : sp.width / 2));
