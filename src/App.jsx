@@ -10,6 +10,7 @@ import ReelsPage from "./pages/ReelsPage.jsx";
 import ImportAztecPage from "./pages/ImportAztecPage.jsx";
 import ProjectPage from "./pages/ProjectPage.jsx";
 import RecognizePage from "./pages/RecognizePage.jsx";
+import AnimatedCharacterPage from "./pages/AnimatedCharacterPage.jsx";
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/import-aztec" element={<ImportAztecPage />} />
       <Route path="/project" element={<ProjectPage />} />
       <Route path="/recognize" element={<RecognizePage />} />
+      <Route path="/personaggio-animato" element={<AnimatedCharacterPage />} />
     </Routes>
   );
 }

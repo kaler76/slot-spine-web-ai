@@ -121,6 +121,14 @@ export default function Home() {
             Da un'immagine intera al pacchetto Spine 4.1 animato: occhi, sorriso, oggetto in mano, inquadratura.
           </div>
         </Link>
+        <Link to="/personaggio-animato" className="card">
+          <div className="card-icon">🎭</div>
+          <div className="card-title">Personaggio animato</div>
+          <span className="status-badge progress">Nuovo</span>
+          <div className="card-desc">
+            Dalle 3 tavole del kit (posa, corpo, viso) al pacchetto Spine 4.1 con ossa, IK, viso in mesh e 6 animazioni.
+          </div>
+        </Link>
         <Link to="/reels" className="card">
           <div className="card-icon">🎰</div>
           <div className="card-title">Rulli animati</div>
