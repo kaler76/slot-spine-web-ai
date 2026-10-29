@@ -209,16 +209,16 @@ function fillSkin(p, box) {
 
 /** Nucleo colorato (labbra, pelle) di un pezzo bocca con baffi/barba: riquadro dei pixel saturi. */
 function coloredCore(p) {
-  let n = 0, sy = 0, mnx = Infinity, mxx = -Infinity;
+  let n = 0, sy = 0, mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
   for (let y = 0; y < p.height; y++)
     for (let x = 0; x < p.width; x++) {
       const i = (y * p.width + x) * 4;
       if (p.rgba[i + 3] < 200) continue;
       const r = p.rgba[i], g = p.rgba[i + 1], b = p.rgba[i + 2];
       const sat = Math.max(r, g, b) - Math.min(r, g, b);
-      if (sat > 70 && r > g) { n++; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); }
+      if (sat > 70 && r > g) { n++; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
     }
-  return n < 15 ? null : { cy: sy / n, w: mxx - mnx };
+  return n < 15 ? null : { cy: sy / n, cx: (mnx + mxx) / 2, w: mxx - mnx, h: mxy - mny };
 }
 
 /** Larghezza del bianco dell'occhio (da angolo ad angolo) nel pezzo occhio della tavola. */
@@ -512,7 +512,22 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     const variants = {};
     row2.slice(0, 5).forEach((p, i) => {
       const sp = scalePiece(p, s * MK);
-      variants[MOUTHS[i]] = { piece: sp, x: Math.round(mid - sp.width / 2), y: Math.round(best.y) };
+      const c = coloredCore(sp);
+      // R7b centrata sulle LABBRA (non sul riquadro del pezzo, che con baffi e barba è asimmetrico)
+      const x = Math.round(mid - (c ? c.cx : sp.width / 2));
+      const y = c && mouthCenterY != null ? Math.round(mouthCenterY - c.cy) : Math.round(best.y);
+      // con il viso in mesh la bocca è sopra la barba ORIGINALE: si tiene solo l'interno della bocca
+      // (ellisse sfumata attorno a labbra e denti), non i baffi e la barba disegnati nella tavola
+      if (c && opt.faceMesh !== false) {
+        const rx = c.w / 2 + 3, ry = Math.max(c.h / 2, c.w * 0.18) + 3;
+        for (let yy = 0; yy < sp.height; yy++)
+          for (let xx = 0; xx < sp.width; xx++) {
+            const d = Math.hypot((xx - c.cx) / rx, (yy - c.cy) / ry);
+            const k = d < 0.8 ? 1 : d > 1 ? 0 : (1 - d) / 0.2;
+            sp.rgba[(yy * sp.width + xx) * 4 + 3] *= k;
+          }
+      }
+      variants[MOUTHS[i]] = { piece: sp, x, y };
     });
     // R6 anche per la bocca a riposo: la neutra è ritagliata dalla posa (baffi e labbra originali);
     // le altre bocche della tavola restano allineate sulle labbra (si vedono solo nelle espressioni)
@@ -545,6 +560,65 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     for (const fp of faceParts) paste(fp.piece, fp.x, fp.y);
     const mn = mouth.variants.neutral;
     paste(mn.piece, mn.x, mn.y);
+    // R7 la testa a riposo è l'ORIGINALE: barba, baffi e capelli della tavola sono ridisegnati (più
+    // piccoli, spostati). Si prendono i pixel della posa per tutta la testa + barba: riempimento dai
+    // pixel della testa sopra la bocca, poi giù solo su pixel "barba" (chiari, poco saturi) fermandosi
+    // sui contorni scuri. La testa della tavola resta solo dove è nascosta (collo).
+    {
+      const eyeY0 = report.face.eyeY, half0 = report.face.half;
+      const mY = mouthCenterY ?? eyeY0 + 2 * half0;
+      const X0 = Math.max(0, Math.floor(head.x - 0.2 * hw)), X1 = Math.min(ref.width - 1, Math.ceil(head.x + 1.2 * hw));
+      const Y0 = Math.max(0, head.y), Y1 = Math.min(ref.height - 1, Math.ceil(head.y + 1.45 * hh));
+      const W2 = X1 - X0 + 1, H2 = Y1 - Y0 + 1;
+      const px = (x, y) => (y * ref.width + x) * 4;
+      const isBg = (i) => ref.rgba[i + 3] < 128 || (ref.rgba[i + 1] > ref.rgba[i] + 40 && ref.rgba[i + 1] > ref.rgba[i + 2] + 40);
+      const kitA = (x, y) => { const hx = x - head.x, hy = y - head.y; return hx < 0 || hy < 0 || hx >= head.width || hy >= head.height ? 0 : head.rgba[(hy * head.width + hx) * 4 + 3]; };
+      const beardLike = (i) => { const r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2]; return Math.max(r, g, b) - Math.min(r, g, b) < 55 && (r + g + b) / 3 > 135; };
+      const F = new Uint8Array(W2 * H2), q = [];
+      for (let y = Y0; y <= Math.min(Y1, mY); y++)
+        for (let x = X0; x <= X1; x++) if (kitA(x, y) > 128 && !isBg(px(x, y))) { F[(y - Y0) * W2 + x - X0] = 1; q.push(x, y); }
+      while (q.length) {
+        const y = q.pop(), x = q.pop();
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const xx = x + dx, yy = y + dy;
+          if (xx < X0 || xx > X1 || yy < Y0 || yy > Y1) continue;
+          const k = (yy - Y0) * W2 + xx - X0;
+          if (F[k]) continue;
+          const i = px(xx, yy);
+          if (isBg(i)) continue;
+          if ((yy <= mY && kitA(xx, yy) > 128) || (yy > mY - half0 && beardLike(i))) { F[k] = 1; q.push(xx, yy); }
+        }
+      }
+      // contorno scuro della barba (2 px)
+      for (let it = 0; it < 2; it++) {
+        const add = [];
+        for (let y = 1; y < H2 - 1; y++)
+          for (let x = 1; x < W2 - 1; x++) {
+            const k = y * W2 + x;
+            if (F[k] || !(F[k - 1] || F[k + 1] || F[k - W2] || F[k + W2])) continue;
+            const i = px(x + X0, y + Y0);
+            if (!isBg(i) && ref.rgba[i] + ref.rgba[i + 1] + ref.rgba[i + 2] < 300) add.push(k);
+          }
+        for (const k of add) F[k] = 1;
+      }
+      const rgba = new Uint8ClampedArray(W2 * H2 * 4);
+      let nOrig = 0;
+      for (let y = 0; y < H2; y++)
+        for (let x = 0; x < W2; x++) {
+          const o = (y * W2 + x) * 4, gx = x + X0, gy = y + Y0, i = px(gx, gy);
+          if (F[y * W2 + x]) { rgba[o] = ref.rgba[i]; rgba[o + 1] = ref.rgba[i + 1]; rgba[o + 2] = ref.rgba[i + 2]; rgba[o + 3] = 255; nOrig++; continue; }
+          const a = kitA(gx, gy);
+          // la tavola solo dove la posa ha qualcosa davanti (collo nascosto), mai sul fondo
+          if (a > 0 && !isBg(i)) { const hi = ((gy - head.y) * head.width + gx - head.x) * 4; rgba[o] = head.rgba[hi]; rgba[o + 1] = head.rgba[hi + 1]; rgba[o + 2] = head.rgba[hi + 2]; rgba[o + 3] = a; }
+        }
+      // ritaglio dello spazio vuoto
+      let bx0 = W2, by0 = H2, bx1 = -1, by1 = -1;
+      for (let y = 0; y < H2; y++) for (let x = 0; x < W2; x++) if (rgba[(y * W2 + x) * 4 + 3]) { bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x); by0 = Math.min(by0, y); by1 = Math.max(by1, y); }
+      const cw = bx1 - bx0 + 1, ch = by1 - by0 + 1, out = new Uint8ClampedArray(cw * ch * 4);
+      for (let y = 0; y < ch; y++) out.set(rgba.subarray(((y + by0) * W2 + bx0) * 4, ((y + by0) * W2 + bx1 + 1) * 4), y * cw * 4);
+      Object.assign(head, { x: X0 + bx0, y: Y0 + by0, width: cw, height: ch, rgba: out });
+      report.face.headFromRef = { px: nOrig, box: [head.x, head.y, cw, ch] };
+    }
     const eyesC = ["dx", "sx"].map((sd) => center(faceParts.find((f) => f.role === "eye" && f.side === sd)));
     const browsC = ["dx", "sx"].map((sd) => center(faceParts.find((f) => f.role === "brow" && f.side === sd)));
     const zm2 = report.face?.mouth;
