@@ -122,8 +122,12 @@ export function buildAnimation(rig, spec) {
     push("bacino", "translate", k.t, { x: p.body?.x ?? 0, y: bodyY }, k.ease);
     push("root", "translate", k.t, { x: p.jump?.x ?? 0, y: p.jump?.y ?? 0 }, k.ease);
     push("torace", "scale", k.t, { x: p.squash?.x ?? 1, y: p.squash?.y ?? 1 }, k.ease);
-    if (has.has("viso")) push("viso", "translate", k.t, { x: (p.look?.x ?? 0) * m.u * 0.22, y: (p.look?.y ?? 0) * m.u * 0.12 }, k.ease);
-    for (const b of facial.filter((n) => n.startsWith("sopracciglio"))) push(b, "translate", k.t, { x: 0, y: (p.brows ?? 0) * m.u * 0.16 }, k.ease);
+    // R5 tratti del viso INCOLLATI alla testa: con la testa in un solo pezzo (non mesh) spostare occhi,
+    // sopracciglia e bocca li fa scivolare fuori dalle palpebre dipinte (segnalato su Zeus, 29 ott).
+    // Lo sguardo si potrà animare solo con le pupille separate o con la testa in mesh 2.5D.
+    if (has.has("viso") && rig.meta.faceMesh) push("viso", "translate", k.t, { x: (p.look?.x ?? 0) * m.u * 0.22, y: (p.look?.y ?? 0) * m.u * 0.12 }, k.ease);
+    // sopracciglia: solo su e giù, poco (0,08 u): si alzano sulla fronte senza staccarsi dall'occhio
+    for (const b of facial.filter((n) => n.startsWith("sopracciglio"))) push(b, "translate", k.t, { x: 0, y: Math.max(-1, Math.min(1, p.brows ?? 0)) * m.u * 0.08 }, k.ease);
     for (const side of ["sx", "dx"]) if (json.ik && has.has(`ik_piede_${side}`)) {
       const f = p[`foot_${side}`] || { x: 0, y: 0 };
       push(`ik_piede_${side}`, "translate", k.t, { x: f.x, y: f.y }, k.ease);

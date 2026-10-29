@@ -164,3 +164,21 @@ test("B7 niente shear e niente chiavi di deformazione", () => {
     }
   }
 });
+
+test("B8 occhi e bocca incollati alla testa: non scivolano fuori dalle palpebre dipinte", async () => {
+  const { rig, images } = build("bust");
+  const { spine, data } = await runtime(rig.json, images);
+  const bad = [];
+  for (const anim of ANIMATIONS) sweep(spine, data, anim, 30, (sk, t) => {
+    const head = sk.findBone("testa");
+    for (const n of ["occhio_sx", "occhio_dx", "bocca"]) {
+      const b = sk.findBone(n);
+      // posizione dell'occhio nello spazio della testa = quella di riposo
+      const p = head.worldToLocal(new spine.Vector2(b.worldX, b.worldY));
+      const r = { x: b.data.x + sk.findBone("viso").data.x, y: b.data.y + sk.findBone("viso").data.y };
+      const d = Math.hypot(p.x - r.x, p.y - r.y);
+      if (d > 0.5) bad.push(`${anim}@${t.toFixed(2)} ${n} spostato di ${d.toFixed(1)} px sulla testa`);
+    }
+  });
+  assert.deepEqual(bad.slice(0, 6), []);
+});
