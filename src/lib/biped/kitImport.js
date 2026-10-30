@@ -951,6 +951,33 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
   // spalle: dalla calotta disegnata nella TAVOLA (prima di prendere i pixel della posa, dove la spalla
   // è coperta da capelli e mantello: dopo, la cima del braccio sarebbe la manica sotto i capelli e il
   // braccio girerebbe "segato" all'altezza del deltoide)
+  // SPALLA VERA = angolo alto del busto (le spalle a sbuffo disegnate nella tavola, sotto il fermaglio
+  // del mantello: indicate dall'utente). Il braccio della tavola spesso è posato più in basso: lo si
+  // allunga verso l'alto fino a quell'angolo, così la parte alta del braccio (dalla spalla all'ascella)
+  // è del BRACCIO e non resta attaccata al busto quando il braccio si alza.
+  const shoulderAt = {};
+  for (const [sd, arm] of [["dx", armDx], ["sx", armSx]]) {
+    const yy = Math.round(torso.height * 0.07);
+    let ex = sd === "dx" ? torso.width : -1;
+    for (let y = Math.max(0, yy - 3); y <= yy + 3; y++)
+      for (let x = 0; x < torso.width; x++) {
+        if (torso.rgba[(y * torso.width + x) * 4 + 3] < 128) continue;
+        if (sd === "dx") ex = Math.min(ex, x); else ex = Math.max(ex, x);
+      }
+    const inward = (sd === "dx" ? 1 : -1) * 0.22 * arm.width;
+    const corner = { x: torso.x + ex + inward, y: torso.y + yy };
+    const cap = capCenter(arm, 0.08);
+    const dy = cap.y - corner.y;
+    if (dy > 4) {
+      // allungamento verticale della sola parte alta: si ricampiona il pezzo con un riquadro più alto
+      const bottom = arm.y + arm.height, top = arm.y - dy;
+      const shiftX = corner.x - cap.x;
+      const res = resizePiece(arm, arm.width, Math.round(bottom - top));
+      Object.assign(arm, res, { y: Math.round(top), x: Math.round(arm.x + shiftX * 0.6) });
+    }
+    shoulderAt[sd] = corner;
+  }
+  report.shoulders = shoulderAt;
   const sheetArm = { dx: { ...armDx }, sx: { ...armSx } };
   const layered = [cape, hair, torso, armDx, armSx, head, lockDx, lockSx];
   const accepts = new Map([[cape, "CN"], [hair, "HN"], [lockDx, "HN"], [lockSx, "HN"], [torso, "BKN"], [armDx, "BKN"], [armSx, "BKN"], [head, "HCBKN"]]);
@@ -964,17 +991,11 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
   // articolazioni
   const P = {};
   const sleeves = {};
-  const capCenter = (p, frac) => {
-    // centro dei pixel opachi nella fascia più alta del pezzo (calotta della spalla)
-    let n = 0, sx = 0, sy = 0;
-    for (let y = 0; y < Math.max(2, p.height * frac); y++)
-      for (let x = 0; x < p.width; x++) if (p.rgba[(y * p.width + x) * 4 + 3] > 200) { n++; sx += x; sy += y; }
-    return { x: p.x + sx / Math.max(1, n), y: p.y + sy / Math.max(1, n) };
-  };
+
   for (const [sd, arm, hand] of [["dx", armDx, handDx], ["sx", armSx, handSx]]) {
     const ax = limbAxis(hand);
     const [wr, ft] = ax.tipA.y <= ax.tipB.y ? [ax.a, ax.tipB] : [ax.b, ax.tipA];
-    const sh = capCenter(sheetArm[sd], 0.08);
+    const sh = shoulderAt[sd] || capCenter(sheetArm[sd], 0.08);
     P[`shoulder_${sd}`] = sh;
     P[`wrist_${sd}`] = wr;
     P[`fingertip_${sd}`] = ft;
@@ -1275,6 +1296,14 @@ function ownByColor(pieces, ref, accepts, { grow = 6, reach = 40, strict = new S
   return { pieces: out, owner, stats: { byFront, byNear, orphan, orphanByClass: { H: orphanBy[1], C: orphanBy[2], B: orphanBy[3], K: orphanBy[4], N: orphanBy[5] } } };
 }
 
+/** Centro dei pixel opachi nella fascia più alta del pezzo (calotta della spalla). */
+function capCenter(p, frac) {
+  // centro dei pixel opachi nella fascia più alta del pezzo (calotta della spalla)
+  let n = 0, sx = 0, sy = 0;
+  for (let y = 0; y < Math.max(2, p.height * frac); y++)
+    for (let x = 0; x < p.width; x++) if (p.rgba[(y * p.width + x) * 4 + 3] > 200) { n++; sx += x; sy += y; }
+  return { x: p.x + sx / Math.max(1, n), y: p.y + sy / Math.max(1, n) };
+};
 /** Ridimensiona un pezzo a w×h (vicino più prossimo; scale diverse in x e y). */
 function resizePiece(p, w, h) {
   const rgba = new Uint8ClampedArray(w * h * 4);
