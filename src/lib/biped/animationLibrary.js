@@ -8,7 +8,7 @@
 import { buildAnimation, restAnatomy, simulateChain } from "./poseAnimator.js";
 
 /** Animazioni disponibili, nell'ordine in cui compaiono nell'app. */
-export const ANIMATIONS = ["intro", "potere", "magia", "sorpresa", "risata", "delusione", "idle"];
+export const ANIMATIONS = ["intro", "potere", "magia", "sorpresa", "risata", "delusione", "idle", "apertura"];
 
 const mirror = (side) => (side === "sx" ? "dx" : "sx");
 
@@ -142,7 +142,7 @@ export function disappointmentSpec(rig) {
   };
 }
 
-const SPECS = { intro: introSpec, attacco: attackSpec, potere: powerSpec, idle: idleSpec, magia: magicSpec, sorpresa: surpriseSpec, risata: laughSpec, delusione: disappointmentSpec };
+const SPECS = { intro: introSpec, attacco: attackSpec, potere: powerSpec, idle: idleSpec, apertura: openArmsSpec, magia: magicSpec, sorpresa: surpriseSpec, risata: laughSpec, delusione: disappointmentSpec };
 
 /** Aggiunge allo skeleton le animazioni richieste (default: tutte). */
 export function addLibraryAnimations(rig, names = ANIMATIONS) {
@@ -265,4 +265,34 @@ export function buildIdle(rig, D = 3.2) {
 
   });
   return rep;
+}
+
+/**
+ * APERTURA A T (braccia spalancate, "eccomi" / vincita): anticipo (braccia che si chiudono e corpo che
+ * scende), slancio con le braccia orizzontali, oltrepasso con i polsi in ritardo (le mani "frustano"),
+ * assestamento, tenuta con respiro, ritorno. Overlap a cascata: avambraccio e mano dopo l'omero.
+ */
+export function openArmsSpec(rig) {
+  const F = features(rig), H = F.H;
+  const arms = (o, f, m) => ({ omero_sx: o, omero_dx: o, avambraccio_sx: f, avambraccio_dx: f, mano_sx: m, mano_dx: m });
+  return {
+    name: "apertura",
+    overlap: { avambraccio_sx: 0.04, avambraccio_dx: 0.05, mano_sx: 0.08, mano_dx: 0.09, testa: 0.07 },
+    keys: [
+      { t: 0, ease: "inOut", pose: {} },
+      // anticipo: le braccia si stringono al corpo, gomiti piegati, il corpo scende e si raccoglie
+      { t: 0.32, ease: "in", pose: { ...arms(8, 35, 15), body: { x: 0, y: -0.018 * H }, squash: { x: 1.03, y: 0.97 }, testa: 4 } },
+      // slancio: braccia aperte a T, corpo che sale, testa appena indietro
+      { t: 0.52, ease: "snap", pose: { ...arms(92, 4, -8), body: { x: 0, y: 0.022 * H }, squash: { x: 0.98, y: 1.03 }, testa: -5 } },
+      // oltrepasso: braccia un po' oltre l'orizzontale, polsi che arrivano dopo
+      { t: 0.66, ease: "out", pose: { ...arms(100, -4, -22), body: { x: 0, y: 0.026 * H }, testa: -7 } },
+      // assestamento e tenuta (respiro)
+      { t: 0.95, ease: "inOut", pose: { ...arms(90, 2, -12), body: { x: 0, y: 0.015 * H }, testa: -4 } },
+      { t: 1.5, ease: "inOut", pose: { ...arms(93, 0, -14), body: { x: 0, y: 0.02 * H }, squash: { x: 1.004, y: 1.012 }, testa: -5 } },
+      { t: 2.0, ease: "inOut", pose: { ...arms(90, 3, -10), body: { x: 0, y: 0.014 * H }, testa: -3 } },
+      // ritorno: le braccia scendono, mani in ritardo
+      { t: 2.55, ease: "inOut", pose: {} }
+    ],
+    blinks: [1.7]
+  };
 }
