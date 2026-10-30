@@ -6,14 +6,14 @@ import BusyStage from "../components/ui/BusyStage.jsx";
 import ActionButton from "../components/ui/ActionButton.jsx";
 
 const TOOLS = [
-  { to: "/personaggio-animato", name: "Personaggio animato", text: "Da tre tavole del personaggio a uno scheletro Spine con ossa, mesh pesate, viso espressivo e otto animazioni pronte." },
-  { to: "/symbols", name: "Simboli", text: "Ogni simbolo della slot con le sue animazioni di attesa, atterraggio e vincita, esportate in Spine 4.1." },
-  { to: "/characters", name: "Character", text: "Personaggi a pezzi con rig libero, generazione dei pezzi con l'AI e anteprima immediata." },
-  { to: "/backgrounds", name: "Fondali", text: "Livelli indipendenti con parallasse, luci che pulsano e movimenti lenti per lo sfondo della slot." },
-  { to: "/reels", name: "Rulli animati", text: "Tutti i simboli animati dentro i rulli: giro completo, atterraggio e vincite come nel gioco." }
+  { to: "/personaggio-animato", name: "Personaggio animato", text: "Respira, ride, si stupisce, lancia la sua magia. Tre tavole e il tuo eroe si sveglia con otto animazioni e un viso che recita." },
+  { to: "/symbols", name: "Simboli", text: "Ogni simbolo pulsa nell'attesa, atterra con un colpo secco ed esplode di luce quando paga. Il giocatore lo sente." },
+  { to: "/characters", name: "Character", text: "Descrivi il personaggio, l'AI disegna i pezzi e lo vedi muoversi subito. Dall'idea al rig in un caffè." },
+  { to: "/backgrounds", name: "Fondali", text: "Nuvole che scorrono, torce che tremano, luci che respirano: il mondo dietro i rulli non sta mai fermo." },
+  { to: "/reels", name: "Rulli animati", text: "Il giro, la frenata, il tris che si accende. Provi la tua slot come la vivrà il giocatore, prima ancora di consegnarla." }
 ];
 
-const DEMO_STEPS = ["Leggo le tavole", "Ritaglio e ricompongo i pezzi", "Costruisco ossa e mesh", "Genero le animazioni", "Preparo il pacchetto Spine"];
+const DEMO_STEPS = ["Studio il tuo personaggio", "Lo ricompongo pezzo per pezzo", "Gli do ossa e muscoli", "Gli insegno a muoversi", "Lo impacchetto per Spine 4.1"];
 const WINS = [["seven", "seven", "seven"], ["gem", "gem", "gem"], ["crown", "crown", "crown"], ["bell", "bell", "bell"]];
 
 export default function ShowcasePage() {
@@ -44,14 +44,14 @@ export default function ShowcasePage() {
       <section className="vt-hero">
         <div className="vt-hero-copy">
           <p className="vt-brand">Slot Spine Generator di Eventic</p>
-          <h1 className="vt-title">Dalla grafica alla slot animata.</h1>
+          <h1 className="vt-title">Diamo vita alla tua slot.</h1>
           <p className="vt-lead">
-            Simboli, personaggi e fondali diventano animazioni Spine 4.1 pronte per il gioco, direttamente nel browser.
-            Si carica la grafica, si sceglie lo stile, si scarica il pacchetto.
+            Carichi la grafica e in pochi secondi simboli, eroi e fondali iniziano a respirare, saltare e brillare.
+            Animazioni Spine 4.1 pronte per il gioco, fatte nel browser, con il ritmo di una vincita vera.
           </p>
           <div className="vt-cta">
-            <Link to="/personaggio-animato" className="btn">Crea un personaggio animato</Link>
-            <Link to="/reels" className="btn secondary">Guarda i rulli</Link>
+            <Link to="/personaggio-animato" className="btn">Sveglia il tuo personaggio</Link>
+            <Link to="/reels" className="btn secondary">Fai girare i rulli</Link>
           </div>
         </div>
         <div className="vt-hero-reels">
@@ -70,19 +70,19 @@ export default function ShowcasePage() {
 
       <section className="vt-demo">
         <div>
-          <h2>Anche l'attesa fa parte dello spettacolo</h2>
+          <h2>Qui anche l'attesa ti fa battere il cuore</h2>
           <p className="subtitle">
-            Ogni lavoro lungo mostra a che punto è: le fasi, il tempo trascorso e i rulli che si fermano sul tris quando il pacchetto è pronto.
+            Mentre lavoriamo vedi ogni passo, i secondi che corrono e i rulli che girano. Quando è pronto, si fermano sul tris.
           </p>
-          <ActionButton busy={!!busy} busyLabel="Creo il pacchetto…" doneLabel="Pacchetto pronto" onClick={runDemo}>
-            Prova una creazione
+          <ActionButton busy={!!busy} busyLabel="Ci siamo quasi…" doneLabel="Tris! È pronto" onClick={runDemo}>
+            Prova l'emozione
           </ActionButton>
         </div>
         <div className="vt-demo-stage">
           {demo ? (
-            <BusyStage key={demo.done ? "fatto" : "corso"} title="Creo il personaggio animato" doneTitle="Pacchetto Spine pronto" steps={DEMO_STEPS} step={demo.step} progress={demo.step / DEMO_STEPS.length} done={demo.done} result={["crown", "crown", "crown"]} />
+            <BusyStage key={demo.done ? "fatto" : "corso"} title="Il tuo personaggio si sta svegliando" doneTitle="Eccolo, è vivo!" steps={DEMO_STEPS} step={demo.step} progress={demo.step / DEMO_STEPS.length} done={demo.done} result={["crown", "crown", "crown"]} />
           ) : (
-            <div className="vt-demo-empty">Premi "Prova una creazione" per vedere l'attesa di un lavoro vero.</div>
+            <div className="vt-demo-empty">Premi "Prova l'emozione" e guarda come aspetta chi crea con noi.</div>
           )}
         </div>
       </section>

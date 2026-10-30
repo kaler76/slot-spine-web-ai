@@ -20,7 +20,7 @@
   --errore: #ff7a6b;
   --ok: #5fe0b0;
 
-  --display: "Bricolage Grotesque Variable", "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --display: "Fredoka Variable", "Fredoka", "Segoe UI", system-ui, sans-serif;
   --testo: "Manrope Variable", "Manrope", "Segoe UI", system-ui, sans-serif;
 
   --r-s: 8px;
@@ -51,18 +51,17 @@ body {
 
 h1 {
   font-family: var(--display);
-  font-weight: 800;
-  font-size: clamp(1.7rem, 1.2rem + 1.6vw, 2.4rem);
-  letter-spacing: -0.02em;
-  line-height: 1.08;
+  font-weight: 700;
+  font-size: clamp(1.8rem, 1.3rem + 1.6vw, 2.6rem);
+  letter-spacing: -0.005em;
+  line-height: 1.05;
   margin: 6px 0 8px;
-  font-variation-settings: "opsz" 96;
 }
 h2, .section-title {
   font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.15rem;
-  letter-spacing: -0.01em;
+  font-weight: 600;
+  font-size: 1.3rem;
+  letter-spacing: 0;
   color: var(--avorio);
   margin: 30px 0 12px;
 }
@@ -89,7 +88,7 @@ a.card:hover, .recent-card:hover, .symbol-card:hover {
   transform: translateY(-2px);
 }
 a.card:active, .recent-card:active, .symbol-card:active { transform: translateY(0) scale(0.99); }
-.card-title { font-family: var(--display); font-weight: 700; font-size: 1.05rem; }
+.card-title { font-family: var(--display); font-weight: 600; font-size: 1.15rem; }
 .card-desc, .recent-card-kind { color: var(--fumo); }
 .card-icon { font-size: 1.5rem; filter: saturate(1.1); }
 .status-badge {
@@ -290,7 +289,7 @@ input[type="file"]::file-selector-button:hover { border-color: var(--oro); }
   animation: entra 360ms var(--morbido) both;
 }
 .busy-stage .reels { --cella: 46px; }
-.busy-title { font-family: var(--display); font-weight: 700; font-size: 1.05rem; margin: 0 0 6px; }
+.busy-title { font-family: var(--display); font-weight: 600; font-size: 1.2rem; margin: 0 0 6px; }
 .busy-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 0.86rem; }
 .busy-steps li { color: var(--fumo-2); display: flex; gap: 8px; align-items: center; transition: color 200ms; }
 .busy-steps li::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; flex: 0 0 auto; }
@@ -333,11 +332,13 @@ input[type="file"]::file-selector-button:hover { border-color: var(--oro); }
 .vt-brand { color: var(--oro-chiaro); font-weight: 700; font-size: 0.9rem; margin: 0 0 14px; }
 .vt-title {
   font-size: clamp(2.6rem, 1.6rem + 4.2vw, 5.4rem);
-  line-height: 0.95;
-  letter-spacing: -0.035em;
+  font-weight: 700;
+  line-height: 0.98;
+  letter-spacing: -0.01em;
   margin: 0 0 22px;
-  max-width: 11ch;
-  background: linear-gradient(180deg, var(--avorio) 40%, #d9c7ae);
+  max-width: 12ch;
+  background: linear-gradient(180deg, var(--oro-chiaro) 0%, var(--oro) 55%, var(--oro-scuro) 100%);
+  filter: drop-shadow(0 4px 0 #3a2310) drop-shadow(0 14px 30px rgba(242,181,68,.25));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -363,7 +364,7 @@ input[type="file"]::file-selector-button:hover { border-color: var(--oro); }
   text-decoration: none;
   transition: color var(--veloce);
 }
-.vt-tool-name { font-family: var(--display); font-weight: 700; font-size: 1.25rem; letter-spacing: -0.01em; transition: color var(--veloce); }
+.vt-tool-name { font-family: var(--display); font-weight: 600; font-size: 1.35rem; letter-spacing: 0; transition: color var(--veloce); }
 .vt-tool-text { color: var(--fumo); font-size: 0.92rem; max-width: 40ch; }
 .vt-tool:hover .vt-tool-name { color: var(--oro); }
 .vt-tool:focus-visible { outline: 3px solid var(--vincita); outline-offset: 4px; border-radius: 6px; }

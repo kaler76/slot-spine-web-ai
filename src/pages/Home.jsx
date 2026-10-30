@@ -54,7 +54,7 @@ export default function Home() {
       <header className="home-head">
         <div>
           <h1>Slot Spine Generator</h1>
-          <div className="subtitle">Dalla grafica della slot alle animazioni Spine 4.1, nel browser.</div>
+          <div className="subtitle">Carica la grafica, noi le diamo vita. Animazioni Spine 4.1 pronte da giocare.</div>
         </div>
         <Link to="/vetrina" className="home-head-reels" aria-label="Apri la vetrina per i clienti">
           <SlotReels state="win" result={["seven", "seven", "seven"]} size={30} label="Vetrina" />

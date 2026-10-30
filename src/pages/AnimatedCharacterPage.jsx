@@ -12,7 +12,7 @@ import { BIPED_RULES_VERSION } from "../lib/biped/bipedSpec.js";
 import ActionButton from "../components/ui/ActionButton.jsx";
 import BusyStage from "../components/ui/BusyStage.jsx";
 
-const STEPS = ["Leggo le tavole", "Ritaglio i pezzi e costruisco ossa e mesh", "Genero le animazioni e l'anteprima"];
+const STEPS = ["Leggo le tavole", "Ritaglio i pezzi, costruisco ossa e mesh", "Genero le animazioni e l'anteprima"];
 
 const SLOTS = [
   { key: "reference", label: "1 · Posa neutra", hint: "personaggio intero in posa neutra, fondo chroma (es. zeus_neutro.png)" },
@@ -193,7 +193,7 @@ export default function AnimatedCharacterPage() {
         {pkg && <ActionButton className="btn secondary" onClick={download}>Scarica lo zip Spine 4.1</ActionButton>}
       </div>
       {step >= 0 && (
-        <BusyStage title="Creo il personaggio animato" doneTitle="Personaggio pronto" steps={STEPS} step={Math.min(step, STEPS.length - 1)} done={step >= STEPS.length} result={["crown", "crown", "crown"]} />
+        <BusyStage title="Creo il personaggio animato" doneTitle="Eccolo, è vivo!" steps={STEPS} step={Math.min(step, STEPS.length - 1)} done={step >= STEPS.length} result={["crown", "crown", "crown"]} />
       )}
       {status && step < 0 && <p className={`status${status.startsWith("Non riesco") ? " error" : ""}`}>{status}</p>}
 
