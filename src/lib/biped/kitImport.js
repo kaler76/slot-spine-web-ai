@@ -958,6 +958,7 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
 
   // articolazioni
   const P = {};
+  const sleeves = {};
   const capCenter = (p, frac) => {
     // centro dei pixel opachi nella fascia più alta del pezzo (calotta della spalla)
     let n = 0, sx = 0, sy = 0;
@@ -974,7 +975,29 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
     P[`fingertip_${sd}`] = ft;
     // gomito: poco sotto metà fra spalla e polso (avambraccio un po' più lungo dell'omero nel busto)
     P[`elbow_${sd}`] = { x: sh.x + 0.47 * (wr.x - sh.x), y: sh.y + 0.47 * (wr.y - sh.y) };
-    report.pieces.push({ side: sd, armLen: Math.round(dist(sh, wr)), handErr: Math.round(hand.err) });
+    // MANICA a campana: dall'esterno del gomito all'angolo dell'orlo più basso e più esterno, lontano
+    // dalla mano (la stoffa che pende)
+    {
+      const el = P[`elbow_${sd}`], out = sd === "dx" ? -1 : 1; // dx = a sinistra per chi guarda
+      const handR = Math.max(8, ax.halfWidth * 1.3);
+      let best = null;
+      for (let y = 0; y < arm.height; y += 2) for (let x = 0; x < arm.width; x += 2) {
+        if (arm.rgba[(y * arm.width + x) * 4 + 3] < 200) continue;
+        const gx = arm.x + x, gy = arm.y + y;
+        if (gy < el.y) continue;
+        // lontano dal segmento polso → punta delle dita
+        const vx = ft.x - wr.x, vy = ft.y - wr.y, l2 = vx * vx + vy * vy || 1;
+        const f = Math.max(0, Math.min(1, ((gx - wr.x) * vx + (gy - wr.y) * vy) / l2));
+        if (Math.hypot(gx - (wr.x + f * vx), gy - (wr.y + f * vy)) < handR) continue;
+        const score = (gy - el.y) + 0.8 * out * (gx - el.x);
+        if (!best || score > best.score) best = { score, x: gx, y: gy };
+      }
+      if (best && opt.sleeves) {
+        const start = { x: el.x + out * 0.25 * ax.halfWidth * 2, y: el.y + 4 };
+        sleeves[sd] = { points: [start, { x: (start.x + best.x) / 2, y: (start.y + best.y) / 2 }, { x: best.x, y: best.y }], armHalf: Math.max(6, ax.halfWidth * 1.1) };
+      }
+    }
+    report.pieces.push({ side: sd, armLen: Math.round(dist(sh, wr)), handErr: Math.round(hand.err), sleeve: !!sleeves[sd] });
   }
   const colTop = (p, x) => { const lx = Math.round(x - p.x); for (let y = 0; y < p.height; y++) if (p.rgba[(y * p.width + lx) * 4 + 3] > 200) return p.y + y; return p.y; };
   P.neck = { x: H.cx, y: colTop(torso, H.cx) };
@@ -1000,8 +1023,8 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
     hair_front_dx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockDx) },
     hair_front_sx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockSx) },
     torso: { skin: ["bacino", "torace", "testa"] },
-    arm_dx: { role: "upper_arm", side: "dx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_dx", "avambraccio_dx", "mano_dx"], grid: { cols: 7, rows: 11 } },
-    arm_sx: { role: "upper_arm", side: "sx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_sx", "avambraccio_sx", "mano_sx"], grid: { cols: 7, rows: 11 } }
+    arm_dx: { role: "upper_arm", side: "dx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_dx", "avambraccio_dx", "mano_dx"], grid: { cols: 9, rows: 13 }, ...(sleeves.dx ? { sleeve: sleeves.dx } : {}) },
+    arm_sx: { role: "upper_arm", side: "sx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_sx", "avambraccio_sx", "mano_sx"], grid: { cols: 9, rows: 13 }, ...(sleeves.sx ? { sleeve: sleeves.sx } : {}) }
   };
   report.layout = "grid";
   return faceAndKit({ ref, faceSheet, f, report, opt: { headFlood: false, eyeSearch: "geo", ...opt }, s, torso, head, roles, P, extra });

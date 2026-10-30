@@ -8,7 +8,7 @@
 import { buildAnimation, restAnatomy } from "./poseAnimator.js";
 
 /** Animazioni disponibili, nell'ordine in cui compaiono nell'app. */
-export const ANIMATIONS = ["intro", "attacco", "magia", "sorpresa", "risata", "delusione"];
+export const ANIMATIONS = ["intro", "potere", "magia", "sorpresa", "risata", "delusione", "idle"];
 
 const mirror = (side) => (side === "sx" ? "dx" : "sx");
 
@@ -112,7 +112,8 @@ export function surpriseSpec(rig) {
 
 export function laughSpec(rig) {
   const F = features(rig), H = F.H;
-  const base = { omero_dx: 30, avambraccio_dx: -120, mano_dx: 10, omero_sx: 45, avambraccio_sx: 60, mano_sx: 20 };
+  // mano sulla pancia senza attraversare il busto (le braccia in mesh pesata non devono incrociare il corpo)
+  const base = { omero_dx: 22, avambraccio_dx: -75, mano_dx: 10, omero_sx: 45, avambraccio_sx: 60, mano_sx: 20 };
   const keys = [{ t: 0, ease: "inOut", pose: {} }, { t: 0.22, ease: "out", pose: { ...base, testa: -10, look: { x: 0, y: 0.35 }, brows: 0.5, body: { x: 0, y: 0.01 * H }, ...mouthIf(F, "open") } }];
   // scosse delle spalle: rapide, smorzate (risata), bocca che alterna aperta/sorriso
   for (let i = 0; i < 7; i++) {
@@ -141,7 +142,7 @@ export function disappointmentSpec(rig) {
   };
 }
 
-const SPECS = { intro: introSpec, attacco: attackSpec, magia: magicSpec, sorpresa: surpriseSpec, risata: laughSpec, delusione: disappointmentSpec };
+const SPECS = { intro: introSpec, attacco: attackSpec, potere: powerSpec, idle: idleSpec, magia: magicSpec, sorpresa: surpriseSpec, risata: laughSpec, delusione: disappointmentSpec };
 
 /** Aggiunge allo skeleton le animazioni richieste (default: tutte). */
 export function addLibraryAnimations(rig, names = ANIMATIONS) {
@@ -151,4 +152,54 @@ export function addLibraryAnimations(rig, names = ANIMATIONS) {
     report.push(buildAnimation(rig, spec));
   }
   return report;
+}
+
+/**
+ * POTERE (al posto dell'attacco, regola "mai ostile verso il giocatore"): raccoglie l'energia al petto,
+ * poi SOLLEVA un braccio sopra la testa e mostra il potere (bagliore che cresce) mentre l'altro braccio
+ * si apre di lato; nessun gesto verso chi guarda. Anticipo → slancio → oltrepasso → tenuta → ritorno.
+ */
+export function powerSpec(rig) {
+  const F = features(rig), H = F.H, s = F.weaponSide, o = mirror(s);
+  const lean = s === "dx" ? 1 : -1;
+  const fx = (alpha, scale) => (F.fx.includes(s) ? { [`fx_${s}`]: { alpha, scale } } : {});
+  return {
+    name: "potere",
+    keys: [
+      { t: 0, ease: "inOut", pose: {} },
+      // anticipo: si abbassa appena, le mani si raccolgono davanti alla vita
+      { t: 0.35, ease: "in", pose: { body: { x: 0, y: -0.02 * H }, squash: { x: 1.03, y: 0.97 }, [`omero_${s}`]: 30, [`avambraccio_${s}`]: 70, [`mano_${s}`]: 20, [`omero_${o}`]: 25, [`avambraccio_${o}`]: 60, torace: -3 * lean, testa: 3, ...fx(0.5, 0.6) } },
+      // slancio: braccio su, palmo al cielo, corpo che sale e si allunga
+      { t: 0.55, ease: "snap", pose: { body: { x: 0, y: 0.025 * H }, squash: { x: 0.97, y: 1.04 }, [`omero_${s}`]: 168, [`avambraccio_${s}`]: 12, [`mano_${s}`]: -25, [`omero_${o}`]: 55, [`avambraccio_${o}`]: 25, [`mano_${o}`]: -15, torace: 6 * lean, testa: -6, ...fx(1, 1.6) } },
+      // oltrepasso e assestamento
+      { t: 0.68, ease: "out", pose: { body: { x: 0, y: 0.03 * H }, squash: { x: 0.98, y: 1.03 }, [`omero_${s}`]: 172, [`avambraccio_${s}`]: 6, [`mano_${s}`]: -30, [`omero_${o}`]: 60, [`avambraccio_${o}`]: 22, [`mano_${o}`]: -20, torace: 8 * lean, testa: -8, ...fx(1, 2.1) } },
+      { t: 1.25, ease: "inOut", pose: { body: { x: 0, y: 0.02 * H }, [`omero_${s}`]: 166, [`avambraccio_${s}`]: 10, [`mano_${s}`]: -22, [`omero_${o}`]: 52, [`avambraccio_${o}`]: 26, [`mano_${o}`]: -14, torace: 6 * lean, testa: -5, ...fx(0.9, 1.8) } },
+      { t: 1.75, ease: "inOut", pose: { ...fx(0, 0.5) } },
+      { t: 2.0, ease: "inOut", pose: {} }
+    ],
+    blinks: [1.45]
+  };
+}
+
+/**
+ * IDLE lungo e desincronizzato (tutorial "revisione": niente loop corto in cui tutto succede insieme):
+ * 6 s, respiro (petto che si alza) con periodo diverso dall'ondeggio del busto e della testa, braccia
+ * rilassate con micro-movimenti sfasati, un solo battito irregolare. Loop chiuso.
+ */
+export function idleSpec(rig) {
+  const F = features(rig), H = F.H;
+  const breath = (k) => ({ squash: { x: 1 + 0.006 * k, y: 1 + 0.014 * k }, body: { x: 0, y: 0.003 * H * k } });
+  return {
+    name: "idle",
+    loop: true,
+    keys: [
+      { t: 0, ease: "inOut", pose: {} },
+      { t: 1.1, ease: "inOut", pose: { ...breath(1), torace: 1.2, testa: -1.5, omero_sx: 3, omero_dx: -1, avambraccio_sx: 4 } },
+      { t: 2.3, ease: "inOut", pose: { ...breath(0), torace: 0.4, testa: 1.8, omero_sx: 1, omero_dx: 2, avambraccio_dx: 5 } },
+      { t: 3.2, ease: "inOut", pose: { ...breath(1), torace: -1.2, testa: 2.5, omero_sx: -1, omero_dx: 3, mano_dx: 4 } },
+      { t: 4.6, ease: "inOut", pose: { ...breath(0.2), torace: -0.6, testa: -1, omero_sx: 2, omero_dx: 1, mano_sx: -3 } },
+      { t: 6.0, ease: "inOut", pose: {} }
+    ],
+    blinks: [2.7]
+  };
 }

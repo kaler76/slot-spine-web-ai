@@ -68,9 +68,11 @@ export function buildBipedSkeleton(kit) {
   if (body === "full") addBone("bacino", "root", P.pelvis, P.waist);
   else addBone("bacino", "root", P.waist, { x: P.waist.x, y: P.waist.y - 10 });
   addBone("torace", "bacino", P.waist, P.neck);
-  addBone("testa", "torace", P.neck, P.crown);
+  // "eredita scala" disattivato su testa e braccia: il respiro/schiacciamento del torace non deforma
+  // la testa né allunga le braccia (tutorial corso base)
+  addBone("testa", "torace", P.neck, P.crown, { transform: "noScale" });
   for (const side of ["sx", "dx"]) {
-    addBone(`omero_${side}`, "torace", P[`shoulder_${side}`], P[`elbow_${side}`]);
+    addBone(`omero_${side}`, "torace", P[`shoulder_${side}`], P[`elbow_${side}`], { transform: "noScale" });
     addBone(`avambraccio_${side}`, `omero_${side}`, P[`elbow_${side}`], P[`wrist_${side}`]);
     addBone(`mano_${side}`, `avambraccio_${side}`, P[`wrist_${side}`], P[`fingertip_${side}`]);
     if (body === "full") {
@@ -107,8 +109,25 @@ export function buildBipedSkeleton(kit) {
       if (part.skin) {
         // MESH PESATA (pesi automatici dalla distanza dalle ossa): il pezzo piega morbido sulle
         // articolazioni, senza giunture (braccio intero con la manica, busto con il respiro)
-        for (const b of part.skin) if (!world[b]) throw new Error(`Pezzo ${part.name}: osso ${b} inesistente.`);
-        attachments[part.name] = { [part.name]: skinnedMesh(part, part.skin, world, S, bones, part.grid) };
+        const skin = [...part.skin];
+        let rules = [];
+        if (part.sleeve) {
+          // MANICA dentro la mesh del braccio: catena di ossa figlie dell'avambraccio lungo l'orlo che
+          // pende; pesa solo sulla stoffa lontana dall'avambraccio e dalla mano (il braccio resta braccio)
+          const def = CHAIN_DEFAULTS.sleeve, parent = `avambraccio_${part.side}`;
+          const pts = resamplePolyline(part.sleeve.points, def.bones + 1);
+          const names = [];
+          for (let i = 0; i < def.bones; i++) {
+            const nm = `manica_${part.side}_${i + 1}`;
+            addBone(nm, i ? names[i - 1] : parent, pts[i], pts[i + 1], { color: "3399ffff" });
+            names.push(nm);
+          }
+          skin.push(...names);
+          rules = [{ bones: names, awayFrom: [{ bone: parent, d: part.sleeve.armHalf }, { bone: `mano_${part.side}`, d: part.sleeve.armHalf * 1.2 }] }];
+          chains.push({ ...def, name: `manica_${part.side}`, kind: "sleeve", bones: names, parent });
+        }
+        for (const b of skin) if (!world[b]) throw new Error(`Pezzo ${part.name}: osso ${b} inesistente.`);
+        attachments[part.name] = { [part.name]: skinnedMesh(part, skin, world, S, bones, part.grid, rules) };
       } else if (part.mesh) {
         // testa con il viso incorporato: mesh a griglia (le espressioni la deformano)
         const m = gridMesh(part, world[bone], S, 14, 16);
@@ -228,7 +247,7 @@ export function gridMesh(part, w, S, cols, rows) {
  * pesi sotto il 3% tolti. Le ossa senza lunghezza contano come punti. Righe e colonne di default
  * dalla forma del pezzo (circa una cella ogni 1/8 del lato lungo).
  */
-export function skinnedMesh(part, boneNames, world, S, bones, grid) {
+export function skinnedMesh(part, boneNames, world, S, bones, grid, rules = []) {
   const long = Math.max(part.width, part.height);
   const cols = grid?.cols ?? Math.max(3, Math.round((part.width / long) * 9) + 1);
   const rows = grid?.rows ?? Math.max(3, Math.round((part.height / long) * 9) + 1);
@@ -255,7 +274,18 @@ export function skinnedMesh(part, boneNames, world, S, bones, grid) {
   for (const [r, c] of order) {
     const u = c / (cols - 1), v = r / (rows - 1);
     const sp = S({ x: part.x + u * part.width, y: part.y + v * part.height });
-    let infl = segs.map((sg) => ({ sg, w: 1 / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) }));
+    // regole: certe ossa (manica) pesano solo lontano da altre (avambraccio, mano), con passaggio morbido
+    const gate = (nm) => {
+      let g = 1;
+      for (const r of rules) if (r.bones.includes(nm)) for (const a of r.awayFrom) {
+        const sa = segs.find((q) => q.nm === a.bone);
+        if (!sa) continue;
+        const d = dist(sa, sp.x, sp.y);
+        g = Math.min(g, Math.max(0, Math.min(1, (d - a.d) / (0.6 * a.d))));
+      }
+      return g;
+    };
+    let infl = segs.map((sg) => ({ sg, w: gate(sg.nm) / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) })).filter((i) => i.w > 0);
     infl.sort((a, b) => b.w - a.w);
     infl = infl.slice(0, 3);
     let sum = infl.reduce((a, i) => a + i.w, 0);

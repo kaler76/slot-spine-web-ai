@@ -308,7 +308,8 @@ export function simulateChain(json, animName, chain, duration, loop) {
   const cycles = loop ? 2 : 1;
   const steps = Math.round(duration * fps);
   const samples = []; // per ogni passo: angoli locali di delta
-  let theta = null, omega = chain.bones.map(() => 0);
+  let theta = null, restWorld = null, omega = chain.bones.map(() => 0);
+  const hang = chain.hang || 0;
   let prevAnchor = null, prevVel = { x: 0, y: 0 };
   for (let c = 0; c < cycles; c++) {
     for (let s = 0; s <= steps; s++) {
@@ -327,13 +328,17 @@ export function simulateChain(json, animName, chain, duration, loop) {
       if (!theta) {
         theta = []; let base = parentRot;
         for (let i = 0; i < chain.bones.length; i++) { base += restLocal[i]; theta.push(base); }
+        restWorld = [...theta]; // direzione a riposo nel mondo (per la stoffa che pende: hang)
       }
       // integrazione (più sottopassi per stabilità)
       for (let sub = 0; sub < 4; sub++) {
         const h = dt / 4;
         let base = parentRot;
         for (let i = 0; i < chain.bones.length; i++) {
-          const target = base + restLocal[i];
+          // gravità: la stoffa appesa cerca la sua direzione di riposo nel MONDO (verso il basso), non
+          // quella relativa al genitore: la manica ricade anche col braccio alzato
+          const rel = base + restLocal[i];
+          const target = hang ? rel + norm(restWorld[i] - rel) * hang : rel;
           const err = norm(theta[i] - target);
           const th = theta[i] / R2D;
           const inertia = -(Math.cos(th) * acc.y - Math.sin(th) * acc.x) / Math.max(lens[i] * (i + 1), 1) * R2D * 0.35;

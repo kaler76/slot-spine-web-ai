@@ -21,7 +21,7 @@ const norm = (a) => { let d = ((a + 180) % 360 + 360) % 360 - 180; return d === 
 function build(body) {
   const { kit, images } = syntheticBipedKit({ body });
   const rig = buildBipedSkeleton(kit);
-  const report = addLibraryAnimations(rig);
+  const report = addLibraryAnimations(rig, [...ANIMATIONS, "attacco"]);
   return { kit, images, rig, report };
 }
 
@@ -57,7 +57,7 @@ for (const body of ["bust", "full"]) {
   test(`B1 ${body}: il pacchetto si carica nel runtime Spine 4.1`, async () => {
     const { rig, images, report } = build(body);
     const { data } = await runtime(rig.json, images);
-    assert.deepEqual(report.map((r) => r.name), ANIMATIONS);
+    assert.deepEqual(report.map((r) => r.name), [...ANIMATIONS, "attacco"]);
     for (const n of ANIMATIONS) assert.ok(data.findAnimation(n), `manca ${n}`);
     assert.ok(data.findSlot("cape") && data.findSlot("hair_back"), "catene");
     if (body === "full") assert.equal(data.ikConstraints.length, 2);

@@ -77,6 +77,8 @@ export const SIGN = {
 
 /** Catene secondarie (capelli, mantello, coda): ossa e oscillazione massima per osso. */
 export const CHAIN_DEFAULTS = {
+  // manica a campana: stoffa appesa all'avambraccio, tende a ricadere verso il basso (hang) e ondeggia
+  sleeve: { bones: 2, maxDeg: 75, stiffness: 95, damping: 7, hang: 0.7, parent: null },
   hair: { bones: 3, maxDeg: 8, stiffness: 260, damping: 14, parent: "testa" }, // capelli dietro: restano dietro la testa
   cape: { bones: 4, maxDeg: 22, stiffness: 110, damping: 8, parent: "torace" },
   tail: { bones: 4, maxDeg: 45, stiffness: 70, damping: 6, parent: "bacino" },
