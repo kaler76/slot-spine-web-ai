@@ -41,6 +41,7 @@ export default function AnimatedCharacterPage() {
   const [files, setFiles] = useState({});
   const [previews, setPreviews] = useState({});
   const [name, setName] = useState("personaggio");
+  const [layout, setLayout] = useState("zeus");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
   const [pkg, setPkg] = useState(null);
@@ -72,7 +73,7 @@ export default function AnimatedCharacterPage() {
       const res = await new Promise((resolve) => {
         worker.onmessage = (e) => resolve(e.data);
         worker.onerror = (e) => resolve({ ok: false, error: e.message });
-        worker.postMessage({ reference, bodySheet, faceSheet, name }, [reference.rgba, bodySheet.rgba, faceSheet.rgba]);
+        worker.postMessage({ reference, bodySheet, faceSheet, name, options: layout === "grid" ? { layout: "grid" } : {} }, [reference.rgba, bodySheet.rgba, faceSheet.rgba]);
       });
       worker.terminate();
       if (!res.ok) throw new Error(res.error);
@@ -170,6 +171,13 @@ export default function AnimatedCharacterPage() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
+        <label>
+          Tavola corpo{" "}
+          <select value={layout} onChange={(e) => setLayout(e.target.value)}>
+            <option value="zeus">esploso 9 pezzi (testa, capelli, busto, 3 per braccio)</option>
+            <option value="grid">griglia 10 pezzi, mesh pesate (testa, capelli, mantello, ciocche, busto, braccia intere, mani)</option>
+          </select>
+        </label>
         <label>Nome <input value={name} onChange={(e) => setName(e.target.value.replace(/[^a-z0-9_-]/gi, "_"))} /></label>
         <button className="btn" disabled={!ready || busy} onClick={run}>{busy ? "Elaborazione…" : "🦴 Crea personaggio animato"}</button>
         {pkg && <button className="btn" onClick={download}>⬇️ Scarica zip Spine 4.1</button>}

@@ -37,7 +37,7 @@ export function buildBipedSkeleton(kit) {
   const P = kit.points || {};
   const errors = [];
   for (const { role, side } of requiredParts(body)) {
-    if (!kit.parts.some((p) => p.role === role && (p.side || null) === (side || null))) errors.push(`Manca il pezzo ${role}${side ? "_" + side : ""}.`);
+    if (!kit.parts.some((p) => (p.role === role || p.covers?.includes(role)) && (p.side || null) === (side || null))) errors.push(`Manca il pezzo ${role}${side ? "_" + side : ""}.`);
   }
   if (errors.length) throw new Error(errors.join(" "));
 
@@ -60,7 +60,7 @@ export function buildBipedSkeleton(kit) {
     if (b) bone.length = round(Math.hypot(b.x - a.x, b.y - a.y));
     Object.assign(bone, extra);
     bones.push(bone);
-    world[name] = { x: a.x, y: a.y, rot };
+    world[name] = { x: a.x, y: a.y, rot, len: b ? Math.hypot(b.x - a.x, b.y - a.y) : 0 };
     return bone;
   };
 
@@ -104,7 +104,12 @@ export function buildBipedSkeleton(kit) {
     let bone, layerKey = part.role, slot = { name: part.name, attachment: part.name };
     if (PART_ROLES[part.role]) {
       bone = boneName(part.role, part.side);
-      if (part.mesh) {
+      if (part.skin) {
+        // MESH PESATA (pesi automatici dalla distanza dalle ossa): il pezzo piega morbido sulle
+        // articolazioni, senza giunture (braccio intero con la manica, busto con il respiro)
+        for (const b of part.skin) if (!world[b]) throw new Error(`Pezzo ${part.name}: osso ${b} inesistente.`);
+        attachments[part.name] = { [part.name]: skinnedMesh(part, part.skin, world, S, bones, part.grid) };
+      } else if (part.mesh) {
         // testa con il viso incorporato: mesh a griglia (le espressioni la deformano)
         const m = gridMesh(part, world[bone], S, 14, 16);
         attachments[part.name] = { [part.name]: m.att };
@@ -215,6 +220,68 @@ export function gridMesh(part, w, S, cols, rows) {
   const edges = [];
   for (let k = 0; k < hull; k++) edges.push(k * 2, ((k + 1) % hull) * 2);
   return { att: { type: "mesh", name: part.name, uvs, triangles, vertices, hull, edges, width: part.width, height: part.height }, imgPts };
+}
+
+/**
+ * MESH PESATA con pesi automatici (come "Auto weights" dell'editor): griglia sul pezzo, ogni vertice
+ * legato alle ossa più vicine con peso ∝ 1/(distanza dal segmento dell'osso)^4, al massimo 3 ossa,
+ * pesi sotto il 3% tolti. Le ossa senza lunghezza contano come punti. Righe e colonne di default
+ * dalla forma del pezzo (circa una cella ogni 1/8 del lato lungo).
+ */
+export function skinnedMesh(part, boneNames, world, S, bones, grid) {
+  const long = Math.max(part.width, part.height);
+  const cols = grid?.cols ?? Math.max(3, Math.round((part.width / long) * 9) + 1);
+  const rows = grid?.rows ?? Math.max(3, Math.round((part.height / long) * 9) + 1);
+  const boneIndex = (nm) => bones.findIndex((b) => b.name === nm);
+  const segs = boneNames.map((nm) => {
+    const w = world[nm], r = w.rot / R2D;
+    return { nm, ax: w.x, ay: w.y, bx: w.x + Math.cos(r) * w.len, by: w.y + Math.sin(r) * w.len, w };
+  });
+  const dist = (sg, x, y) => {
+    const vx = sg.bx - sg.ax, vy = sg.by - sg.ay, l2 = vx * vx + vy * vy;
+    const f = l2 ? Math.max(0, Math.min(1, ((x - sg.ax) * vx + (y - sg.ay) * vy) / l2)) : 0;
+    return Math.hypot(x - (sg.ax + f * vx), y - (sg.ay + f * vy));
+  };
+  const scale = long * 0.04 + 1;
+  const order = [];
+  for (let c = 0; c < cols; c++) order.push([0, c]);
+  for (let r = 1; r < rows; r++) order.push([r, cols - 1]);
+  for (let c = cols - 2; c >= 0; c--) order.push([rows - 1, c]);
+  for (let r = rows - 2; r >= 1; r--) order.push([r, 0]);
+  const hull = order.length;
+  for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) order.push([r, c]);
+  const index = new Map(order.map(([r, c], i) => [r * cols + c, i]));
+  const uvs = [], vertices = [], weights = [];
+  for (const [r, c] of order) {
+    const u = c / (cols - 1), v = r / (rows - 1);
+    const sp = S({ x: part.x + u * part.width, y: part.y + v * part.height });
+    let infl = segs.map((sg) => ({ sg, w: 1 / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) }));
+    infl.sort((a, b) => b.w - a.w);
+    infl = infl.slice(0, 3);
+    let sum = infl.reduce((a, i) => a + i.w, 0);
+    infl = infl.filter((i) => i.w / sum >= 0.03);
+    sum = infl.reduce((a, i) => a + i.w, 0);
+    uvs.push(round(u, 5), round(v, 5));
+    vertices.push(infl.length);
+    const wv = {};
+    for (const { sg, w } of infl) {
+      const dx = sp.x - sg.w.x, dy = sp.y - sg.w.y;
+      const co = Math.cos(-sg.w.rot / R2D), si = Math.sin(-sg.w.rot / R2D);
+      vertices.push(boneIndex(sg.nm), round(dx * co - dy * si), round(dx * si + dy * co), round(w / sum, 4));
+      wv[sg.nm] = w / sum;
+    }
+    weights.push(wv);
+  }
+  const triangles = [];
+  for (let r = 0; r < rows - 1; r++)
+    for (let c = 0; c < cols - 1; c++) {
+      const a = index.get(r * cols + c), b = index.get(r * cols + c + 1), d = index.get((r + 1) * cols + c), e = index.get((r + 1) * cols + c + 1);
+      if ((r + c) % 2) triangles.push(a, d, b, b, d, e);
+      else triangles.push(a, e, b, a, d, e);
+    }
+  const edges = [];
+  for (let k = 0; k < hull; k++) edges.push(k * 2, ((k + 1) % hull) * 2);
+  return { type: "mesh", name: part.name, uvs, triangles, vertices, hull, edges, width: part.width, height: part.height };
 }
 
 /** n punti equidistanti lungo la polilinea. */

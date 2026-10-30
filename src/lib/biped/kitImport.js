@@ -12,6 +12,7 @@
 // Puro: nessun DOM (immagini { width, height, rgba }).
 
 import { keyBackground, splitComponents, cutPiece, alignPiece, estimateScale, scalePiece } from "../explodedSheet.js";
+import { transplantOriginal } from "../sheetAssembly.js";
 
 export const KIT_IMPORT_VERSION = "2026-10-29.kit.1";
 const MOUTHS = ["neutral", "open", "o", "smile", "sad"];
@@ -242,6 +243,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   const ref = downscale(reference, f);
   const report = { version: KIT_IMPORT_VERSION, warnings: [], pieces: [] };
 
+  if (opt.layout === "grid") return importGrid({ ref, bodySheet, faceSheet, f, report, opt });
   // 1) pezzi del corpo e scala comune (dal pezzo più grande: il busto)
   const body = pieces(downscale(bodySheet, f), 400 * f * f * 4).sort((a, b) => b.area - a.area);
   if (body.length < 9) throw new Error(`Tavola del corpo: ${body.length} pezzi, ne servono 9 (testa, capelli, busto, 3 per braccio).`);
@@ -322,6 +324,16 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   P.crown = { x: hcx, y: colTop(head, hcx) };
   P.waist = { x: torso.x + torso.width / 2, y: torso.y + torso.height * 0.92 };
 
+  return faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P });
+}
+
+/**
+ * Viso (tratti dalla posa, viso in mesh, palpebre, bocche) e kit finale: comune ai due formati di
+ * tavola. roles: Map pezzo → ruolo (torso, head, hair_back, upper_arm_dx, ..., oppure cape,
+ * hair_front_dx, arm_dx per la tavola a griglia); extra: proprietà aggiuntive per ruolo.
+ */
+function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, extra = {} }) {
+  const hcx = head.x + head.width / 2;
   // 4) viso: tratti cercati sulla posa neutra, a più scale, nella zona del viso
   const face = pieces(downscale(faceSheet, f), 60 * f * f * 4);
   const rowY = (p) => p.sheetY + p.height / 2;
@@ -433,7 +445,26 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     //  R2 stessa altezza e simmetrici rispetto alla mediana del viso (punto medio fra gli occhi);
     //  R3 sopracciglia alla stessa altezza fra loro, sulla verticale del proprio occhio, sopra l'occhio;
     //  R4 bocca (con i suoi baffi) centrata sulla mediana, cercata SOTTO il naso alla scala R0.
-    const eyeFit = findPair(row1[0], row1[1], tgt.eye_dx, tgt.eye_sx);
+    // testa RIDISEGNATA (tavola a griglia): la differenza è rumorosa ovunque e non indica gli occhi.
+    // Ricerca geometrica: coppia simmetrica (stessa altezza, stessa scala) con distanza fra i centri
+    // da 0,16 a 0,32 della larghezza della testa; larghezza del pezzo occhio da 1,1 a 1,7 volte la semidistanza.
+    const geoPair = (pa, pb) => {
+      let best = null;
+      const hcx0 = head.x + head.width / 2;
+      for (let half = 0.08 * hw; half <= 0.16 * hw; half += 2) for (const ratio of [1.1, 1.3, 1.5, 1.7]) {
+        const k = (ratio * half) / (pa.width * s);
+        const sa = scalePiece(pa, s * k), sb = scalePiece(pb, s * k);
+        if (sa.width < 4 || sb.width < 4) continue;
+        for (let m = hcx0 - 0.04 * hw; m <= hcx0 + 0.04 * hw; m += 3)
+          for (let ey = head.y + 0.2 * hh; ey <= head.y + 0.55 * hh; ey += 3) {
+            const ax = Math.round(m - half - sa.width / 2), bx = Math.round(m + half - sb.width / 2);
+            const e = matchAt(sa, ref, ax, Math.round(ey - sa.height / 2), 3) + matchAt(sb, ref, bx, Math.round(ey - sb.height / 2), 3);
+            if (!best || e < best.e) best = { e, k, a: { sp: sa, pos: { x: ax, y: Math.round(ey - sa.height / 2), err: e / 2 } }, b: { sp: sb, pos: { x: bx, y: Math.round(ey - sb.height / 2), err: e / 2 } } };
+          }
+      }
+      return best;
+    };
+    const eyeFit = opt.eyeSearch === "geo" ? geoPair(row1[0], row1[1]) : findPair(row1[0], row1[1], tgt.eye_dx, tgt.eye_sx);
     const K = eyeFit.k;
     const ca = { x: eyeFit.a.pos.x + eyeFit.a.sp.width / 2, y: eyeFit.a.pos.y + eyeFit.a.sp.height / 2 };
     const cb = { x: eyeFit.b.pos.x + eyeFit.b.sp.width / 2, y: eyeFit.b.pos.y + eyeFit.b.sp.height / 2 };
@@ -490,7 +521,26 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
     // la bocca della tavola porta con sé baffi e barba e non segue la scala R0. Si allinea la BOCCA
     // vera (labbra e pelle sotto i baffi): nella posa neutra è la zona accesa dalla differenza con la
     // testa (dove la testa ha la bocca tolta), nel pezzo sono i pixel colorati fra i peli bianchi.
-    const zm = zone((mid - 1.3 * half - head.x) / head.width, (mid + 1.3 * half - head.x) / head.width, (eyeY + 1.1 * half - head.y) / head.height, (eyeY + 3.2 * half - head.y) / head.height);
+    let zm = zone((mid - 1.3 * half - head.x) / head.width, (mid + 1.3 * half - head.x) / head.width, (eyeY + 1.1 * half - head.y) / head.height, (eyeY + 3.2 * half - head.y) / head.height);
+    if (opt.eyeSearch === "geo") {
+      // testa ridisegnata: bocca neutra della tavola cercata sulla mediana (scala e altezza), poi la
+      // zona delle labbra = il suo nucleo colorato in quella posizione
+      let bm = null;
+      const c0 = coloredCore(row2[0]);
+      for (let wl = 0.9 * half; wl <= 2.2 * half; wl += 2) {
+        const k = c0 ? wl / c0.w : wl / row2[0].width;
+        const sp = scalePiece(row2[0], k);
+        if (sp.width < 6) continue;
+        for (let y = eyeY + 1.2 * half; y <= eyeY + 3.4 * half; y += 2) {
+          const e = matchAt(sp, ref, Math.round(mid - sp.width / 2), Math.round(y - sp.height / 2), 2);
+          if (!bm || e < bm.e) bm = { e, k, y, sp };
+        }
+      }
+      if (bm) {
+        const c = coloredCore(bm.sp);
+        if (c) zm = { cx: mid, cy: bm.y - bm.sp.height / 2 + c.cy, w: c.w, h: c.h, n: 100 };
+      }
+    }
     const pm = coloredCore(row2[0]);
     let MK, mouthTop;
     if (zm && pm) {
@@ -577,7 +627,7 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
       const kitA = (x, y) => { const hx = x - head.x, hy = y - head.y; return hx < 0 || hy < 0 || hx >= head.width || hy >= head.height ? 0 : head.rgba[(hy * head.width + hx) * 4 + 3]; };
       const beardLike = (i) => { const r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2]; return Math.max(r, g, b) - Math.min(r, g, b) < 55 && (r + g + b) / 3 > 135; };
       const F = new Uint8Array(W2 * H2), q = [];
-      for (let y = Y0; y <= Math.min(Y1, mY); y++)
+      for (let y = Y0; y <= (opt.headFlood === false ? Y1 : Math.min(Y1, mY)); y++)
         for (let x = X0; x <= X1; x++) if (kitA(x, y) > 128 && !isBg(px(x, y))) { F[(y - Y0) * W2 + x - X0] = 1; q.push(x, y); }
       while (q.length) {
         const y = q.pop(), x = q.pop();
@@ -588,7 +638,9 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
           if (F[k]) continue;
           const i = px(xx, yy);
           if (isBg(i)) continue;
-          if ((yy <= mY && kitA(xx, yy) > 128) || (yy > mY - half0 && beardLike(i))) { F[k] = 1; q.push(xx, yy); }
+          // con opt.headFlood=false (capelli lunghi in pezzi a parte) si resta nella sagoma della testa
+          if ((yy <= mY || opt.headFlood === false) && kitA(xx, yy) > 128) { F[k] = 1; q.push(xx, yy); }
+          else if (opt.headFlood !== false && yy > mY - half0 && beardLike(i)) { F[k] = 1; q.push(xx, yy); }
         }
       }
       // contorno scuro della barba (2 px)
@@ -645,12 +697,13 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   };
   for (const [p, r] of roles) {
     report.pieces.push({ role: r, err: Math.round(p.err) });
-    if (r === "hair_back") {
+    if (extra[r]?.role) put(r, p, extra[r]);
+    else if (r === "hair_back") {
       const top = { x: p.x + p.width / 2, y: p.y + p.height * 0.12 };
       put("hair_back", p, { role: "chain", kind: "hair", layer: "hair_back", points: [top, { x: top.x, y: p.y + p.height * 0.55 }, { x: top.x, y: p.y + p.height * 0.97 }] });
     } else {
       const m = /^(.*)_(sx|dx)$/.exec(r);
-      put(r, p, m ? { role: m[1], side: m[2] } : { role: r, ...(r === "head" && faceGeo ? { mesh: true } : {}) });
+      put(r, p, { ...(m ? { role: m[1], side: m[2] } : { role: r, ...(r === "head" && faceGeo ? { mesh: true } : {}) }), ...(extra[r] || {}) });
     }
   }
   for (const fp of faceParts) {
@@ -681,4 +734,466 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   }
   const kit = { name: opt.name || "personaggio", body: "bust", points: P, parts, ...(faceGeo ? { face: faceGeo } : {}) };
   return { kit, images, report, scale: s, work: f };
+}
+
+/**
+ * TAVOLA A GRIGLIA (personaggi con mesh pesate, es. la maga): 10 pezzi in 3 righe
+ *  riga 1: testa | capelli dietro | mantello
+ *  riga 2: ciocca davanti dx | busto | ciocca davanti sx
+ *  riga 3: braccio dx (spalla→polso con manica, mano compresa) | mano dx | mano sx | braccio sx
+ * I pezzi NON sono vicini alla loro posizione: ognuno si cerca sulla posa in una finestra anatomica
+ * attorno al busto. Le mani della riga 3 servono solo a trovare polso e punta delle dita (la mano è
+ * già nel braccio, che diventa UNA mesh pesata su omero, avambraccio e mano: niente giunture).
+ */
+function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
+  const all = pieces(downscale(bodySheet, f), 400 * f * f * 4).sort((a, b) => b.area - a.area).slice(0, 10);
+  if (all.length < 10) throw new Error(`Tavola a griglia: ${all.length} pezzi, ne servono 10.`);
+  const cy = (p) => p.sheetY + p.height / 2, cx = (p) => p.sheetX + p.width / 2;
+  // righe: i due salti più grandi fra i centri in verticale
+  const byY = [...all].sort((a, b) => cy(a) - cy(b));
+  const gaps = byY.slice(1).map((p, i) => ({ i: i + 1, g: cy(p) - cy(byY[i]) })).sort((a, b) => b.g - a.g).slice(0, 2).map((g) => g.i).sort((a, b) => a - b);
+  const rows = [byY.slice(0, gaps[0]), byY.slice(gaps[0], gaps[1]), byY.slice(gaps[1])].map((r) => r.sort((a, b) => cx(a) - cx(b)));
+  if (rows[0].length !== 3 || rows[1].length !== 3 || rows[2].length !== 4)
+    throw new Error(`Tavola a griglia: righe da ${rows.map((r) => r.length).join("/")} pezzi invece di 3/3/4.`);
+  const [[head, hair, cape], [lockDx, torso, lockSx], [armDx, handDx, handSx, armSx]] = rows;
+  const W = ref.width;
+  // nella griglia il generatore rimpicciolisce i pezzi per farli stare: scala cercata su un intervallo
+  // ampio sul busto, poi rifinita pezzo per pezzo (±15%) nella sua finestra
+  // scala: il busto da solo è ingannevole (un busto piccolo "sta" dentro il vestito). Si prova ogni
+  // scala sul GRUPPO busto + testa + due braccia, ognuno nella sua finestra rispetto al busto, e vince
+  // l'errore totale più basso (pesato sull'area): a scala sbagliata testa e braccia non tornano.
+  const groupErr = (k, coarse) => {
+    let tot = 0, wsum = 0;
+    const tsp = scalePiece(torso, k);
+    const tp = alignPiece(tsp, ref, 1, { coarse, nFew: 150 });
+    const tx = tp.x, ty = tp.y, tw = tsp.width;
+    const add = (pc, win) => {
+      const sp = scalePiece(pc, k);
+      const e = alignPiece(sp, ref, 1, { coarse, nFew: 150, window: win }).err;
+      tot += e * pc.area; wsum += pc.area;
+    };
+    tot += tp.err * torso.area; wsum += torso.area;
+    add(head, { cx: tx + tw / 2, cy: ty - head.height * k * 0.3, r: 0.12 * W });
+    add(armDx, { cx: tx + 0.05 * tw, cy: ty + armDx.height * k * 0.5, r: 0.18 * W });
+    add(armSx, { cx: tx + 0.95 * tw, cy: ty + armSx.height * k * 0.5, r: 0.18 * W });
+    return tot / wsum;
+  };
+  let best = { k: 1, e: Infinity };
+  for (let k = 0.8; k <= 2.4; k += 0.1) { const e = groupErr(k, 10); if (e < best.e) best = { k, e }; }
+  for (const k of [best.k - 0.06, best.k - 0.03, best.k + 0.03, best.k + 0.06]) { const e = groupErr(k, 6); if (e < best.e) best = { k, e }; }
+  const s = +best.k.toFixed(3);
+  report.gridScale = { s, err: Math.round(best.e) };
+  const place = (p, win, coarse = 4, ks = [0.88, 0.94, 1, 1.06, 1.12]) => {
+    let best = null;
+    for (const k of win ? ks : [1]) {
+      const sp = scalePiece(p, s * k);
+      const pos = alignPiece(sp, ref, 1, { coarse, nFew: 300, ...(win ? { window: win } : {}) });
+      if (!best || pos.err < best.pos.err) best = { sp, pos, k };
+    }
+    Object.assign(p, best.sp, { x: best.pos.x, y: best.pos.y, err: best.pos.err, scaleK: best.k });
+    return p;
+  };
+  place(torso, null, 6);
+  const T = { x: torso.x, y: torso.y, w: torso.width, h: torso.height, cx: torso.x + torso.width / 2 };
+  place(head, { cx: T.cx, cy: T.y - head.height * s * 0.3, r: 0.12 * W });
+  const H = { cx: head.x + head.width / 2, y: head.y, h: head.height };
+  // capelli dietro e mantello sono in gran parte nascosti e il generatore li disegna spesso più
+  // piccoli: scala cercata su un intervallo più ampio
+  // Si piazzano sul RIQUADRO DEL LORO COLORE nella posa (mantello: viola; capelli: lilla/chiari poco
+  // saturi), centrati sul busto: il confronto pixel per pixel su pezzi quasi nascosti non è affidabile.
+  const colorBox = (test) => {
+    let x0 = Infinity, x1 = -1, y0 = Infinity, y1 = -1, n = 0;
+    for (let y = 0; y < ref.height; y++)
+      for (let x = 0; x < ref.width; x++) {
+        const i = (y * ref.width + x) * 4;
+        if (ref.rgba[i + 3] < 128 || !test(ref.rgba[i], ref.rgba[i + 1], ref.rgba[i + 2])) continue;
+        n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+    return n > 200 ? { x0, x1, y0, y1 } : null;
+  };
+  // tinta dominante del pezzo della tavola, per riconoscere il suo colore nella posa
+  const hueOf = (p) => {
+    const hist = new Float64Array(36);
+    for (let i = 0; i < p.width * p.height; i += 5) {
+      if (p.rgba[i * 4 + 3] < 200) continue;
+      const r = p.rgba[i * 4], g = p.rgba[i * 4 + 1], b = p.rgba[i * 4 + 2], mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+      if (mx - mn < 20) continue;
+      let h = mx === r ? (g - b) / (mx - mn) : mx === g ? 2 + (b - r) / (mx - mn) : 4 + (r - g) / (mx - mn);
+      h = ((h * 60) + 360) % 360;
+      hist[Math.floor(h / 10)] += 1;
+    }
+    let bi = 0; hist.forEach((v, i) => { if (v > hist[bi]) bi = i; });
+    return bi * 10 + 5;
+  };
+  const hueTest = (hc, tol, minSat, minV = 0, maxSat = 255) => (r, g, b) => {
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    if (mx - mn < minSat || mx - mn > maxSat || mx < minV) return false;
+    let h = mx === r ? (g - b) / (mx - mn) : mx === g ? 2 + (b - r) / (mx - mn) : 4 + (r - g) / (mx - mn);
+    h = ((h * 60) + 360) % 360;
+    const d = Math.abs(h - hc);
+    return Math.min(d, 360 - d) <= tol;
+  };
+  const fitBox = (p, box, { top = 0 } = {}) => {
+    const k = (box.x1 - box.x0 + 1) / p.width;
+    const sp = scalePiece(p, k);
+    Object.assign(p, sp, { x: Math.round((box.x0 + box.x1) / 2 - sp.width / 2), y: Math.round(box.y0 - top * sp.height), err: 0, fitBox: true });
+  };
+  const capeHue = hueOf(cape), hairHue = hueOf(hair);
+  const capeBox = colorBox(hueTest(capeHue, 18, 60));
+  const hairBox = colorBox(hueTest(hairHue, 25, 12, 150, 90));
+  report.colorFit = { capeHue, hairHue, capeBox, hairBox };
+  const wide = [0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6];
+  if (hairBox) fitBox(hair, hairBox); else place(hair, { cx: H.cx, cy: H.y + hair.height * s * 0.55, r: 0.12 * W }, 4, wide);
+  if (capeBox) fitBox(cape, capeBox); else place(cape, { cx: T.cx, cy: T.y + cape.height * s * 0.5, r: 0.14 * W }, 4, wide);
+  // il mantello sta dietro a tutto e si vede solo ai lati: il generatore lo disegna più piccolo. Lo si
+  // adatta (scala diversa in x e y) al riquadro dei pixel viola della posa, così copre anche le zone
+  // che si scoprono quando le braccia si alzano
+  {
+    // righe con almeno 1% di pixel viola (le ombre viola sparse nei capelli non contano)
+    let x0 = ref.width, y0 = ref.height, x1 = -1, y1 = -1;
+    const rowsC = [];
+    let lastC = -1;
+    const thin = [];
+    for (let y = 0; y < ref.height; y++) {
+      let n = 0, a = ref.width, b = -1;
+      for (let x = 0; x < ref.width; x++) {
+        const i = (y * ref.width + x) * 4;
+        if (ref.rgba[i + 3] < 128 || colorClass(ref.rgba[i], ref.rgba[i + 1], ref.rgba[i + 2]) !== "C") continue;
+        n++; if (x < a) a = x; if (x > b) b = x;
+      }
+      rowsC.push(n >= ref.width * 0.04 ? [a, b] : null);
+      if (n >= ref.width * 0.01) { lastC = y; thin.push([y, a, b]); }
+    }
+    // la fascia continua più lunga di righe viola
+    let run = null;
+    for (let y = 0, st = -1; y <= rowsC.length; y++) {
+      // buchi fino a 12 righe (stelle e fermagli) non spezzano la fascia
+      if (y < rowsC.length && (rowsC[y] || (st >= 0 && rowsC.slice(y, y + 12).some(Boolean)))) { if (st < 0) st = y; continue; }
+      if (st >= 0 && (!run || y - st > run[1] - run[0])) run = [st, y - 1];
+      st = -1;
+    }
+    if (run) for (let y = run[0]; y <= run[1]; y++) { if (!rowsC[y]) continue; const [a, b] = rowsC[y]; if (a < x0) x0 = a; if (b > x1) x1 = b; y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    // il fondo del mantello: spesso coperto in parte dalle maniche, conta anche una fascia sottile
+    if (run) {
+      y1 = Math.max(y1, lastC);
+      for (const [y, a, b] of thin) if (y > run[1]) { x0 = Math.min(x0, a); x1 = Math.max(x1, b); }
+    }
+    if (x1 > x0 && y1 > y0 && (x1 - x0) * (y1 - y0) > cape.width * cape.height * 0.5) {
+      Object.assign(cape, resizePiece(cape, x1 - x0 + 1, y1 - y0 + 1), { x: x0, y: y0 });
+      report.capeFit = [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+    }
+  }
+  place(lockDx, { cx: T.x + 0.2 * T.w, cy: T.y + lockDx.height * s * 0.4, r: 0.15 * W });
+  place(lockSx, { cx: T.x + 0.8 * T.w, cy: T.y + lockSx.height * s * 0.4, r: 0.15 * W });
+  place(armDx, { cx: T.x + 0.05 * T.w, cy: T.y + armDx.height * s * 0.5, r: 0.18 * W });
+  place(armSx, { cx: T.x + 0.95 * T.w, cy: T.y + armSx.height * s * 0.5, r: 0.18 * W });
+  // mani: in fondo al proprio braccio
+  place(handDx, { cx: armDx.x + armDx.width * 0.35, cy: armDx.y + armDx.height * 0.85, r: 0.08 * W }, 3);
+  place(handSx, { cx: armSx.x + armSx.width * 0.65, cy: armSx.y + armSx.height * 0.85, r: 0.08 * W }, 3);
+
+  // PIXEL VISIBILI DALL'ORIGINALE con PROPRIETÀ PER COLORE. La tavola è ridisegnata: le sagome dei
+  // pezzi ricollocati non coincidono con la posa, e il solo "pezzo più davanti" mette stelle del
+  // mantello nelle maniche o ciocche nel busto. Ogni pixel della posa va al pezzo più davanti che lo
+  // copre E che accetta il suo colore (mantello: viola; capelli: lilla/chiari; busto e braccia: blu,
+  // pelle; testa: tutto; neutri come argento e contorni: chiunque), altrimenti al pezzo compatibile
+  // più vicino. Nel pezzo: pixel della posa dove è suo, disegno della tavola dove è nascosto.
+  const layered = [cape, hair, torso, armDx, armSx, head, lockDx, lockSx];
+  const accepts = new Map([[cape, "CN"], [hair, "HN"], [lockDx, "HN"], [lockSx, "HN"], [torso, "BKN"], [armDx, "BKN"], [armSx, "BKN"], [head, "HCBKN"]]);
+  // la testa possiede solo i pixel dentro la propria sagoma (niente "più vicino"): il petto sotto il
+  // mento va al busto, non alla testa
+  const own = ownByColor(layered, ref, accepts, { grow: 6, reach: 60, strict: new Set([head]) });
+  layered.forEach((p, k) => { if (p !== head) Object.assign(p, own.pieces[k]); });
+  report.ownership = own.stats;
+
+  // articolazioni
+  const P = {};
+  const capCenter = (p, frac) => {
+    // centro dei pixel opachi nella fascia più alta del pezzo (calotta della spalla)
+    let n = 0, sx = 0, sy = 0;
+    for (let y = 0; y < Math.max(2, p.height * frac); y++)
+      for (let x = 0; x < p.width; x++) if (p.rgba[(y * p.width + x) * 4 + 3] > 200) { n++; sx += x; sy += y; }
+    return { x: p.x + sx / Math.max(1, n), y: p.y + sy / Math.max(1, n) };
+  };
+  for (const [sd, arm, hand] of [["dx", armDx, handDx], ["sx", armSx, handSx]]) {
+    const ax = limbAxis(hand);
+    const [wr, ft] = ax.tipA.y <= ax.tipB.y ? [ax.a, ax.tipB] : [ax.b, ax.tipA];
+    const sh = capCenter(arm, 0.1);
+    P[`shoulder_${sd}`] = sh;
+    P[`wrist_${sd}`] = wr;
+    P[`fingertip_${sd}`] = ft;
+    // gomito: poco sotto metà fra spalla e polso (avambraccio un po' più lungo dell'omero nel busto)
+    P[`elbow_${sd}`] = { x: sh.x + 0.47 * (wr.x - sh.x), y: sh.y + 0.47 * (wr.y - sh.y) };
+    report.pieces.push({ side: sd, armLen: Math.round(dist(sh, wr)), handErr: Math.round(hand.err) });
+  }
+  const colTop = (p, x) => { const lx = Math.round(x - p.x); for (let y = 0; y < p.height; y++) if (p.rgba[(y * p.width + lx) * 4 + 3] > 200) return p.y + y; return p.y; };
+  P.neck = { x: H.cx, y: colTop(torso, H.cx) };
+  P.crown = { x: H.cx, y: colTop(head, H.cx) };
+  P.waist = { x: T.cx, y: T.y + T.h * 0.92 };
+
+  const roles = new Map([[cape, "cape"], [hair, "hair_back"], [torso, "torso"], [armDx, "arm_dx"], [armSx, "arm_sx"], [head, "head"], [lockDx, "hair_front_dx"], [lockSx, "hair_front_sx"]]);
+  const vline = (p, a = 0.06, b = 0.97) => [{ x: p.x + p.width / 2, y: p.y + p.height * a }, { x: p.x + p.width / 2, y: p.y + p.height * (a + b) / 2 }, { x: p.x + p.width / 2, y: p.y + p.height * b }];
+  const lockPts = (p) => {
+    // dalla radice (alto) alla punta (basso), seguendo il centro dei pixel per fasce
+    const pts = [];
+    for (const fr of [0.04, 0.35, 0.65, 0.96]) {
+      const y = Math.round(p.height * fr);
+      let n = 0, sx = 0;
+      for (let x = 0; x < p.width; x++) if (p.rgba[(y * p.width + x) * 4 + 3] > 200) { n++; sx += x; }
+      pts.push({ x: p.x + (n ? sx / n : p.width / 2), y: p.y + y });
+    }
+    return pts;
+  };
+  const extra = {
+    cape: { role: "chain", kind: "cape", z: -1, parent: "torace", points: vline(cape, 0.05, 0.97) },
+    hair_back: { role: "chain", kind: "hair", layer: "hair_back", points: vline(hair, 0.12, 0.97) },
+    hair_front_dx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockDx) },
+    hair_front_sx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockSx) },
+    torso: { skin: ["bacino", "torace", "testa"] },
+    arm_dx: { role: "upper_arm", side: "dx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_dx", "avambraccio_dx", "mano_dx"], grid: { cols: 7, rows: 11 } },
+    arm_sx: { role: "upper_arm", side: "sx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_sx", "avambraccio_sx", "mano_sx"], grid: { cols: 7, rows: 11 } }
+  };
+  report.layout = "grid";
+  return faceAndKit({ ref, faceSheet, f, report, opt: { headFlood: false, eyeSearch: "geo", ...opt }, s, torso, head, roles, P, extra });
+}
+
+/**
+ * PROPRIETÀ DEI PIXEL per tavole ridisegnate (forme un po' diverse dalla posa). Ogni pixel del
+ * personaggio nella posa va a uno dei pezzi la cui sagoma (allargata di D px) lo copre: quello con la
+ * TAVOLOZZA più vicina al colore del pixel (mantello viola, capelli lilla, vestito blu...), a parità
+ * il più davanti. Poi ogni pezzo: pixel suoi = colore della posa; pixel della sua sagoma che nella
+ * posa appartengono a un pezzo DAVANTI = disegno della tavola (parte nascosta); pixel che nella posa
+ * sono fondo o appartengono a un pezzo DIETRO = trasparenti. A riposo coincide con la posa.
+ * pieces: dal fondo al davanti; keep: pezzi di cui si calcola la proprietà ma non si cambia l'immagine.
+ */
+function ownByPalette(pieces, ref, { D = 10, keep = new Set(), maxPal = 80, maxIsland = 0.004 * ref.width * ref.height } = {}) {
+  const W = ref.width, Hh = ref.height, N = W * Hh;
+  const isBg = (g) => ref.rgba[g * 4 + 3] < 128 || (ref.rgba[g * 4 + 1] > ref.rgba[g * 4] + 40 && ref.rgba[g * 4 + 1] > ref.rgba[g * 4 + 2] + 40);
+  // tavolozze: 6 colori per pezzo (k-means su un campione)
+  const palettes = pieces.map((p) => {
+    const smp = [];
+    for (let i = 0; i < p.width * p.height; i += 7) if (p.rgba[i * 4 + 3] > 200) smp.push([p.rgba[i * 4], p.rgba[i * 4 + 1], p.rgba[i * 4 + 2]]);
+    let c = Array.from({ length: 6 }, (_, k) => smp[Math.floor(((k + 0.5) * smp.length) / 6)] || [0, 0, 0]);
+    for (let it = 0; it < 8; it++) {
+      const acc = c.map(() => [0, 0, 0, 0]);
+      for (const v of smp) {
+        let bi = 0, bd = Infinity;
+        c.forEach((q, k) => { const d = (v[0] - q[0]) ** 2 + (v[1] - q[1]) ** 2 + (v[2] - q[2]) ** 2; if (d < bd) { bd = d; bi = k; } });
+        acc[bi][0] += v[0]; acc[bi][1] += v[1]; acc[bi][2] += v[2]; acc[bi][3]++;
+      }
+      c = c.map((q, k) => (acc[k][3] ? [acc[k][0] / acc[k][3], acc[k][1] / acc[k][3], acc[k][2] / acc[k][3]] : q));
+    }
+    return c;
+  });
+  const palDist = (k, g) => {
+    let bd = Infinity;
+    for (const q of palettes[k]) bd = Math.min(bd, Math.abs(ref.rgba[g * 4] - q[0]) + Math.abs(ref.rgba[g * 4 + 1] - q[1]) + Math.abs(ref.rgba[g * 4 + 2] - q[2]));
+    return bd;
+  };
+  // sagome nella posa, e sagome allargate (distanza dal pezzo ≤ D)
+  const inMask = pieces.map((p) => (g) => {
+    const x = (g % W) - p.x, y = ((g / W) | 0) - p.y;
+    return x >= 0 && y >= 0 && x < p.width && y < p.height && p.rgba[(y * p.width + x) * 4 + 3] > 128;
+  });
+  const near = pieces.map((p, k) => {
+    const Dk = typeof D === "function" ? D(p, k) : D;
+    const m = new Uint8Array(N);
+    const q = [];
+    for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
+      if (p.rgba[(y * p.width + x) * 4 + 3] <= 128) continue;
+      const gx = p.x + x, gy = p.y + y;
+      if (gx < 0 || gy < 0 || gx >= W || gy >= Hh) continue;
+      const g = gy * W + gx;
+      if (!m[g]) { m[g] = 1; q.push(g); }
+    }
+    for (let d = 1; d <= Dk; d++) {
+      const nq = [];
+      for (const g of q) {
+        const x = g % W;
+        for (const h of [g - 1, g + 1, g - W, g + W]) {
+          if (h < 0 || h >= N || m[h] || Math.abs((h % W) - x) > 1) continue;
+          m[h] = d + 1; nq.push(h);
+        }
+      }
+      q.length = 0; q.push(...nq);
+    }
+    return m;
+  });
+  const nearMax = pieces.map((p, k) => (typeof D === "function" ? D(p, k) : D) + 1);
+  const owner = new Int16Array(N).fill(-1);
+  let holes = 0, fgN = 0;
+  for (let g = 0; g < N; g++) {
+    if (isBg(g)) continue;
+    fgN++;
+    let best = -1, bs = Infinity;
+    for (let k = 0; k < pieces.length; k++) {
+      if (!near[k][g]) continue;
+      // tavolozza + piccola penalità se il pixel è fuori dalla sagoma vera + piccolo vantaggio a chi sta davanti
+      const sc = palDist(k, g) + (near[k][g] > 1 ? (30 * near[k][g]) / nearMax[k] : 0) - k * 2;
+      if (sc < bs) { bs = sc; best = k; }
+    }
+    // colore lontano da tutte le tavolozze vicine: lo decide la propagazione (es. mantello viola dietro
+    // la manica, quando il mantello della tavola è più piccolo e non arriva fin lì)
+    if (best >= 0 && palDist(best, g) > maxPal) best = -1;
+    if (best < 0) holes++;
+    owner[g] = best;
+  }
+  // pixel non coperti da nessuna sagoma allargata: propagazione dai vicini già assegnati (il pezzo
+  // si estende fin dove arriva nella posa, es. mantello e capelli disegnati più piccoli nella tavola)
+  {
+    let q = [];
+    for (let g = 0; g < N; g++) if (owner[g] >= 0) q.push(g);
+    while (q.length) {
+      const nq = [];
+      // a ogni giro: ogni pixel libero accanto a pixel assegnati prende, fra i proprietari vicini,
+      // quello con la tavolozza più simile
+      const cand = new Map();
+      for (const g of q) {
+        const x = g % W;
+        for (const h of [g - 1, g + 1, g - W, g + W]) {
+          if (h < 0 || h >= N || owner[h] >= 0 || Math.abs((h % W) - x) > 1 || isBg(h)) continue;
+          const k = owner[g], d = palDist(k, h);
+          const c = cand.get(h);
+          if (!c || d < c.d) cand.set(h, { k, d });
+        }
+      }
+      for (const [h, c] of cand) { owner[h] = c.k; nq.push(h); }
+      q = nq;
+    }
+  }
+  pieces.forEach((p, k) => {
+    if (keep.has(p)) return;
+    // nuovo riquadro: sagoma allargata + pixel propri
+    let x0 = W, y0 = Hh, x1 = -1, y1 = -1;
+    for (let g = 0; g < N; g++) if (near[k][g] || owner[g] === k) { const x = g % W, y = (g / W) | 0; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (x1 < 0) return;
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, out = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        const g = (y + y0) * W + x + x0, o = (y * w + x) * 4;
+        if (owner[g] === k) { out[o] = ref.rgba[g * 4]; out[o + 1] = ref.rgba[g * 4 + 1]; out[o + 2] = ref.rgba[g * 4 + 2]; out[o + 3] = 255; continue; }
+        if (!inMask[k](g)) continue;
+        if (isBg(g) || owner[g] < k) continue; // fondo o pezzo dietro: qui il pezzo non c'è
+        // nascosto da un pezzo davanti: resta il disegno della tavola
+        const lx = x + x0 - p.x, ly = y + y0 - p.y, li = (ly * p.width + lx) * 4;
+        out[o] = p.rgba[li]; out[o + 1] = p.rgba[li + 1]; out[o + 2] = p.rgba[li + 2]; out[o + 3] = p.rgba[li + 3];
+      }
+    Object.assign(p, { x: x0, y: y0, width: w, height: h, rgba: out });
+  });
+  // isole: componenti piccole di un proprietario chiuse dentro un altro (decori argentati del vestito
+  // presi per capelli, stelle del mantello prese per altro...) passano a chi le circonda
+  {
+    const seen = new Uint8Array(N);
+    for (let g0 = 0; g0 < N; g0++) {
+      if (seen[g0] || owner[g0] < 0) continue;
+      const k = owner[g0], comp = [g0], border = new Map();
+      seen[g0] = 1;
+      for (let qi = 0; qi < comp.length; qi++) {
+        const g = comp[qi], x = g % W;
+        for (const h of [g - 1, g + 1, g - W, g + W]) {
+          if (h < 0 || h >= N || Math.abs((h % W) - x) > 1) continue;
+          if (owner[h] === k) { if (!seen[h]) { seen[h] = 1; comp.push(h); } }
+          else border.set(owner[h], (border.get(owner[h]) || 0) + 1);
+        }
+      }
+      if (comp.length > maxIsland) continue;
+      let bo = -2, bn = 0, tot = 0;
+      for (const [o, n] of border) { tot += n; if (n > bn) { bn = n; bo = o; } }
+      if (bo >= 0 && bn > 0.6 * tot) for (const g of comp) owner[g] = bo;
+    }
+  }
+  if (globalThis.__ownerDebug) globalThis.__ownerDebug = { owner, W, Hh };
+  return { holeShare: +(holes / Math.max(1, fgN)).toFixed(4) };
+}
+
+/** Classe di colore di un pixel: H capelli chiari/lilla, C viola (mantello), B blu (vestito), K pelle, N neutro. */
+export function colorClass(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn, v = mx, sat = mx ? d / mx : 0;
+  let h = 0;
+  if (d) h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  h = (h * 60 + 360) % 360;
+  if (r > g && g > b && r - b > 40 && sat > 0.18 && sat < 0.65 && v > 120) return "K";
+  if (v > 150 && sat < 0.3 && b >= g && r >= g - 4 && (r + b) / 2 - g > 10) return "H";
+  if (sat > 0.45 && h >= 255 && h <= 315) return "C";
+  if (sat > 0.35 && h >= 195 && h < 255) return "B";
+  return "N";
+}
+
+/**
+ * Proprietà dei pixel della posa per colore + ordine (vedi importGrid). pieces in ordine dal fondo;
+ * accepts: Map pezzo → classi accettate. Restituisce i pezzi con rgba nuovo (stesso riquadro
+ * allargato alla parte presa dalla posa) e le statistiche.
+ */
+function ownByColor(pieces, ref, accepts, { grow = 6, reach = 40, strict = new Set() } = {}) {
+  const W = ref.width, H = ref.height, N = W * H;
+  const fg = new Uint8Array(N), cls = new Uint8Array(N);
+  const CODE = { H: 1, C: 2, B: 3, K: 4, N: 5 };
+  for (let i = 0; i < N; i++) {
+    const r = ref.rgba[i * 4], g = ref.rgba[i * 4 + 1], b = ref.rgba[i * 4 + 2];
+    if (ref.rgba[i * 4 + 3] < 128 || (g > r + 40 && g > b + 40)) continue;
+    fg[i] = 1; cls[i] = CODE[colorClass(r, g, b)];
+  }
+  // maschere dei pezzi (allargate di "grow") e distanza da ciascuna (fino a reach), per pezzo
+  const masks = pieces.map((p) => {
+    const m = new Uint8Array(N);
+    for (let y = 0; y < p.height; y++) for (let x = 0; x < p.width; x++) {
+      if (p.rgba[(y * p.width + x) * 4 + 3] < 128) continue;
+      const gx = p.x + x, gy = p.y + y;
+      if (gx >= 0 && gy >= 0 && gx < W && gy < H) m[gy * W + gx] = 1;
+    }
+    return m;
+  });
+  const distTo = (m, lim) => {
+    const d = new Uint16Array(N).fill(65535), q = [];
+    for (let i = 0; i < N; i++) if (m[i]) { d[i] = 0; q.push(i); }
+    for (let qi = 0; qi < q.length; qi++) {
+      const i = q[qi], x = i % W, y = (i - x) / W;
+      if (d[i] >= lim) continue;
+      for (const j of [x > 0 ? i - 1 : -1, x < W - 1 ? i + 1 : -1, y > 0 ? i - W : -1, y < H - 1 ? i + W : -1])
+        if (j >= 0 && d[j] === 65535) { d[j] = d[i] + 1; q.push(j); }
+    }
+    return d;
+  };
+  const dists = masks.map((m) => distTo(m, reach));
+  const acc = pieces.map((p) => new Set([...(accepts.get(p) || "HCBKN")].map((c) => CODE[c])));
+  const owner = new Int8Array(N).fill(-1);
+  let byFront = 0, byNear = 0, orphan = 0;
+  const orphanBy = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    if (!fg[i]) continue;
+    let k = -1;
+    for (let j = pieces.length - 1; j >= 0; j--) if (dists[j][i] <= (strict.has(pieces[j]) ? 0 : grow) && acc[j].has(cls[i])) { k = j; break; }
+    if (k >= 0) { byFront++; owner[i] = k; continue; }
+    let bd = 65535;
+    for (let j = 0; j < pieces.length; j++) if (!strict.has(pieces[j]) && acc[j].has(cls[i]) && dists[j][i] < bd) { bd = dists[j][i]; k = j; }
+    if (k >= 0 && bd <= reach) { byNear++; owner[i] = k; } else { orphan++; orphanBy[cls[i]]++; }
+  }
+  const out = pieces.map((p, k) => {
+    // riquadro: unione del pezzo e dei pixel della posa che possiede
+    let x0 = p.x, y0 = p.y, x1 = p.x + p.width - 1, y1 = p.y + p.height - 1;
+    for (let i = 0; i < N; i++) if (owner[i] === k) { const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(W - 1, x1); y1 = Math.min(H - 1, y1);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, rgba = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const gx = x + x0, gy = y + y0, g = gy * W + gx, o = (y * w + x) * 4;
+      if (owner[g] === k) { rgba.set(ref.rgba.subarray(g * 4, g * 4 + 3), o); rgba[o + 3] = 255; continue; }
+      // disegno della tavola solo dove il pezzo è NASCOSTO da un pezzo più davanti
+      const lx = gx - p.x, ly = gy - p.y;
+      if (lx < 0 || ly < 0 || lx >= p.width || ly >= p.height) continue;
+      const li = (ly * p.width + lx) * 4;
+      if (p.rgba[li + 3] < 128) continue;
+      if (fg[g] && owner[g] > k) { rgba.set(p.rgba.subarray(li, li + 4), o); }
+    }
+    return { x: x0, y: y0, width: w, height: h, rgba };
+  });
+  return { pieces: out, owner, stats: { byFront, byNear, orphan, orphanByClass: { H: orphanBy[1], C: orphanBy[2], B: orphanBy[3], K: orphanBy[4], N: orphanBy[5] } } };
+}
+
+/** Ridimensiona un pezzo a w×h (vicino più prossimo; scale diverse in x e y). */
+function resizePiece(p, w, h) {
+  const rgba = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const sx = Math.min(p.width - 1, Math.floor((x * p.width) / w)), sy = Math.min(p.height - 1, Math.floor((y * p.height) / h));
+    rgba.set(p.rgba.subarray((sy * p.width + sx) * 4, (sy * p.width + sx) * 4 + 4), (y * w + x) * 4);
+  }
+  return { width: w, height: h, rgba };
 }
