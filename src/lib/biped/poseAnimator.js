@@ -245,19 +245,26 @@ export function faceOffsets(fm, ex) {
   const add = (x, y, dx, dy, R = 0.3) => ctrl.push({ x, y, dx: dx * u, dy: dy * u, R: R * u });
   const w = (k) => ex[k] || 0;
   const cl = { x: M.x - M.w / 2, y: M.y }, cr = { x: M.x + M.w / 2, y: M.y };
+  // REGOLA DEL VISO 1 (dell'utente): gli angoli della bocca stanno sulla verticale delle pupille; nel
+  // sorriso si spostano soprattutto IN FUORI, in orizzontale oltre quella verticale (poco in su).
+  // Il controllo del sorriso agisce quindi sugli angoli veri e sulla verticale delle pupille.
+  const pl = { x: Math.min(cl.x, eL.x), y: M.y }, pr = { x: Math.max(cr.x, eR.x), y: M.y };
   const sm = w("smile") + w("laugh");
   if (sm) {
-    add(cl.x, cl.y, -0.05 * sm, -0.11 * sm, 0.3); add(cr.x, cr.y, 0.05 * sm, -0.11 * sm, 0.3);
+    add(cl.x, cl.y, -0.13 * sm, -0.05 * sm, 0.24); add(cr.x, cr.y, 0.13 * sm, -0.05 * sm, 0.24);
+    add(pl.x, pl.y, -0.06 * sm, -0.03 * sm, 0.2); add(pr.x, pr.y, 0.06 * sm, -0.03 * sm, 0.2);
     add(eL.x, eL.y + 0.42 * u, 0, -0.06 * sm, 0.28); add(eR.x, eR.y + 0.42 * u, 0, -0.06 * sm, 0.28); // guance
     add(eL.x, eL.y + 0.13 * u, 0, -0.03 * sm, 0.14); add(eR.x, eR.y + 0.13 * u, 0, -0.03 * sm, 0.14); // occhi che sorridono
   }
-  if (w("laugh") || w("surprise")) add(M.x, M.y + 0.45 * u, 0, 0.1 * (w("laugh") + 1.3 * w("surprise")), 0.55); // mento giù
+  // mento giù: sul mento della REGOLA DEL VISO 2 (fondo del terzo inferiore), se noto
+  const chin = face.chin || { x: M.x, y: M.y + 0.45 * u };
+  if (w("laugh") || w("surprise")) add(chin.x, (chin.y + M.y) / 2 + 0.1 * u, 0, 0.1 * (w("laugh") + 1.3 * w("surprise")), 0.55);
   if (w("surprise")) {
     add(cl.x, cl.y, 0.04 * w("surprise"), 0.02, 0.25); add(cr.x, cr.y, -0.04 * w("surprise"), 0.02, 0.25);
     add(bL.x, bL.y, 0, -0.15 * w("surprise"), 0.32); add(bR.x, bR.y, 0, -0.15 * w("surprise"), 0.32);
   }
   if (w("sad")) {
-    add(cl.x, cl.y, 0.02 * w("sad"), 0.09 * w("sad"), 0.3); add(cr.x, cr.y, -0.02 * w("sad"), 0.09 * w("sad"), 0.3);
+    add(cl.x, cl.y, 0.04 * w("sad"), 0.13 * w("sad"), 0.24); add(cr.x, cr.y, -0.04 * w("sad"), 0.13 * w("sad"), 0.24);
     add(bL.x + 0.18 * u, bL.y, 0, -0.08 * w("sad"), 0.18); add(bR.x - 0.18 * u, bR.y, 0, -0.08 * w("sad"), 0.18); // interno su
     add(bL.x - 0.2 * u, bL.y, 0, 0.04 * w("sad"), 0.16); add(bR.x + 0.2 * u, bR.y, 0, 0.04 * w("sad"), 0.16);
   }

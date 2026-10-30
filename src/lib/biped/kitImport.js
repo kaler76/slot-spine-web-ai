@@ -217,7 +217,9 @@ function coloredCore(p) {
       if (p.rgba[i + 3] < 200) continue;
       const r = p.rgba[i], g = p.rgba[i + 1], b = p.rgba[i + 2];
       const sat = Math.max(r, g, b) - Math.min(r, g, b);
-      if (sat > 70 && r > g) { n++; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
+      // labbra e interno della bocca, non la pelle (la pelle rosata delle donne è satura anche lei):
+      // il rosso che si stacca dalla media di verde e blu
+      if (sat > 70 && r > g && r - (g + b) / 2 > 72) { n++; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
     }
   return n < 15 ? null : { cy: sy / n, cx: (mnx + mxx) / 2, w: mxx - mnx, h: mxy - mny };
 }
@@ -683,6 +685,26 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       mouth: { x: mid2, y: mouthCenterY ?? report.face.eyeY + 1.9 * half2, w: zm2?.refW ?? 1.6 * half2 },
       u: 2 * half2
     };
+    // REGOLA DEL VISO 2 (proporzioni): attaccatura→sopracciglia, sopracciglia→base del naso e base
+    // del naso→mento sono tre terzi uguali (T); la bocca sta a 1/3 del terzo inferiore; gli occhi a
+    // metà della testa (cima dei capelli = 1/6 sopra l'attaccatura). Da sopracciglia e bocca:
+    // T = 0,75·(bocca − sopracciglia); naso = sopracciglia + T; mento = sopracciglia + 2T.
+    {
+      const browY = (browsC[0].y + browsC[1].y) / 2, mY = faceGeo.mouth.y, T = 0.75 * (mY - browY);
+      const eyeY = (eyesC[0].y + eyesC[1].y) / 2, eyeExp = browY + 0.2 * T;
+      faceGeo.nose = { x: faceGeo.mouth.x, y: browY + T };
+      faceGeo.chin = { x: faceGeo.mouth.x, y: browY + 2 * T };
+      faceGeo.hairline = browY - T;
+      report.face.rule2 = { third: Math.round(T), eyeVsHalf: +((eyeY - eyeExp) / T).toFixed(2) };
+      if (Math.abs(eyeY - eyeExp) > 0.25 * T) report.warnings.push(`Viso: occhi lontani dalla metà della testa (${Math.round(((eyeY - eyeExp) / T) * 100)}% di un terzo).`);
+    }
+    // controllo REGOLA DEL VISO 1: angoli della bocca sulla verticale delle pupille, bocca sulla mediana
+    {
+      const mw = faceGeo.mouth.w, pd = Math.abs(eyesC[1].x - eyesC[0].x);
+      const off = (faceGeo.mouth.x - (eyesC[0].x + eyesC[1].x) / 2) / pd;
+      report.face.rule1 = { mouthOverPupils: +(mw / pd).toFixed(2), centerOffset: +off.toFixed(3) };
+      if (Math.abs(off) > 0.05) report.warnings.push(`Viso: bocca fuori dalla mediana del ${Math.round(Math.abs(off) * 100)}% della distanza fra le pupille.`);
+    }
     faceParts.length = 0;
     delete mouth.variants.neutral;
     report.face.mesh = true;
