@@ -236,6 +236,21 @@ function eyeWhiteWidth(p) {
 }
 const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
 
+/** Larghezza della sclera (bianco neutro, non pelle chiara) per righe: la riga più larga. */
+function scleraWidth(p) {
+  let best = 0;
+  for (let y = 0; y < p.height; y++) {
+    let mn = Infinity, mx = -Infinity, n = 0;
+    for (let x = 0; x < p.width; x++) {
+      const i = (y * p.width + x) * 4, r = p.rgba[i], g = p.rgba[i + 1], b = p.rgba[i + 2];
+      if (p.rgba[i + 3] < 200 || Math.min(r, g, b) < 200 || Math.max(r, g, b) - Math.min(r, g, b) > 22) continue;
+      n++; mn = Math.min(mn, x); mx = Math.max(mx, x);
+    }
+    if (n >= 3) best = Math.max(best, mx - mn);
+  }
+  return best || p.width * 0.6;
+}
+
 /**
  * @param {{reference, bodySheet, faceSheet}} imgs - immagini { width, height, rgba }
  * @param {{ work?: number }} opt - fattore di riduzione di lavoro (default 0.5)
@@ -697,6 +712,20 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       faceGeo.hairline = browY - T;
       report.face.rule2 = { third: Math.round(T), eyeVsHalf: +((eyeY - eyeExp) / T).toFixed(2) };
       if (Math.abs(eyeY - eyeExp) > 0.25 * T) report.warnings.push(`Viso: occhi lontani dalla metà della testa (${Math.round(((eyeY - eyeExp) / T) * 100)}% di un terzo).`);
+    }
+    // REGOLA DEL VISO 3 (Loomis): cerchio del cranio dalla cima alla base del naso, sopracciglia sul
+    // suo centro; in larghezza il viso fra gli angoli esterni degli occhi si divide in 3 parti uguali:
+    // occhio, spazio fra gli occhi (= larghezza del naso), occhio. Sotto il naso: bocca a 1/3, mento a 3/3.
+    {
+      const eyeParts = faceParts.filter((fp) => fp.role === "eye").sort((a, b) => a.x - b.x);
+      if (eyeParts.length === 2) {
+        // larghezza vera dell'occhio = bianco da angolo ad angolo (il ritaglio ha un margine)
+        const [l, r] = eyeParts, wL = scleraWidth(l.piece), wR = scleraWidth(r.piece);
+        const dC = (r.x + r.piece.width / 2) - (l.x + l.piece.width / 2);
+        const gap = dC - (wL + wR) / 2, span = dC + (wL + wR) / 2;
+        faceGeo.noseWidth = Math.max(gap, 0.25 * span);
+        report.face.rule3 = { eyeW: Math.round((wL + wR) / 2), gap: Math.round(gap), gapOverEye: +(gap / ((wL + wR) / 2)).toFixed(2) };
+      }
     }
     // controllo REGOLA DEL VISO 1: angoli della bocca sulla verticale delle pupille, bocca sulla mediana
     {
