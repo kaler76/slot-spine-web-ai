@@ -958,7 +958,7 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
   // mento va al busto, non alla testa
   const own = ownByColor(layered, ref, accepts, { grow: 6, reach: 60, strict: new Set([head]), prefer: { 1: { pieces: [lockDx, lockSx], reach: 1e9, over: [torso, armDx, armSx] } } });
   // (capelli chiari che stanno SOPRA busto e braccia = ciocche davanti; quelli ai lati = capelli dietro)
-  layered.forEach((p, k) => { if (p !== head) Object.assign(p, own.pieces[k]); });
+  layered.forEach((p, k) => { if (p !== head) Object.assign(p, cleanSpecks(own.pieces[k])); });
   report.ownership = own.stats;
 
   // articolazioni
@@ -1283,4 +1283,29 @@ function resizePiece(p, w, h) {
     rgba.set(p.rgba.subarray((sy * p.width + sx) * 4, (sy * p.width + sx) * 4 + 4), (y * w + x) * 4);
   }
   return { width: w, height: h, rgba };
+}
+
+/**
+ * Pulizia del pezzo: via i pixel quasi trasparenti (< 60) e le isole staccate piccole (< 2% della più
+ * grande). Le isole e i bordi sporchi, nelle mesh che si allungano, diventano righe tratteggiate e
+ * puntini che volano attorno al pezzo (visti nell'apertura a T della maga).
+ */
+function cleanSpecks(p) {
+  const { width: W, height: H, rgba } = p, N = W * H;
+  for (let i = 0; i < N; i++) if (rgba[i * 4 + 3] < 60) rgba[i * 4 + 3] = 0;
+  const lab = new Int32Array(N).fill(-1), sizes = [];
+  for (let i = 0; i < N; i++) {
+    if (lab[i] >= 0 || !rgba[i * 4 + 3]) continue;
+    const id = sizes.length, q = [i]; lab[i] = id; let n = 0;
+    while (q.length) {
+      const j = q.pop(); n++;
+      const x = j % W, y = (j - x) / W;
+      for (const k of [x > 0 ? j - 1 : -1, x < W - 1 ? j + 1 : -1, y > 0 ? j - W : -1, y < H - 1 ? j + W : -1])
+        if (k >= 0 && lab[k] < 0 && rgba[k * 4 + 3]) { lab[k] = id; q.push(k); }
+    }
+    sizes.push(n);
+  }
+  const big = Math.max(0, ...sizes);
+  for (let i = 0; i < N; i++) if (lab[i] >= 0 && sizes[lab[i]] < 0.02 * big) rgba[i * 4 + 3] = 0;
+  return p;
 }
