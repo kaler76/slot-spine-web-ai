@@ -3,7 +3,7 @@
 //  B1 il pacchetto si carica (ossa, slot, mesh delle catene, IK, varianti della bocca);
 //  B2 ogni articolazione resta entro i limiti anatomici in ogni fotogramma (anche le ginocchia
 //     guidate dall'IK e le catene di capelli/mantello);
-//  B3 ogni animazione inizia e finisce nella posa di riposo (si aggancia all'idle senza scatti);
+//  B3 ogni animazione inizia e finisce nella posa di riposo (si aggancia all'idle senza scatti); l'idle è un loop chiuso;
 //  B4 figura intera: i piedi restano a terra quando il personaggio non salta; ginocchia verso l'esterno;
 //  B5 l'attacco ha davvero anticipo → colpo veloce → assestamento (il colpo dura pochi fotogrammi);
 //  B6 la stoffa segue con ritardo (follow-through) e torna ferma;
@@ -95,6 +95,16 @@ for (const body of ["bust", "full"]) {
     const setup = new spine.Skeleton(data); setup.setToSetupPose(); setup.updateWorldTransform();
     const ref = setup.bones.map((b) => ({ x: b.worldX, y: b.worldY }));
     for (const anim of ANIMATIONS) {
+      if (anim === "idle") {
+        // l'idle è un loop: non parte per forza dal riposo (come negli esempi ufficiali), ma si chiude:
+        // primo e ultimo fotogramma coincidono
+        const at = [];
+        sweep(spine, data, anim, 30, (sk) => at.push(sk.bones.map((b) => ({ x: b.worldX, y: b.worldY }))));
+        at.splice(1, at.length - 2);
+        const worst = Math.max(...at[0].map((p, i) => Math.hypot(p.x - at[1][i].x, p.y - at[1][i].y)));
+        assert.ok(worst < 1, `idle non chiuso: ${worst.toFixed(2)} px`);
+        continue;
+      }
       sweep(spine, data, anim, 30, (sk, t, dur) => {
         if (t !== dur && !(t === 0 && anim !== "intro")) return;
         const worst = Math.max(...sk.bones.map((b, i) => Math.hypot(b.worldX - ref[i].x, b.worldY - ref[i].y)));

@@ -338,7 +338,14 @@ export function simulateChain(json, animName, chain, duration, loop) {
           // gravità: la stoffa appesa cerca la sua direzione di riposo nel MONDO (verso il basso), non
           // quella relativa al genitore: la manica ricade anche col braccio alzato
           const rel = base + restLocal[i];
-          const target = hang ? rel + norm(restWorld[i] - rel) * hang : rel;
+          let target = hang ? rel + norm(restWorld[i] - rel) * hang : rel;
+          // VENTO / ONDEGGIO (tutorial stoffa: ritardo a cascata, ultimo osso ≤ metà ciclo): bersaglio
+          // che oscilla con ampiezza crescente verso la punta e ritardo per osso
+          if (chain.wind) {
+            const W = chain.wind, n = chain.bones.length;
+            const ph = (2 * Math.PI * (t - (i / n) * 0.5 * W.period)) / W.period + (W.phase || 0);
+            target += W.amp * (0.6 + 0.4 * (i / Math.max(1, n - 1))) * Math.sin(ph);
+          }
           const err = norm(theta[i] - target);
           const th = theta[i] / R2D;
           const inertia = -(Math.cos(th) * acc.y - Math.sin(th) * acc.x) / Math.max(lens[i] * (i + 1), 1) * R2D * 0.35;

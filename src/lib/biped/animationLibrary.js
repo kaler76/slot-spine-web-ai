@@ -5,7 +5,7 @@
 // posa di riposo. Le pose si adattano al personaggio: lato dell'arma, mezzo busto o figura
 // intera, bocca con varianti o no, bagliore della magia presente o no.
 
-import { buildAnimation, restAnatomy } from "./poseAnimator.js";
+import { buildAnimation, restAnatomy, simulateChain } from "./poseAnimator.js";
 
 /** Animazioni disponibili, nell'ordine in cui compaiono nell'app. */
 export const ANIMATIONS = ["intro", "potere", "magia", "sorpresa", "risata", "delusione", "idle"];
@@ -148,6 +148,7 @@ const SPECS = { intro: introSpec, attacco: attackSpec, potere: powerSpec, idle: 
 export function addLibraryAnimations(rig, names = ANIMATIONS) {
   const report = [];
   for (const n of names) {
+    if (n === "idle") { report.push(buildIdle(rig)); continue; }
     const spec = SPECS[n](rig);
     report.push(buildAnimation(rig, spec));
   }
@@ -202,4 +203,66 @@ export function idleSpec(rig) {
     ],
     blinks: [2.7]
   };
+}
+
+/**
+ * IDLE "da animatore" con i numeri degli esempi ufficiali Spine (spineboy, hero, mix-and-match, owl):
+ * ogni osso ha il SUO ciclo (periodo, fase, ampiezza), non pose comuni a tutti:
+ *  - bacino: su/giù ~1,2% dell'altezza (2 respiri per ciclo) e di lato ~0,6% (spostamento del peso),
+ *    rotazione ±1,2°;
+ *  - torace: ±2,2° in ritardo sul bacino; respiro in scala (testa e braccia non ereditano la scala);
+ *  - testa: ±3° in ritardo sul torace;
+ *  - braccia: omero ±7°, avambraccio ±11°, mano ±6°, i figli in ritardo (overlap) e i due lati sfasati;
+ *  - catene (capelli, ciocche, mantello): ondeggio con ritardo a cascata + inerzia dal corpo.
+ * Durata 3,2 s, loop chiuso (tutte le onde hanno periodi che dividono la durata): come negli esempi
+ * ufficiali il loop non parte per forza dalla posa di riposo. Un battito.
+ */
+export function buildIdle(rig, D = 3.2) {
+  const json = rig.json, H = json.skeleton.height;
+  // battito e struttura dal motore (pose ferme), poi i cicli per osso
+  const rep = buildAnimation(rig, { name: "idle", loop: true, secondary: false, keys: [{ t: 0, ease: "inOut", pose: {} }, { t: D, ease: "inOut", pose: {} }], blinks: [1.9] });
+  const anim = json.animations.idle;
+  const has = new Set(json.bones.map((b) => b.name));
+  const N = 32; // campioni per ciclo intero
+  const wave = (amp, cycles, phase, delay = 0) => (t) => amp * Math.sin(2 * Math.PI * (cycles * (t - delay) / D) + phase);
+  const rot = (bone, f) => {
+    if (!has.has(bone)) return;
+    const keys = [];
+    for (let k = 0; k <= N; k++) { const t = (k / N) * D; keys.push({ time: +t.toFixed(4), value: +f(t).toFixed(3) }); } // onde simmetriche: il loop si chiude (D è multiplo dei periodi)
+    (anim.bones[bone] ||= {}).rotate = keys;
+  };
+  const tr = (bone, fx, fy) => {
+    if (!has.has(bone)) return;
+    const keys = [];
+    for (let k = 0; k <= N; k++) { const t = (k / N) * D; keys.push({ time: +t.toFixed(4), x: +fx(t).toFixed(3), y: +fy(t).toFixed(3) }); }
+    (anim.bones[bone] ||= {}).translate = keys;
+  };
+  const sc = (bone, fx, fy) => {
+    if (!has.has(bone)) return;
+    const keys = [];
+    for (let k = 0; k <= N; k++) { const t = (k / N) * D; keys.push({ time: +t.toFixed(4), x: +fx(t).toFixed(4), y: +fy(t).toFixed(4) }); }
+    (anim.bones[bone] ||= {}).scale = keys;
+  };
+  // bacino: peso (1 ciclo di lato) + respiro (2 cicli in su/giù)
+  tr("bacino", wave(0.006 * H, 1, 0), (t) => -0.006 * H + wave(0.006 * H, 2, Math.PI / 2)(t));
+  rot("bacino", wave(1.2, 1, 0.4));
+  rot("torace", wave(2.2, 1, 0.4, 0.18));
+  sc("torace", (t) => 1 + wave(0.004, 2, Math.PI / 2, 0.1)(t), (t) => 1 + wave(0.011, 2, Math.PI / 2, 0.1)(t));
+  rot("testa", (t) => wave(3, 1, 0.4, 0.38)(t) + wave(0.8, 2, 1.1)(t));
+  for (const [sd, ph] of [["sx", 0.3], ["dx", 2.2]]) {
+    // vista frontale: l'oscillazione delle braccia è nel piano (apre/chiude), quindi più contenuta che
+    // negli esempi di profilo, altrimenti le braccia "sbattono"
+    rot(`omero_${sd}`, wave(3.5, 1, ph, 0.05));
+    rot(`avambraccio_${sd}`, wave(6, 1, ph, 0.2));
+    rot(`mano_${sd}`, wave(5, 1, ph, 0.33));
+  }
+  // catene: ondeggio a cascata (ampiezze dagli esempi: ciocche 6–16°, mantello ~5°)
+  const WIND = { hair: { amp: 3.5, cycles: 1 }, cape: { amp: 1.5, cycles: 1 }, sleeve: { amp: 6, cycles: 1 }, tail: { amp: 10, cycles: 1 }, ribbon: { amp: 10, cycles: 2 } };
+  rig.meta.chains.forEach((ch, i) => {
+    const w = WIND[ch.kind] || WIND.hair;
+    const front = /front/.test(ch.name);
+    simulateChain(json, "idle", { ...ch, wind: { amp: front ? w.amp * 1.2 : w.amp, period: D / w.cycles, phase: i * 1.3 } }, D, true);
+
+  });
+  return rep;
 }
