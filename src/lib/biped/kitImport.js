@@ -1049,8 +1049,8 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
     hair_front_dx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockDx) },
     hair_front_sx: { role: "chain", kind: "hair", parent: "testa", z: 44, bones: 3, maxDeg: 14, points: lockPts(lockSx) },
     torso: { skin: ["bacino", "torace", "testa"] },
-    arm_dx: { role: "upper_arm", side: "dx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_dx", "avambraccio_dx", "mano_dx"], grid: { cols: 9, rows: 13 }, ...(sleeves.dx ? { sleeve: sleeves.dx } : {}) },
-    arm_sx: { role: "upper_arm", side: "sx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_sx", "avambraccio_sx", "mano_sx"], grid: { cols: 9, rows: 13 }, ...(sleeves.sx ? { sleeve: sleeves.sx } : {}) }
+    arm_dx: { role: "upper_arm", side: "dx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_dx", "avambraccio_dx", "mano_dx"], chainSkin: { bones: ["omero_dx", "avambraccio_dx", "mano_dx"], root: "torace" }, grid: { cols: 9, rows: 13 }, ...(sleeves.dx ? { sleeve: sleeves.dx } : {}) },
+    arm_sx: { role: "upper_arm", side: "sx", covers: ["upper_arm", "forearm", "hand"], skin: ["torace", "omero_sx", "avambraccio_sx", "mano_sx"], chainSkin: { bones: ["omero_sx", "avambraccio_sx", "mano_sx"], root: "torace" }, grid: { cols: 9, rows: 13 }, ...(sleeves.sx ? { sleeve: sleeves.sx } : {}) }
   };
   report.layout = "grid";
   return faceAndKit({ ref, faceSheet, f, report, opt: { headFlood: false, eyeSearch: "geo", ...opt }, s, torso, head, roles, P, extra });

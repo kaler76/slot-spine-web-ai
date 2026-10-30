@@ -18,12 +18,14 @@ export function loadRuntime(json, images) {
   return { data, page };
 }
 
-export function renderPose(sk, page, { box, scale = 0.5, bg = [36, 38, 48, 255] }) {
+export function renderPose(sk, page, { box, scale = 0.5, bg = [36, 38, 48, 255], hide = null }) {
   const fw = Math.round(box.width * scale), fh = Math.round(box.height * scale);
   const out = new Float32Array(fw * fh * 3);
+  const cov = new Float32Array(fw * fh); // copertura (alfa accumulato) per buchi e strappi
   for (let i = 0; i < fw * fh; i++) { out[i * 3] = bg[0]; out[i * 3 + 1] = bg[1]; out[i * 3 + 2] = bg[2]; }
   const tex = (u, v) => { const x = Math.min(page.width - 1, Math.max(0, Math.floor(u * page.width))), y = Math.min(page.height - 1, Math.max(0, Math.floor(v * page.height))); const i = (y * page.width + x) * 4; return page.rgba.subarray(i, i + 4); };
   for (const slot of sk.drawOrder) {
+    if (hide && hide(slot)) continue;
     const att = slot.getAttachment();
     if (!att || !(att instanceof spine.RegionAttachment || att instanceof spine.MeshAttachment)) continue;
     let verts, uvs, tris;
@@ -44,12 +46,14 @@ export function renderPose(sk, page, { box, scale = 0.5, bg = [36, 38, 48, 255] 
         const u = wa * uvs[ia * 2] + wb * uvs[ib * 2] + wc * uvs[ic * 2], v = wa * uvs[ia * 2 + 1] + wb * uvs[ib * 2 + 1] + wc * uvs[ic * 2 + 1];
         const t = tex(u, v); const al = (t[3] / 255) * alpha; if (al <= 0) continue;
         const o = (y * fw + x) * 3;
+        if (!add) cov[y * fw + x] += (1 - cov[y * fw + x]) * al;
         for (let ch = 0; ch < 3; ch++) out[o + ch] = add ? Math.min(255, out[o + ch] + t[ch] * al) : out[o + ch] * (1 - al) + t[ch] * al;
       }
     }
   }
   const png = new PNG({ width: fw, height: fh });
   for (let i = 0; i < fw * fh; i++) { png.data[i * 4] = out[i * 3]; png.data[i * 4 + 1] = out[i * 3 + 1]; png.data[i * 4 + 2] = out[i * 3 + 2]; png.data[i * 4 + 3] = 255; }
+  png.coverage = cov;
   return png;
 }
 

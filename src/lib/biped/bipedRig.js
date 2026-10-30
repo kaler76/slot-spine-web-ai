@@ -111,6 +111,7 @@ export function buildBipedSkeleton(kit) {
         // articolazioni, senza giunture (braccio intero con la manica, busto con il respiro)
         const skin = [...part.skin];
         let rules = [];
+        if (part.chainSkin) rules.push({ chain: part.chainSkin.bones, root: part.chainSkin.root, rootReach: part.chainSkin.rootReach, rootMax: part.chainSkin.rootMax, blend: part.chainSkin.blend });
         if (part.sleeve) {
           // MANICA dentro la mesh del braccio: catena di ossa figlie dell'avambraccio lungo l'orlo che
           // pende; pesa solo sulla stoffa lontana dall'avambraccio e dalla mano (il braccio resta braccio)
@@ -123,7 +124,7 @@ export function buildBipedSkeleton(kit) {
             names.push(nm);
           }
           skin.push(...names);
-          rules = [{ bones: names, awayFrom: [{ bone: parent, d: part.sleeve.armHalf }, { bone: `mano_${part.side}`, d: part.sleeve.armHalf * 1.2 }] }];
+          rules.push({ bones: names, awayFrom: [{ bone: parent, d: part.sleeve.armHalf }, { bone: `mano_${part.side}`, d: part.sleeve.armHalf * 1.2 }] });
           chains.push({ ...def, name: `manica_${part.side}`, kind: "sleeve", bones: names, parent });
         }
         for (const b of skin) if (!world[b]) throw new Error(`Pezzo ${part.name}: osso ${b} inesistente.`);
@@ -262,6 +263,46 @@ export function skinnedMesh(part, boneNames, world, S, bones, grid, rules = []) 
     return Math.hypot(x - (sg.ax + f * vx), y - (sg.ay + f * vy));
   };
   const scale = long * 0.04 + 1;
+  // ARTO A CATENA: ogni vertice si proietta sulla polilinea spalla→gomito→polso→dita e prende i pesi
+  // dalla posizione lungo l'arto (passaggio morbido solo attorno alle articolazioni). La stoffa che
+  // pende (manica a campana accanto al fianco) segue così l'osso a cui appartiene e non resta
+  // agganciata al busto: il busto pesa solo sulla calotta della spalla.
+  const chainWeights = (rule, sp) => {
+    const cs = rule.chain.map((nm) => segs.find((q) => q.nm === nm)).filter(Boolean);
+    const lens = cs.map((sg) => Math.hypot(sg.bx - sg.ax, sg.by - sg.ay) || 1);
+    let best = null, acc = 0;
+    cs.forEach((sg, i) => {
+      const vx = sg.bx - sg.ax, vy = sg.by - sg.ay, l2 = vx * vx + vy * vy || 1;
+      const f = Math.max(i === 0 ? -1 : 0, Math.min(i === cs.length - 1 ? 2 : 1, ((sp.x - sg.ax) * vx + (sp.y - sg.ay) * vy) / l2));
+      const fc = Math.max(0, Math.min(1, f));
+      const d = Math.hypot(sp.x - (sg.ax + fc * vx), sp.y - (sg.ay + fc * vy));
+      if (!best || d < best.d - 1e-6) best = { d, s: acc + f * lens[i] };
+      acc += lens[i];
+    });
+    const out = cs.map((sg) => ({ sg, w: 0 }));
+    let j = 0;
+    const joints = [];
+    for (let i = 0, a = 0; i < cs.length - 1; i++) { a += lens[i]; joints.push(a); }
+    // peso a gradini con rampe larghe h attorno a ogni articolazione
+    let w = cs.map(() => 0);
+    const s0 = best.s;
+    j = joints.findIndex((J) => s0 < J);
+    if (j < 0) j = cs.length - 1;
+    w[j] = 1;
+    for (let k = 0; k < joints.length; k++) {
+      const h = (rule.blend ?? 0.2) * Math.min(lens[k], lens[k + 1]);
+      const t = (s0 - (joints[k] - h)) / (2 * h);
+      if (t > 0 && t < 1) { const e = t * t * (3 - 2 * t); w = cs.map(() => 0); w[k] = 1 - e; w[k + 1] = e; break; }
+    }
+    out.forEach((o, i) => (o.w = w[i]));
+    if (rule.root) {
+      const rs = segs.find((q) => q.nm === rule.root);
+      const r = (rule.rootReach ?? 0.3) * lens[0];
+      const k = Math.max(0, Math.min(1, 1 - s0 / r)) * (rule.rootMax ?? 0.5);
+      if (rs && k > 0) { out.forEach((o) => (o.w *= 1 - k)); out.push({ sg: rs, w: k }); }
+    }
+    return out.filter((o) => o.w > 0);
+  };
   const order = [];
   for (let c = 0; c < cols; c++) order.push([0, c]);
   for (let r = 1; r < rows; r++) order.push([r, cols - 1]);
@@ -285,7 +326,10 @@ export function skinnedMesh(part, boneNames, world, S, bones, grid, rules = []) 
       }
       return g;
     };
-    let infl = segs.map((sg) => ({ sg, w: gate(sg.nm) / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) })).filter((i) => i.w > 0);
+    const chainRule = rules.find((r) => r.chain);
+    let infl = chainRule
+      ? chainWeights(chainRule, sp)
+      : segs.map((sg) => ({ sg, w: gate(sg.nm) / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) })).filter((i) => i.w > 0);
     infl.sort((a, b) => b.w - a.w);
     infl = infl.slice(0, 3);
     let sum = infl.reduce((a, i) => a + i.w, 0);
