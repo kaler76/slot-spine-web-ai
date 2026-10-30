@@ -208,30 +208,20 @@ function fillSkin(p, box) {
       }
 }
 
-/** Labbra / interno della bocca: rosso-rosa (tinta fra 330° e 12°), saturo; la pelle è arancio/pesca (15°–35°). */
-export function isLipColor(r, g, b) {
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
-  if (d < 60 || mx !== r) return false;
-  let h = ((g - b) / d) * 60;
-  if (h < 0) h += 360;
-  return (h <= 8 || h >= 330) && d / mx > 0.45;
-}
-
 /** Nucleo colorato (labbra, pelle) di un pezzo bocca con baffi/barba: riquadro dei pixel saturi. */
 function coloredCore(p) {
-  // riquadro ROBUSTO dei pixel delle labbra: percentili 8–92 (qualche pixel rosato sparso nella barba
-  // o nella pelle non deve allargare la bocca a tutto il pezzo)
-  const xs = [], ys = [];
+  let n = 0, sy = 0, mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
   for (let y = 0; y < p.height; y++)
     for (let x = 0; x < p.width; x++) {
       const i = (y * p.width + x) * 4;
       if (p.rgba[i + 3] < 200) continue;
-      if (isLipColor(p.rgba[i], p.rgba[i + 1], p.rgba[i + 2])) { xs.push(x); ys.push(y); }
+      const r = p.rgba[i], g = p.rgba[i + 1], b = p.rgba[i + 2];
+      const sat = Math.max(r, g, b) - Math.min(r, g, b);
+      // labbra e interno della bocca, non la pelle (la pelle rosata delle donne è satura anche lei):
+      // il rosso che si stacca dalla media di verde e blu
+      if (sat > 70 && r > g && r - (g + b) / 2 > 72) { n++; sy += y; mnx = Math.min(mnx, x); mxx = Math.max(mxx, x); mny = Math.min(mny, y); mxy = Math.max(mxy, y); }
     }
-  if (xs.length < 15) return null;
-  const q = (arr, f) => { const a = [...arr].sort((m, n) => m - n); return a[Math.min(a.length - 1, Math.floor(f * a.length))]; };
-  const mnx = q(xs, 0.08), mxx = q(xs, 0.92), mny = q(ys, 0.08), mxy = q(ys, 0.92);
-  return { cy: ys.reduce((a, v) => a + v, 0) / ys.length, cy0: (mny + mxy) / 2, cx: (mnx + mxx) / 2, w: mxx - mnx, h: mxy - mny };
+  return n < 15 ? null : { cy: sy / n, cx: (mnx + mxx) / 2, w: mxx - mnx, h: mxy - mny };
 }
 
 /** Larghezza del bianco dell'occhio (da angolo ad angolo) nel pezzo occhio della tavola. */
@@ -589,21 +579,6 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
     const variants = {};
     // bocche della tavola un po' più grandi della misura sulle labbra (verifica dell'utente su Zeus: +12%)
     const OPEN_K = opt.mouthScale ?? 1.12;
-    // labbra ORIGINALI (rosse, nella posa): la bocca aperta deve coprirle tutte, altrimenti attorno
-    // alla bocca aperta resta la bocca chiusa (doppia bocca)
-    let refLips = null;
-    if (mouthCenterY != null) {
-      const bx0 = Math.round(mid - 1.4 * half), by0 = Math.round(mouthCenterY - 0.7 * half);
-      const bw = Math.round(2.8 * half), bh = Math.round(1.4 * half);
-      const cut = { width: bw, height: bh, rgba: new Uint8ClampedArray(bw * bh * 4) };
-      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) {
-        const gx = bx0 + x, gy = by0 + y;
-        if (gx < 0 || gy < 0 || gx >= ref.width || gy >= ref.height) continue;
-        cut.rgba.set(ref.rgba.subarray((gy * ref.width + gx) * 4, (gy * ref.width + gx) * 4 + 4), (y * bw + x) * 4);
-      }
-      refLips = coloredCore(cut);
-      if (refLips) report.face.refLips = { w: Math.round(refLips.w), h: Math.round(refLips.h) };
-    }
     row2.slice(0, 5).forEach((p, i) => {
       const sp = scalePiece(p, s * MK * OPEN_K);
       const c = coloredCore(sp);
@@ -613,12 +588,11 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       // con il viso in mesh la bocca è sopra la barba ORIGINALE: si tiene solo l'interno della bocca
       // (ellisse sfumata attorno a labbra e denti), non i baffi e la barba disegnati nella tavola
       if (c && opt.faceMesh !== false) {
-        // ellisse stretta su labbra e interno (i baffi originali stanno sopra, la barba sotto è della testa)
-        const rx = Math.max(c.w / 2 + 1, refLips ? refLips.w * 0.72 : 0), ry = Math.max(c.h / 2, c.w * 0.16, refLips ? refLips.h * 0.75 : 0) + 1;
+        const rx = c.w / 2 + 3, ry = Math.max(c.h / 2, c.w * 0.18) + 3;
         for (let yy = 0; yy < sp.height; yy++)
           for (let xx = 0; xx < sp.width; xx++) {
-            const d = Math.hypot((xx - c.cx) / rx, (yy - (c.cy0 ?? c.cy)) / ry);
-            const k = d < 0.85 ? 1 : d > 1 ? 0 : (1 - d) / 0.15;
+            const d = Math.hypot((xx - c.cx) / rx, (yy - c.cy) / ry);
+            const k = d < 0.8 ? 1 : d > 1 ? 0 : (1 - d) / 0.2;
             sp.rgba[(yy * sp.width + xx) * 4 + 3] *= k;
           }
       }
@@ -637,7 +611,7 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
   // occhi, sopracciglia e bocca a riposo, ritagliati dalla posa, si INCORPORANO nella testa, che
   // diventa una mesh unica; le espressioni sono deformazioni della mesh (poseAnimator). Restano pezzi a
   // sé solo le palpebre del battito e le bocche aperte (interno della bocca, con trasparenza).
-  let faceGeo = null, mustachePart = null;
+  let faceGeo = null;
   if (opt.faceMesh !== false && faceParts.length === 4 && mouth?.variants.neutral) {
     const paste = (pc, x0, y0) => {
       for (let y = 0; y < pc.height; y++)
@@ -726,58 +700,6 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       mouth: { x: mid2, y: mouthCenterY ?? report.face.eyeY + 1.9 * half2, w: zm2?.refW ?? 1.6 * half2 },
       u: 2 * half2
     };
-    // BAFFI IN UN LIVELLO A PARTE (sopra le bocche aperte): con la bocca aperta sotto i baffi non deve
-    // restare la bocca chiusa della testa né comparire baffi diversi dalla tavola. I baffi ORIGINALI
-    // (pixel chiari poco saturi fra la base del naso e le labbra) diventano una mesh sopra la bocca,
-    // deformata come il viso: centrati e identici all'originale per costruzione. Solo se c'è la barba.
-    if (opt.mustache !== false) {
-      const mid3 = faceGeo.mouth.x, my = faceGeo.mouth.y, hf = report.face.half;
-      const x0 = Math.round(mid3 - 1.7 * hf), x1 = Math.round(mid3 + 1.7 * hf);
-      // solo i baffi: dalla base del naso alla linea delle labbra (la barba sotto le labbra resta nella
-      // testa e scende con il mento)
-      const y0 = Math.round(my - 0.95 * hf), y1 = Math.round(my - 0.02 * hf);
-      const w = x1 - x0 + 1, h = y1 - y0 + 1;
-      const m = new Uint8Array(w * h);
-      let n = 0;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const gx = x + x0, gy = y + y0;
-        if (gx < 0 || gy < 0 || gx >= ref.width || gy >= ref.height) continue;
-        const i = (gy * ref.width + gx) * 4, r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2];
-        if (Math.max(r, g, b) - Math.min(r, g, b) < 55 && (r + g + b) / 3 > 150) { m[y * w + x] = 1; n++; }
-      }
-      // per colonna: i baffi finiscono dove comincia il labbro (rosso) o la riga scura della bocca
-      for (let x = 0; x < w; x++) {
-        let cut = -1;
-        for (let y = Math.round(h * 0.4); y < h; y++) {
-          const gx = x + x0, gy = y + y0;
-          if (gx < 0 || gy < 0 || gx >= ref.width || gy >= ref.height) continue;
-          const i = (gy * ref.width + gx) * 4, r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2];
-          if (isLipColor(r, g, b) || r + g + b < 150) { cut = y; break; }
-        }
-        if (cut >= 0) for (let y = cut; y < h; y++) if (m[y * w + x]) { m[y * w + x] = 0; n--; }
-      }
-      if (n > w * h * 0.15) {
-        // contorno scuro attorno ai peli (2 px) e bordo morbido
-        for (let it = 0; it < 2; it++) {
-          const add = [];
-          for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
-            const k = y * w + x;
-            if (m[k] || !(m[k - 1] || m[k + 1] || m[k - w] || m[k + w])) continue;
-            const i = ((y + y0) * ref.width + x + x0) * 4;
-            if (ref.rgba[i] + ref.rgba[i + 1] + ref.rgba[i + 2] < 330) add.push(k);
-          }
-          for (const k of add) m[k] = 1;
-        }
-        const rgba = new Uint8ClampedArray(w * h * 4);
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-          if (!m[y * w + x]) continue;
-          const i = ((y + y0) * ref.width + x + x0) * 4, o = (y * w + x) * 4;
-          rgba[o] = ref.rgba[i]; rgba[o + 1] = ref.rgba[i + 1]; rgba[o + 2] = ref.rgba[i + 2]; rgba[o + 3] = 255;
-        }
-        mustachePart = { x: x0, y: y0, width: w, height: h, rgba };
-        report.face.mustache = { box: [x0, y0, w, h], share: +(n / (w * h)).toFixed(2) };
-      }
-    }
     // REGOLA DEL VISO 2 (proporzioni): attaccatura→sopracciglia, sopracciglia→base del naso e base
     // del naso→mento sono tre terzi uguali (T); la bocca sta a 1/3 del terzo inferiore; gli occhi a
     // metà della testa (cima dei capelli = 1/6 sopra l'attaccatura). Da sopracciglia e bocca:
@@ -839,7 +761,6 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
     put(`${fp.role}_${fp.side}`, { ...fp.piece, x: fp.x, y: fp.y }, { role: fp.role, side: fp.side });
     report.pieces.push({ role: `${fp.role}_${fp.side}`, err: Math.round(fp.err), scale: fp.scale });
   }
-  if (mustachePart) put("mustache", mustachePart, { role: "mustache", mesh: true });
   for (const lp of lidParts) put(`lid_${lp.side}`, { ...lp.piece, x: lp.x, y: lp.y }, { role: "lid", side: lp.side });
   if (mouth) {
     const variants = {};

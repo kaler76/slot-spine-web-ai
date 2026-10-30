@@ -218,11 +218,6 @@ export function buildAnimation(rig, spec) {
       return o;
     });
     anim.deform = { default: { [fm.slot]: { [fm.attachment]: keys } } };
-    // mesh del viso aggiuntive (baffi): stesse espressioni, sui loro vertici
-    for (const ex of fm.extra || []) {
-      const fx = { ...fm, imgPts: ex.imgPts, rot: ex.rot };
-      anim.deform.default[ex.slot] = { [ex.attachment]: keys.map((k, i) => ({ ...k, vertices: faceOffsets(fx, faceKeys[i].ex) })) };
-    }
   }
   json.animations[spec.name] = anim;
   if (!Object.keys(anim.slots).length) delete anim.slots;
