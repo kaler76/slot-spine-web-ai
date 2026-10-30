@@ -29,7 +29,7 @@ const DEFAULT_LAYER = {
   "chain:hair_back": 0, "chain:cape": 1, "chain:tail": 2,
   thigh: 10, shin: 11, foot: 12, pelvis: 13, torso: 20,
   upper_arm: 30, forearm: 31, hand: 32, prop: 33,
-  head: 40, eye: 41, lid: 41.5, brow: 42, mouth: 43, "chain:hair": 44, "chain:ribbon": 45, fx: 60
+  head: 40, eye: 41, lid: 41.5, brow: 42, mouth: 43, mustache: 43.5, "chain:hair": 44, "chain:ribbon": 45, fx: 60
 };
 
 export function buildBipedSkeleton(kit) {
@@ -100,6 +100,7 @@ export function buildBipedSkeleton(kit) {
 
   const chains = [];
   let faceMesh = null;
+  const faceExtra = [];
   for (const part of kit.parts) {
     let bone, layerKey = part.role, slot = { name: part.name, attachment: part.name };
     if (PART_ROLES[part.role]) {
@@ -119,6 +120,12 @@ export function buildBipedSkeleton(kit) {
       bone = `${part.role === "eye" ? "occhio" : "sopracciglio"}_${part.side}`;
       addBone(bone, "viso", { x: part.x + part.width / 2, y: part.y + part.height / 2 }, null);
       attachments[part.name] = { [part.name]: regionAt(bone, part) };
+    } else if (part.role === "mustache") {
+      // baffi originali in mesh sopra le bocche aperte: si deformano come il viso (stesse espressioni)
+      bone = "testa";
+      const m = gridMesh(part, world[bone], S, 10, 6);
+      attachments[part.name] = { [part.name]: m.att };
+      faceExtra.push({ slot: part.name, attachment: part.name, bone, imgPts: m.imgPts, rot: world[bone].rot });
     } else if (part.role === "lid") {
       // palpebra chiusa: pezzo a sé sopra l'occhio, invisibile a riposo, visibile solo nel battito
       bone = `palpebra_${part.side}`;
@@ -183,7 +190,7 @@ export function buildBipedSkeleton(kit) {
     skins: [{ name: "default", attachments }],
     animations: {}
   };
-  return { json, meta: { rulesVersion: BIPED_RULES_VERSION, body, chains, world, origin: { x: ox, y: oy }, ...(faceMesh && kit.face ? { faceMesh: { ...faceMesh, face: kit.face } } : {}) } };
+  return { json, meta: { rulesVersion: BIPED_RULES_VERSION, body, chains, world, origin: { x: ox, y: oy }, ...(faceMesh && kit.face ? { faceMesh: { ...faceMesh, face: kit.face, extra: faceExtra } } : {}) } };
 }
 
 /**
