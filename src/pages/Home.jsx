@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import SlotReels from "../components/ui/SlotReels.jsx";
 import { listSymbolsWithAnimations } from "../lib/symbolsRepository.js";
 import { listCharactersWithParts } from "../lib/charactersRepository.js";
 import { listBackgroundsWithLayers } from "../lib/backgroundsRepository.js";
@@ -50,8 +51,16 @@ export default function Home() {
 
   return (
     <div className="page">
-      <h1>🎰 Slot Spine Generator</h1>
-      <div className="subtitle">Pipeline di animazione automatica per grafiche slot machine</div>
+      <header className="home-head">
+        <div>
+          <h1>Slot Spine Generator</h1>
+          <div className="subtitle">Dalla grafica della slot alle animazioni Spine 4.1, nel browser.</div>
+        </div>
+        <Link to="/vetrina" className="home-head-reels" aria-label="Apri la vetrina per i clienti">
+          <SlotReels state="win" result={["seven", "seven", "seven"]} size={30} label="Vetrina" />
+          <span>Vetrina per i clienti</span>
+        </Link>
+      </header>
 
       <div className="cards-grid">
         <Link to="/project" className="card">
@@ -126,7 +135,7 @@ export default function Home() {
           <div className="card-title">Personaggio animato</div>
           <span className="status-badge progress">Nuovo</span>
           <div className="card-desc">
-            Dalle 3 tavole del kit (posa, corpo, viso) al pacchetto Spine 4.1 con ossa, IK, viso in mesh e 6 animazioni.
+            Dalle 3 tavole del kit (posa, corpo, viso) al pacchetto Spine 4.1 con ossa, IK, viso in mesh e 8 animazioni.
           </div>
         </Link>
         <Link to="/reels" className="card">
@@ -162,7 +171,7 @@ export default function Home() {
         </>
       )}
 
-      {loading && <div className="status">⏳ Carico...</div>}
+      {loading && <div className="page-loading" style={{ minHeight: 160 }}><SlotReels state="spin" size={34} label="Carico i lavori recenti" /></div>}
     </div>
   );
 }

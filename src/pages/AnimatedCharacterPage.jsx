@@ -1,5 +1,5 @@
 // Pagina "Personaggio animato": dalle 3 tavole del kit (posa neutra, corpo esploso, viso) al pacchetto
-// Spine 4.1 con le 6 animazioni della libreria biped, viso in mesh ed espressioni deformate.
+// Spine 4.1 con le animazioni della libreria biped, viso in mesh ed espressioni deformate.
 // Tutto client-side (Web Worker), niente Supabase: per ora si caricano tavole già generate.
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -9,6 +9,10 @@ import "@esotericsoftware/spine-player/dist/spine-player.css";
 import { ANIMATIONS } from "../lib/biped/animationLibrary.js";
 import { KIT_IMPORT_VERSION } from "../lib/biped/kitImport.js";
 import { BIPED_RULES_VERSION } from "../lib/biped/bipedSpec.js";
+import ActionButton from "../components/ui/ActionButton.jsx";
+import BusyStage from "../components/ui/BusyStage.jsx";
+
+const STEPS = ["Leggo le tavole", "Ritaglio i pezzi e costruisco ossa e mesh", "Genero le animazioni e l'anteprima"];
 
 const SLOTS = [
   { key: "reference", label: "1 · Posa neutra", hint: "personaggio intero in posa neutra, fondo chroma (es. zeus_neutro.png)" },
@@ -44,6 +48,7 @@ export default function AnimatedCharacterPage() {
   const [layout, setLayout] = useState("zeus");
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState(-1); // fase in corso (palco dell'attesa); STEPS.length = finito
   const [pkg, setPkg] = useState(null);
   const [anim, setAnim] = useState("intro");
   const playerBox = useRef(null);
@@ -65,10 +70,11 @@ export default function AnimatedCharacterPage() {
   async function run() {
     setBusy(true);
     setPkg(null);
-    setStatus("⏳ Lettura delle immagini…");
+    setStatus("");
+    setStep(0);
     try {
       const [reference, bodySheet, faceSheet] = await Promise.all(SLOTS.map((s) => fileToImage(files[s.key])));
-      setStatus("⏳ Importazione del kit, rig e animazioni (alcuni secondi)…");
+      setStep(1);
       const worker = new Worker(new URL("../lib/biped/bipedWorker.js", import.meta.url), { type: "module" });
       const res = await new Promise((resolve) => {
         worker.onmessage = (e) => resolve(e.data);
@@ -77,12 +83,16 @@ export default function AnimatedCharacterPage() {
       });
       worker.terminate();
       if (!res.ok) throw new Error(res.error);
+      setStep(2);
       const pagePng = await rgbaToPngBlob(res.page);
       setPkg({ ...res, pagePng });
       const w = res.report.warnings || [];
-      setStatus(`✅ Pronto in ${res.seconds.toFixed(1)} s · ${res.json.bones.length} ossa · ${Object.keys(res.json.animations).length} animazioni` + (w.length ? ` · ⚠️ ${w.join(" · ")}` : ""));
+      setStep(STEPS.length);
+      setTimeout(() => setStep(-1), 2200);
+      setStatus(`Pronto in ${res.seconds.toFixed(1)} s: ${res.json.bones.length} ossa, ${Object.keys(res.json.animations).length} animazioni.` + (w.length ? ` Attenzione: ${w.join("; ")}` : ""));
     } catch (err) {
-      setStatus(`❌ ${err.message}`);
+      setStep(-1);
+      setStatus(`Non riesco a creare il personaggio: ${err.message}`);
     } finally {
       setBusy(false);
     }
@@ -152,10 +162,10 @@ export default function AnimatedCharacterPage() {
   return (
     <div className="page page-wide">
       <p><Link to="/">← Home</Link></p>
-      <h1>🎭 Personaggio animato <span style={{ fontSize: 13, fontWeight: 400, opacity: 0.75 }}>· {BIPED_RULES_VERSION}</span></h1>
+      <h1>🎭 Personaggio animato <span className="ver">{BIPED_RULES_VERSION}</span></h1>
       <div className="hint">
         Carica le 3 tavole del kit (fondo chroma). L'app ritaglia i pezzi, li rimette sulla posa, costruisce ossa e IK
-        entro i limiti anatomici, incorpora il viso originale in una mesh e genera 6 animazioni: {ANIMATIONS.join(", ")}.
+        entro i limiti anatomici, incorpora il viso originale in una mesh e genera {ANIMATIONS.length} animazioni: {ANIMATIONS.join(", ")}.
         Esporta Spine 4.1. Per Zeus: le tavole sono nella cartella <code>tavole/</code> dello zip di prova.
       </div>
 
@@ -179,16 +189,19 @@ export default function AnimatedCharacterPage() {
           </select>
         </label>
         <label>Nome <input value={name} onChange={(e) => setName(e.target.value.replace(/[^a-z0-9_-]/gi, "_"))} /></label>
-        <button className="btn" disabled={!ready || busy} onClick={run}>{busy ? "Elaborazione…" : "🦴 Crea personaggio animato"}</button>
-        {pkg && <button className="btn" onClick={download}>⬇️ Scarica zip Spine 4.1</button>}
+        <ActionButton busy={busy} busyLabel="Creo il personaggio…" doneLabel="Personaggio pronto" disabled={!ready} onClick={run}>Crea personaggio animato</ActionButton>
+        {pkg && <ActionButton className="btn secondary" onClick={download}>Scarica lo zip Spine 4.1</ActionButton>}
       </div>
-      {status && <p style={{ marginTop: 12 }}>{status}</p>}
+      {step >= 0 && (
+        <BusyStage title="Creo il personaggio animato" doneTitle="Personaggio pronto" steps={STEPS} step={Math.min(step, STEPS.length - 1)} done={step >= STEPS.length} result={["crown", "crown", "crown"]} />
+      )}
+      {status && step < 0 && <p className={`status${status.startsWith("Non riesco") ? " error" : ""}`}>{status}</p>}
 
       {pkg && (
         <div className="card" style={{ marginTop: 16, padding: 16 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             {Object.keys(pkg.json.animations).map((a) => (
-              <button key={a} className="btn" style={{ opacity: a === anim ? 1 : 0.6 }} onClick={() => play(a)}>{a}</button>
+              <button key={a} className={a === anim ? "btn tiny" : "btn tiny secondary"} aria-pressed={a === anim} onClick={() => play(a)}>{a}</button>
             ))}
           </div>
           <div ref={playerBox} style={{ width: "100%", height: 620 }} />

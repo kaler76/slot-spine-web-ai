@@ -1,19 +1,26 @@
 import { Routes, Route } from "react-router-dom";
-import Home from "./pages/Home.jsx";
-import SymbolsList from "./pages/SymbolsList.jsx";
-import SymbolPage from "./pages/SymbolPage.jsx";
-import CharactersList from "./pages/CharactersList.jsx";
-import CharacterPage from "./pages/CharacterPage.jsx";
-import BackgroundsList from "./pages/BackgroundsList.jsx";
-import BackgroundPage from "./pages/BackgroundPage.jsx";
-import ReelsPage from "./pages/ReelsPage.jsx";
-import ImportAztecPage from "./pages/ImportAztecPage.jsx";
-import ProjectPage from "./pages/ProjectPage.jsx";
-import RecognizePage from "./pages/RecognizePage.jsx";
-import AnimatedCharacterPage from "./pages/AnimatedCharacterPage.jsx";
+import { lazy, Suspense } from "react";
+import SlotReels from "./components/ui/SlotReels.jsx";
+
+// pagine caricate a richiesta: l'app parte subito, ogni strumento si scarica quando lo si apre
+const Home = lazy(() => import("./pages/Home.jsx"));
+const SymbolsList = lazy(() => import("./pages/SymbolsList.jsx"));
+const SymbolPage = lazy(() => import("./pages/SymbolPage.jsx"));
+const CharactersList = lazy(() => import("./pages/CharactersList.jsx"));
+const CharacterPage = lazy(() => import("./pages/CharacterPage.jsx"));
+const BackgroundsList = lazy(() => import("./pages/BackgroundsList.jsx"));
+const BackgroundPage = lazy(() => import("./pages/BackgroundPage.jsx"));
+const ReelsPage = lazy(() => import("./pages/ReelsPage.jsx"));
+const ImportAztecPage = lazy(() => import("./pages/ImportAztecPage.jsx"));
+const ProjectPage = lazy(() => import("./pages/ProjectPage.jsx"));
+const RecognizePage = lazy(() => import("./pages/RecognizePage.jsx"));
+const AnimatedCharacterPage = lazy(() => import("./pages/AnimatedCharacterPage.jsx"));
+const ShowcasePage = lazy(() => import("./pages/ShowcasePage.jsx"));
+
 
 export default function App() {
   return (
+    <Suspense fallback={<div className="page-loading"><SlotReels state="spin" size={52} label="Apro la pagina" /></div>}>
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/symbols" element={<SymbolsList />} />
@@ -27,6 +34,8 @@ export default function App() {
       <Route path="/project" element={<ProjectPage />} />
       <Route path="/recognize" element={<RecognizePage />} />
       <Route path="/personaggio-animato" element={<AnimatedCharacterPage />} />
+      <Route path="/vetrina" element={<ShowcasePage />} />
     </Routes>
+    </Suspense>
   );
 }

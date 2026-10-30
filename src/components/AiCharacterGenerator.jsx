@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabaseClient.js";
 import SpriteSheetImporter from "./SpriteSheetImporter.jsx";
+import ActionButton from "./ui/ActionButton.jsx";
+import BusyStage from "./ui/BusyStage.jsx";
 
 function base64ToBlob(base64, mimeType = "image/png") {
   const bytes = atob(base64);
@@ -523,16 +525,15 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
         </>
       )}
 
-      <button type="button" className="btn" onClick={handleGenerate} disabled={generating}>
-        {generating
-          ? "⏳ Generazione..."
-          : result
-            ? "🔄 Rigenera sprite sheet"
-            : useReference && hasExistingParts
-              ? "🎨 Ricostruisci sprite sheet dall'immagine"
-              : "🎨 Genera sprite sheet completa"}
-      </button>
+      <ActionButton type="button" busy={generating} busyLabel="Genero la sprite sheet…" doneLabel="Sprite sheet pronta" onClick={handleGenerate}>
+        {result
+          ? "Rigenera la sprite sheet"
+          : useReference && hasExistingParts
+            ? "Ricostruisci la sprite sheet dall'immagine"
+            : "Genera la sprite sheet completa"}
+      </ActionButton>
 
+      {generating && <BusyStage title="Genero la sprite sheet con l'AI" steps={["Preparo il prompt", "L'AI disegna i pezzi", "Controllo e ritaglio il foglio"]} step={/tentativ|controll|verific/i.test(status) ? 2 : 1} />}
       {status && <div className="status">{status}</div>}
 
       {result?.blob && (
@@ -635,9 +636,10 @@ export default function AiCharacterGenerator({ characterId, existingParts, onImp
             </label>
           )}
 
-          <button type="button" className="btn" onClick={handleGenerateSingle} disabled={generatingSingle}>
-            {generatingSingle ? "⏳ Generazione 2 varianti..." : "🎨 Genera 2 varianti di questo elemento"}
-          </button>
+          <ActionButton type="button" busy={generatingSingle} busyLabel="Genero 2 varianti…" doneLabel="Varianti pronte" onClick={handleGenerateSingle}>
+            Genera 2 varianti di questo elemento
+          </ActionButton>
+          {generatingSingle && <BusyStage title="Genero 2 varianti dell'elemento" />}
 
           {singleVariants && (
             <div className="ai-single-variants-grid">
