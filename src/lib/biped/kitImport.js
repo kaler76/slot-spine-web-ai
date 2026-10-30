@@ -948,11 +948,16 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
   // copre E che accetta il suo colore (mantello: viola; capelli: lilla/chiari; busto e braccia: blu,
   // pelle; testa: tutto; neutri come argento e contorni: chiunque), altrimenti al pezzo compatibile
   // più vicino. Nel pezzo: pixel della posa dove è suo, disegno della tavola dove è nascosto.
+  // spalle: dalla calotta disegnata nella TAVOLA (prima di prendere i pixel della posa, dove la spalla
+  // è coperta da capelli e mantello: dopo, la cima del braccio sarebbe la manica sotto i capelli e il
+  // braccio girerebbe "segato" all'altezza del deltoide)
+  const sheetArm = { dx: { ...armDx }, sx: { ...armSx } };
   const layered = [cape, hair, torso, armDx, armSx, head, lockDx, lockSx];
   const accepts = new Map([[cape, "CN"], [hair, "HN"], [lockDx, "HN"], [lockSx, "HN"], [torso, "BKN"], [armDx, "BKN"], [armSx, "BKN"], [head, "HCBKN"]]);
   // la testa possiede solo i pixel dentro la propria sagoma (niente "più vicino"): il petto sotto il
   // mento va al busto, non alla testa
-  const own = ownByColor(layered, ref, accepts, { grow: 6, reach: 60, strict: new Set([head]) });
+  const own = ownByColor(layered, ref, accepts, { grow: 6, reach: 60, strict: new Set([head]), prefer: { 1: { pieces: [lockDx, lockSx], reach: 1e9, over: [torso, armDx, armSx] } } });
+  // (capelli chiari che stanno SOPRA busto e braccia = ciocche davanti; quelli ai lati = capelli dietro)
   layered.forEach((p, k) => { if (p !== head) Object.assign(p, own.pieces[k]); });
   report.ownership = own.stats;
 
@@ -969,7 +974,7 @@ function importGrid({ ref, bodySheet, faceSheet, f, report, opt }) {
   for (const [sd, arm, hand] of [["dx", armDx, handDx], ["sx", armSx, handSx]]) {
     const ax = limbAxis(hand);
     const [wr, ft] = ax.tipA.y <= ax.tipB.y ? [ax.a, ax.tipB] : [ax.b, ax.tipA];
-    const sh = capCenter(arm, 0.1);
+    const sh = capCenter(sheetArm[sd], 0.08);
     P[`shoulder_${sd}`] = sh;
     P[`wrist_${sd}`] = wr;
     P[`fingertip_${sd}`] = ft;
@@ -1197,7 +1202,7 @@ export function colorClass(r, g, b) {
  * accepts: Map pezzo → classi accettate. Restituisce i pezzi con rgba nuovo (stesso riquadro
  * allargato alla parte presa dalla posa) e le statistiche.
  */
-function ownByColor(pieces, ref, accepts, { grow = 6, reach = 40, strict = new Set() } = {}) {
+function ownByColor(pieces, ref, accepts, { grow = 6, reach = 40, strict = new Set(), prefer = null } = {}) {
   const W = ref.width, H = ref.height, N = W * H;
   const fg = new Uint8Array(N), cls = new Uint8Array(N);
   const CODE = { H: 1, C: 2, B: 3, K: 4, N: 5 };
@@ -1235,6 +1240,14 @@ function ownByColor(pieces, ref, accepts, { grow = 6, reach = 40, strict = new S
   for (let i = 0; i < N; i++) {
     if (!fg[i]) continue;
     let k = -1;
+    // preferenze per classe (es. i capelli chiari sopra le spalle sono delle CIOCCHE DAVANTI, non dei
+    // capelli dietro: così il braccio sotto tiene la sua spalla disegnata e non resta "segato")
+    const pref = prefer?.[cls[i]];
+    if (pref && (!pref.over || pref.over.some((pc) => { const j = pieces.indexOf(pc); return j >= 0 && dists[j][i] <= 2; }))) {
+      let bd = Infinity;
+      for (const pc of pref.pieces) { const j = pieces.indexOf(pc); if (j >= 0 && dists[j][i] <= pref.reach && dists[j][i] < bd) { bd = dists[j][i]; k = j; } }
+      if (k >= 0) { byFront++; owner[i] = k; continue; }
+    }
     for (let j = pieces.length - 1; j >= 0; j--) if (dists[j][i] <= (strict.has(pieces[j]) ? 0 : grow) && acc[j].has(cls[i])) { k = j; break; }
     if (k >= 0) { byFront++; owner[i] = k; continue; }
     let bd = 65535;
