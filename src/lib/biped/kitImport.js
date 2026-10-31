@@ -13,6 +13,7 @@
 
 import { keyBackground, splitComponents, cutPiece, alignPiece, estimateScale, scalePiece } from "../explodedSheet.js";
 import { transplantOriginal } from "../sheetAssembly.js";
+import { underlayJoints } from "../jointUnderlay.js";
 
 export const KIT_IMPORT_VERSION = "2026-10-29.kit.1";
 const MOUTHS = ["neutral", "open", "o", "smile", "sad"];
@@ -340,6 +341,56 @@ export function importBipedKit({ reference, bodySheet, faceSheet }, opt = {}) {
   P.neck = { x: hcx, y: colTop(torso, hcx) };
   P.crown = { x: hcx, y: colTop(head, hcx) };
   P.waist = { x: torso.x + torso.width / 2, y: torso.y + torso.height * 0.92 };
+
+  // PIXEL VISIBILI DALL'ORIGINALE (regola della tavola esplosa: la tavola serve solo per le zone
+  // nascoste). Ogni pixel della posa va al pezzo più davanti che lo copre; braccia e busto prendono i
+  // colori veri della posa (il Francese: maniche ridisegnate più strette, pantaloni assenti nella
+  // tavola). La testa partecipa solo per non cedere il viso al busto: il suo pezzo resta quello della
+  // tavola, perché il viso lo ricompone R7 più avanti. Ciò che nessun pezzo copre (es. pantaloni)
+  // va al busto.
+  if (opt.transplant !== false) {
+    const ORDER = { hair_back: 0, torso: 1, upper_arm: 2, forearm: 3, hand: 4, head: 5 };
+    const NAME = { hair_back: "capelli", torso: "busto", upper_arm: "braccio", forearm: "avambraccio", hand: "mano", head: "testa" };
+    const list = [...roles].map(([pc, role]) => {
+      const base = role.replace(/_(dx|sx)$/, "");
+      pc.order = ORDER[base]; pc.name = NAME[base] + (role.match(/_(dx|sx)$/)?.[0] || "");
+      return pc;
+    });
+    const tr = transplantOriginal(list, ref, { maxFill: Math.round(0.05 * ref.width) });
+    const byOld = new Map(list.map((pc, i) => [pc, tr.pieces[i]]));
+    let mergedRest = 0;
+    for (const [pc, nw] of byOld) {
+      if (pc === head) continue; // la testa resta quella della tavola (R7)
+      Object.assign(pc, { x: nw.x, y: nw.y, width: nw.width, height: nw.height, rgba: nw.rgba });
+    }
+    // resti scoperti (pantaloni, oggetti non disegnati nella tavola) dentro il busto
+    for (const r of tr.rest || []) {
+      const x0 = Math.min(torso.x, r.x), y0 = Math.min(torso.y, r.y), x1 = Math.max(torso.x + torso.width, r.x + r.width), y1 = Math.max(torso.y + torso.height, r.y + r.height);
+      const w = x1 - x0, h = y1 - y0, px = new Uint8ClampedArray(w * h * 4);
+      for (const q of [torso, r]) for (let y = 0; y < q.height; y++) for (let x = 0; x < q.width; x++) {
+        const si = (y * q.width + x) * 4; if (!q.rgba[si + 3]) continue;
+        const di = ((q.y - y0 + y) * w + (q.x - x0 + x)) * 4; px.set(q.rgba.subarray(si, si + 4), di);
+      }
+      Object.assign(torso, { x: x0, y: y0, width: w, height: h, rgba: px });
+      mergedRest += r.area || 0;
+    }
+    report.transplant = { holeShare: +tr.holeShare.toFixed(3), filledShare: +tr.filledShare.toFixed(3), restInTorso: mergedRest, iou: +tr.iou.toFixed(3) };
+    // SOVRAPPOSIZIONE AI RACCORDI (jointUnderlay): dove braccio/avambraccio/mano coprono a riposo e
+    // dietro non c'è nulla, il pezzo dietro si allunga sotto di loro: piegando non si aprono crepe
+    const PARENT = { braccio: ["busto", "shoulder"], avambraccio: ["braccio", "elbow"], mano: ["avambraccio", "wrist"] };
+    const ul = list.filter((pc) => pc !== head && pc !== hair).map((pc) => {
+      const m = pc.name.match(/^(braccio|avambraccio|mano)_(dx|sx)$/);
+      if (!m) return pc;
+      const [par, joint] = PARENT[m[1]];
+      return Object.assign(pc, { parent: par === "busto" ? "busto" : `${par}_${m[2]}`, pivot: P[`${joint}_${m[2]}`] });
+    });
+    const under = underlayJoints(ul, { reach: 0.25, maxPx: Math.round(0.06 * ref.width) });
+    for (const nw of under.pieces) {
+      const pc = ul.find((q) => q.name === nw.name);
+      if (pc && nw !== pc) Object.assign(pc, { x: nw.x, y: nw.y, width: nw.width, height: nw.height, rgba: nw.rgba });
+    }
+    report.transplant.underlay = under.changes.map((c) => `${c.joint}→${c.into} +${c.added}`);
+  }
 
   return faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P });
 }
