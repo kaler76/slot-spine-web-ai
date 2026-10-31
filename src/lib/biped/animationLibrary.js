@@ -29,6 +29,7 @@ function features(rig) {
 /** Bocca solo se il kit ha quella variante. */
 const mouthIf = (F, v) => (F.mouth.has(v) ? { mouth: v } : {});
 
+// entrata su ARCO (non in verticale "a binario"): parte un po' di lato, sale curvando, atterra al centro
 export function introSpec(rig) {
   const F = features(rig), H = F.H, rest = restAnatomy(rig.json);
   const a = (side, o, f = rest[`avambraccio_${side}`]) => ({ [`omero_${side}`]: o, [`avambraccio_${side}`]: f });
@@ -36,8 +37,8 @@ export function introSpec(rig) {
   return {
     name: "intro",
     keys: [
-      { t: 0, ease: "out", pose: { jump: { x: 0, y: -0.55 * H }, squash: { x: 0.94, y: 1.08 }, ...a("sx", 150, 20), ...a("dx", 150, 20), ...feet(0), ...mouthIf(F, "open"), brows: 0.8 } },
-      { t: 0.32, ease: "in", pose: { jump: { x: 0, y: 0.07 * H }, squash: { x: 0.92, y: 1.1 }, ...a("sx", 165, 10), ...a("dx", 165, 10), ...feet(0.06 * H), ...mouthIf(F, "open"), brows: 1 } },
+      { t: 0, ease: "out", pose: { jump: { x: -0.07 * H, y: -0.55 * H }, squash: { x: 0.94, y: 1.08 }, ...a("sx", 150, 20), ...a("dx", 150, 20), ...feet(0), ...mouthIf(F, "open"), brows: 0.8 } },
+      { t: 0.32, ease: "in", pose: { jump: { x: 0.02 * H, y: 0.07 * H }, squash: { x: 0.92, y: 1.1 }, ...a("sx", 165, 10), ...a("dx", 165, 10), ...feet(0.06 * H), ...mouthIf(F, "open"), brows: 1 } },
       { t: 0.5, ease: "out", pose: { jump: { x: 0, y: 0 }, body: { x: 0, y: F.full ? -0.05 * H : -0.02 * H }, squash: { x: 1.12, y: 0.88 }, ...a("sx", 70, 30), ...a("dx", 70, 30), testa: -6, look: { x: 0, y: -0.5 }, ...feet(0) } },
       { t: 0.68, ease: "inOut", pose: { body: { x: 0, y: 0.01 * H }, squash: { x: 0.97, y: 1.03 }, ...a("sx", 40, -60), ...a("dx", 100, 60), testa: 4, look: { x: 0.2, y: 0.1 }, ...feet(0) } },
       { t: 0.95, ease: "out", pose: { ...a(F.weaponSide, 125, 45), [`mano_${F.weaponSide}`]: 25, ...a(mirror(F.weaponSide), 35, -105), testa: 8, look: { x: 0.45, y: 0.1 }, brows: 0.5, ...mouthIf(F, "smile"), ...feet(0) } },

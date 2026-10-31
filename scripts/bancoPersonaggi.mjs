@@ -134,6 +134,53 @@ export function benchCase(c, outDir) {
       frames.push({ anim: a, t: +t.toFixed(2), tears: Math.max(0, h.n - restHoles), drag: st.frac, dragSlot: `${st.worst[0]} ${(100 * st.worst[1]).toFixed(0)}%`, img, mask: h.mask });
     }
   }
+  // TRAIETTORIE (lezione Playtika: il movimento bello corre su archi, non su rette, e senza scatti).
+  // Per mani e testa, in ogni animazione: punti a 60 fps; arco = scostamento massimo dalla corda / corda
+  // (sotto 0,06 su un tragitto lungo = movimento "a binario"); scatto = picco della derivata seconda
+  // rispetto alla media (salto di velocità in un fotogramma oltre 1,1 volte la velocità massima: sopra il 90° percentile degli esempi ufficiali Spine); ciclo chiuso per idle.
+  const ends = ["mano_dx", "mano_sx", "testa"].filter((n) => sk.findBone(n));
+  const traj = {};
+  for (const a of Object.keys(rig.json.animations)) {
+    const an = data.findAnimation(a), n = Math.max(8, Math.round(an.duration * 60));
+    const pts = Object.fromEntries(ends.map((e) => [e, []]));
+    for (let i = 0; i <= n; i++) {
+      sk.setToSetupPose();
+      an.apply(sk, 0, (an.duration * i) / n, false, [], 1, spine.MixBlend.setup, spine.MixDirection.mixIn);
+      sk.updateWorldTransform();
+      for (const e of ends) { const b = sk.findBone(e); pts[e].push([b.worldX, b.worldY]); }
+    }
+    traj[a] = {};
+    for (const e of ends) {
+      const P = pts[e];
+      let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+      // il percorso si divide nei tratti tra due soste (minimi di velocità); per ogni tratto lungo,
+      // arco = scostamento massimo dalla corda / corda. Conta la parte di percorso fatta "a binario".
+      const sp = []; for (let i = 1; i < P.length; i++) sp.push(Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+      const cuts = [0];
+      for (let i = 1; i < sp.length - 1; i++) if (sp[i] <= sp[i - 1] && sp[i] < sp[i + 1] && sp[i] < 0.35 * Math.max(...sp)) cuts.push(i);
+      cuts.push(P.length - 1);
+      let straightLen = 0, longLen = 0, arcSum = 0;
+      for (let k = 0; k < cuts.length - 1; k++) {
+        const i0 = cuts[k], i1 = cuts[k + 1];
+        const [ax, ay] = P[i0], [bx, by] = P[i1], cl = Math.hypot(bx - ax, by - ay);
+        let segLen = 0; for (let i = i0 + 1; i <= i1; i++) segLen += sp[i - 1];
+        if (cl < 40) continue;
+        let dev = 0; for (let i = i0; i <= i1; i++) dev = Math.max(dev, Math.abs((P[i][0] - ax) * (by - ay) - (P[i][1] - ay) * (bx - ax)) / cl);
+        longLen += segLen; arcSum += (dev / cl) * segLen;
+        if (dev / cl < 0.06) straightLen += segLen;
+      }
+      const far = longLen, dev = arcSum, cl = longLen || 1;
+      const acc = []; for (let i = 1; i < P.length - 1; i++) acc.push(Math.hypot(P[i + 1][0] - 2 * P[i][0] + P[i - 1][0], P[i + 1][1] - 2 * P[i][1] + P[i - 1][1]));
+      // scatto: salto di velocità in un fotogramma rispetto alla velocità massima (le pause non contano)
+      let vmax = 1e-9; for (let i = 1; i < P.length; i++) vmax = Math.max(vmax, Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+      traj[a][e] = { tragitto: Math.round(len), arco: far > 30 ? +(dev / cl).toFixed(2) : null, binario: far > 30 ? +(straightLen / far).toFixed(2) : 0, scatto: +(Math.max(0, ...acc) / vmax).toFixed(2) };
+    }
+  }
+  const binari = [], scatti = [];
+  for (const [a, m] of Object.entries(traj)) for (const [e, v] of Object.entries(m)) {
+    if (v.binario > 0.5) binari.push(`${a}/${e} ${Math.round(100 * v.binario)}%`);
+    if (v.scatto > 1.1 && v.tragitto > 40) scatti.push(`${a}/${e} ${v.scatto}`);
+  }
   const worstTear = frames.reduce((m, f) => (f.tears > m.tears ? f : m), frames[0]);
   const worstDrag = frames.reduce((m, f) => (f.drag > m.drag ? f : m), frames[0]);
   const res = {
@@ -151,6 +198,7 @@ export function benchCase(c, outDir) {
       const fs_ = frames.filter((f) => f.anim === a);
       return [a, { tears: Math.max(...fs_.map((f) => f.tears)), drag: +(100 * Math.max(...fs_.map((f) => f.drag))).toFixed(1) }];
     })),
+    trajectories: { straight: binari, jerks: scatti, detail: traj },
     bones: rig.json.bones.length,
     warnings: r.report.warnings || []
   };
