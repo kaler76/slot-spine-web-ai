@@ -225,6 +225,31 @@ function coloredCore(p) {
   return n < 15 ? null : { cy: sy / n, cx: (mnx + mxx) / 2, w: mxx - mnx, h: mxy - mny };
 }
 
+/**
+ * Riquadro delle LABBRA (angolo-angolo della bocca) nel pezzo: tinta rosa/rossa (hue < 14° o > 335°,
+ * saturazione > 0,3), non la pelle aranciata (hue ~20–35°) che coloredCore conta quando la pelle è
+ * calda (Francese). Larghezza = distanza fra i due angoli della bocca (5°–95° percentile delle colonne).
+ */
+function lipBox(p) {
+  const xs = [], ys = [];
+  for (let y = 0; y < p.height; y++)
+    for (let x = 0; x < p.width; x++) {
+      const i = (y * p.width + x) * 4;
+      if (p.rgba[i + 3] < 200) continue;
+      const r = p.rgba[i] / 255, g = p.rgba[i + 1] / 255, b = p.rgba[i + 2] / 255;
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+      if (mx < 0.25 || d / mx < 0.3) continue;
+      let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h = (h * 60 + 360) % 360;
+      if (h < 14 || h > 335) { xs.push(x); ys.push(y); }
+    }
+  if (xs.length < 15) return null;
+  const sx = [...xs].sort((a, b) => a - b), sy = [...ys].sort((a, b) => a - b);
+  const q = (a, f) => a[Math.min(a.length - 1, Math.floor(f * a.length))];
+  const x0 = q(sx, 0.02), x1 = q(sx, 0.98), y0 = q(sy, 0.03), y1 = q(sy, 0.97);
+  return { cx: (x0 + x1) / 2, cy: ys.reduce((a, v) => a + v, 0) / ys.length, w: x1 - x0, h: y1 - y0, top: y0 };
+}
+
 /** Larghezza del bianco dell'occhio (da angolo ad angolo) nel pezzo occhio della tavola. */
 function eyeWhiteWidth(p) {
   let mn = Infinity, mx = -Infinity;
@@ -636,8 +661,26 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
     //  R-B2 POSIZIONE: il centro della bocca sta sulla verticale del centro del NASO, misurato sulla posa
     //       (asse di simmetria della zona del naso), non sul centro del pezzo.
     // (sostituisce il +12% fisso deciso a occhio su Zeus; opt.mouthScale lo rimette se serve)
-    const pupilGap = 2 * half;
-    const c0 = coloredCore(row2[0]);
+    // pupille VERE sulla posa: centroide dei pixel più scuri (2,5%) in una finestra attorno a ogni occhio
+    // (con la testa appena girata la metà fra gli occhi non è l'asse del naso, e mid ± half non cade
+    // sulle pupille: Francese)
+    const lumP = (i) => 0.3 * ref.rgba[i] + 0.59 * ref.rgba[i + 1] + 0.11 * ref.rgba[i + 2];
+    const pupilAt = (cx0) => {
+      const pts = [];
+      for (let y = Math.round(eyeY - 0.45 * half); y <= Math.round(eyeY + 0.35 * half); y++)
+        for (let x = Math.round(cx0 - 0.55 * half); x <= Math.round(cx0 + 0.55 * half); x++) {
+          if (x < 0 || y < 0 || x >= ref.width || y >= ref.height) continue;
+          const i = (y * ref.width + x) * 4, r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2];
+          // pupilla/iride: scura, non pelle; si escludono i capelli e le ciglia allungate (bordo finestra)
+          pts.push({ x, y, l: lumP(i) + (b > r ? -20 : 0) });
+        }
+      pts.sort((a, b) => a.l - b.l);
+      const k = Math.max(4, Math.round(pts.length * 0.025)), sel = pts.slice(0, k);
+      return { x: sel.reduce((a, q) => a + q.x, 0) / k, y: sel.reduce((a, q) => a + q.y, 0) / k };
+    };
+    const pupL = pupilAt(mid - half), pupR = pupilAt(mid + half);
+    const pupilGap = Math.abs(pupR.x - pupL.x) || 2 * half;
+    const c0 = lipBox(row2[0]) || coloredCore(row2[0]);
     const kMouth = opt.mouthScale ? s * MK * opt.mouthScale : c0 ? (pupilGap * (opt.mouthWidth ?? 1)) / c0.w : s * MK * 1.12;
     // centro del naso: asse di simmetria orizzontale della fascia fra occhi e bocca (posa originale)
     const noseX = (() => {
@@ -699,10 +742,20 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       }
     }
     const mouthLineNoBeard = noseBase + 0.4 * pupilGap;
-    report.face.mouthRule = { pupilGap: Math.round(pupilGap), noseX: Math.round(noseX), eyesMid: Math.round(mid), noseBase: Math.round(noseBase), moustacheBottom, mouthLine: moustacheBottom == null ? Math.round(mouthLineNoBeard) : null, scale: +kMouth.toFixed(3), prevScale: +(s * MK * 1.12).toFixed(3) };
+    report.face.mouthRule = { pupilL: Math.round(pupL.x), pupilR: Math.round(pupR.x), pupilGap: Math.round(pupilGap), noseX: Math.round(noseX), eyesMid: Math.round(mid), noseBase: Math.round(noseBase), moustacheBottom, mouthLine: moustacheBottom == null ? Math.round(mouthLineNoBeard) : null, scale: +kMouth.toFixed(3), prevScale: +(s * MK * 1.12).toFixed(3) };
     row2.slice(0, 5).forEach((p, i) => {
-      const sp = scalePiece(p, kMouth);
-      const c = coloredCore(sp);
+      // R-B1 per variante (regola 1 del viso): a riposo angoli sotto le pupille (1,00); risata 1,05;
+      // sorriso largo oltre le pupille (1,15); triste un po' più stretta (0,95); la "O" resta come disegnata
+      // rispetto alla neutra. Ogni bocca si misura sulle SUE labbra, così una tavola disegnata
+      // incoerente (Zeus: risata più stretta della neutra) non cambia la regola.
+      const TARGET = { neutral: 1, open: 1.05, smile: 1.15, sad: 0.95 };
+      const lb0 = lipBox(p);
+      const kV = !opt.mouthScale && lb0 && TARGET[MOUTHS[i]] ? (pupilGap * TARGET[MOUTHS[i]] * (opt.mouthWidth ?? 1)) / lb0.w : kMouth;
+      const sp = scalePiece(p, kV);
+      const lb = lipBox(sp), cc = coloredCore(sp);
+      // centro e bordo alto dalle LABBRA (lipBox); l'ellisse sfumata più sotto usa il nucleo colorato
+      const c = lb ? { ...cc, cx: lb.cx, cy: lb.top + lb.h / 2, w: lb.w, h: lb.h } : cc;
+      (report.face.mouthRule.widths ||= {})[MOUTHS[i]] = c ? +(c.w / pupilGap).toFixed(2) : null;
       // centrata sulle LABBRA (R7b) e sulla verticale del naso (R-B2)
       const x = Math.round(noseX - (c ? c.cx : sp.width / 2));
       // R-B3: labbro alto attaccato ai baffi (2 px sotto il loro bordo, per non lasciare fessure), oppure
