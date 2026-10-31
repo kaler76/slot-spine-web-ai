@@ -37,8 +37,8 @@ export function introSpec(rig) {
   return {
     name: "intro",
     keys: [
-      { t: 0, ease: "out", pose: { jump: { x: -0.07 * H, y: -0.55 * H }, squash: { x: 0.94, y: 1.08 }, ...a("sx", 150, 20), ...a("dx", 150, 20), ...feet(0), ...mouthIf(F, "open"), brows: 0.8 } },
-      { t: 0.32, ease: "in", pose: { jump: { x: 0.02 * H, y: 0.07 * H }, squash: { x: 0.92, y: 1.1 }, ...a("sx", 165, 10), ...a("dx", 165, 10), ...feet(0.06 * H), ...mouthIf(F, "open"), brows: 1 } },
+      { t: 0, ease: "out", pose: { jump: { x: -0.14 * H, y: -0.55 * H }, squash: { x: 0.94, y: 1.08 }, ...a("sx", 150, 20), ...a("dx", 150, 20), ...feet(0), ...mouthIf(F, "open"), brows: 0.8 } },
+      { t: 0.32, ease: "in", pose: { jump: { x: 0.03 * H, y: 0.07 * H }, squash: { x: 0.92, y: 1.1 }, ...a("sx", 165, 10), ...a("dx", 165, 10), ...feet(0.06 * H), ...mouthIf(F, "open"), brows: 1 } },
       { t: 0.5, ease: "out", pose: { jump: { x: 0, y: 0 }, body: { x: 0, y: F.full ? -0.05 * H : -0.02 * H }, squash: { x: 1.12, y: 0.88 }, ...a("sx", 70, 30), ...a("dx", 70, 30), testa: -6, look: { x: 0, y: -0.5 }, ...feet(0) } },
       { t: 0.68, ease: "inOut", pose: { body: { x: 0, y: 0.01 * H }, squash: { x: 0.97, y: 1.03 }, ...a("sx", 40, -60), ...a("dx", 100, 60), testa: 4, look: { x: 0.2, y: 0.1 }, ...feet(0) } },
       { t: 0.95, ease: "out", pose: { ...a(F.weaponSide, 125, 45), [`mano_${F.weaponSide}`]: 25, ...a(mirror(F.weaponSide), 35, -105), testa: 8, look: { x: 0.45, y: 0.1 }, brows: 0.5, ...mouthIf(F, "smile"), ...feet(0) } },
@@ -133,10 +133,10 @@ export function disappointmentSpec(rig) {
     name: "delusione",
     keys: [
       { t: 0, ease: "inOut", pose: {} },
-      // sospiro: prima si gonfia un attimo, poi si accascia lentamente
+      // sospiro: prima si gonfia un attimo, poi si accascia lentamente, un po' di lato (arco, C8)
       { t: 0.35, ease: "inOut", pose: { squash: { x: 1.02, y: 1.03 }, body: { x: 0, y: 0.008 * H }, look: { x: 0, y: 0.2 }, brows: 0.3 } },
-      { t: 1.0, ease: "out", pose: { ...slump, squash: { x: 1.03, y: 0.94 }, body: { x: 0, y: -0.035 * H }, testa: 7, look: { x: -0.2, y: -0.8 }, brows: -0.5, ...mouthIf(F, "sad") } },
-      { t: 1.7, ease: "inOut", pose: { ...slump, squash: { x: 1.03, y: 0.95 }, body: { x: 0, y: -0.03 * H }, testa: 8, look: { x: -0.25, y: -0.75 }, brows: -0.5, ...mouthIf(F, "sad") } },
+      { t: 1.0, ease: "out", pose: { ...slump, squash: { x: 1.03, y: 0.94 }, body: { x: 0.012 * H, y: -0.035 * H }, testa: 7, look: { x: -0.2, y: -0.8 }, brows: -0.5, ...mouthIf(F, "sad") } },
+      { t: 1.7, ease: "inOut", pose: { ...slump, squash: { x: 1.03, y: 0.95 }, body: { x: 0.01 * H, y: -0.03 * H }, testa: 8, look: { x: -0.25, y: -0.75 }, brows: -0.5, ...mouthIf(F, "sad") } },
       { t: 2.2, ease: "inOut", pose: {} }
     ],
     blinks: [1.3]

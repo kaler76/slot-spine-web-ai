@@ -15,7 +15,7 @@ import { keyBackground, splitComponents, cutPiece, alignPiece, estimateScale, sc
 import { transplantOriginal } from "../sheetAssembly.js";
 import { underlayJoints } from "../jointUnderlay.js";
 
-export const KIT_IMPORT_VERSION = "2026-10-29.kit.1";
+export const KIT_IMPORT_VERSION = "2026-10-31.kit.2";
 const MOUTHS = ["neutral", "open", "o", "smile", "sad"];
 
 /** Errore medio (troncato a 120) del pezzo posto in (x,y) sull'immagine, su pixel campione. */
@@ -628,13 +628,39 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       if (e < best.err) best = { err: e, y };
     }
     const variants = {};
-    // bocche della tavola un po' più grandi della misura sulle labbra (verifica dell'utente su Zeus: +12%)
-    const OPEN_K = opt.mouthScale ?? 1.12;
+    // REGOLA BOCCA (utente, 31 ott, sul Francese):
+    //  R-B1 LARGHEZZA: la bocca è larga quanto la distanza fra il dentro dei due occhi (pupille):
+    //       angoli della bocca sotto le pupille (coerente con la Regola 1 del viso). Una sola scala per
+    //       tutte le bocche della tavola, presa dalle labbra della bocca neutra: le altre mantengono le
+    //       proporzioni disegnate (la "O" resta più stretta, la risata più aperta).
+    //  R-B2 POSIZIONE: il centro della bocca sta sulla verticale del centro del NASO, misurato sulla posa
+    //       (asse di simmetria della zona del naso), non sul centro del pezzo.
+    // (sostituisce il +12% fisso deciso a occhio su Zeus; opt.mouthScale lo rimette se serve)
+    const pupilGap = 2 * half;
+    const c0 = coloredCore(row2[0]);
+    const kMouth = opt.mouthScale ? s * MK * opt.mouthScale : c0 ? (pupilGap * (opt.mouthWidth ?? 1)) / c0.w : s * MK * 1.12;
+    // centro del naso: asse di simmetria orizzontale della fascia fra occhi e bocca (posa originale)
+    const noseX = (() => {
+      const y0 = Math.round(eyeY + 0.35 * half), y1 = Math.round(eyeY + 1.25 * half), r = Math.round(0.55 * half);
+      let bx = mid, be = Infinity;
+      for (let cx = Math.round(mid - 0.35 * half); cx <= Math.round(mid + 0.35 * half); cx++) {
+        let e = 0, n = 0;
+        for (let y = y0; y <= y1; y += 1)
+          for (let d = 1; d <= r; d++) {
+            const a = (y * ref.width + cx - d) * 4, b = (y * ref.width + cx + d) * 4;
+            if (cx - d < 0 || cx + d >= ref.width) continue;
+            e += Math.abs(ref.rgba[a] - ref.rgba[b]) + Math.abs(ref.rgba[a + 1] - ref.rgba[b + 1]) + Math.abs(ref.rgba[a + 2] - ref.rgba[b + 2]); n++;
+          }
+        if (n && e / n < be) { be = e / n; bx = cx; }
+      }
+      return bx;
+    })();
+    report.face.mouthRule = { pupilGap: Math.round(pupilGap), noseX: Math.round(noseX), eyesMid: Math.round(mid), scale: +kMouth.toFixed(3), prevScale: +(s * MK * 1.12).toFixed(3) };
     row2.slice(0, 5).forEach((p, i) => {
-      const sp = scalePiece(p, s * MK * OPEN_K);
+      const sp = scalePiece(p, kMouth);
       const c = coloredCore(sp);
-      // R7b centrata sulle LABBRA (non sul riquadro del pezzo, che con baffi e barba è asimmetrico)
-      const x = Math.round(mid - (c ? c.cx : sp.width / 2));
+      // centrata sulle LABBRA (R7b) e sulla verticale del naso (R-B2)
+      const x = Math.round(noseX - (c ? c.cx : sp.width / 2));
       const y = c && mouthCenterY != null ? Math.round(mouthCenterY - c.cy) : Math.round(best.y);
       // con il viso in mesh la bocca è sopra la barba ORIGINALE: si tiene solo l'interno della bocca
       // (ellisse sfumata attorno a labbra e denti), non i baffi e la barba disegnati nella tavola

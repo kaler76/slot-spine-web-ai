@@ -10,7 +10,7 @@
 //    180 = in alto; gomito 0 = dritto, 150 = piegato al massimo. Il motore li converte nelle
 //    rotazioni Spine del lato giusto (SIGN) e li tiene SEMPRE dentro i limiti.
 
-export const BIPED_RULES_VERSION = "2026-10-29.biped.1";
+export const BIPED_RULES_VERSION = "2026-10-31.biped.2";
 
 /** Corpi supportati: mezzo busto per i simboli, figura intera per mascotte e presentatori. */
 export const BODY_TYPES = ["bust", "full"];

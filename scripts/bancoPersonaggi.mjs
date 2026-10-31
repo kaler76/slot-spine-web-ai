@@ -15,6 +15,7 @@ import { importBipedKit, downscale } from "../src/lib/biped/kitImport.js";
 import { buildBipedSkeleton } from "../src/lib/biped/bipedRig.js";
 import { addLibraryAnimations, ANIMATIONS } from "../src/lib/biped/animationLibrary.js";
 import { loadRuntime, renderPose } from "./renderBiped.mjs";
+import { crackMask as holes, meshStretch as stretch, trajectoryStats, constructionVerdict, CONSTRUCTION_RULES_VERSION } from "../src/lib/biped/constructionRules.js";
 
 const load = (p) => { const png = PNG.sync.read(fs.readFileSync(p)); return { width: png.width, height: png.height, rgba: new Uint8ClampedArray(png.data) }; };
 const ARM = /omero|avambr|mano|manica|polso|dita|braccio/;
@@ -22,32 +23,6 @@ const ARM = /omero|avambr|mano|manica|polso|dita|braccio/;
 function isArmSlot(slot) {
   for (let b = slot.bone; b; b = b.parent) if (ARM.test(b.data.name)) return true;
   return false;
-}
-
-// crepe: pixel vuoti che una chiusura morfologica di raggio R riempie (fessure sottili tra pezzi,
-// non i grandi vuoti tra braccio e fianco quando la mano tocca il corpo)
-function holes(cov, w, h, R = 3) {
-  const full = new Uint8Array(w * h);
-  for (let i = 0; i < w * h; i++) full[i] = cov[i] >= 0.5 ? 1 : 0;
-  const dil = morph(full, w, h, R, true), clo = morph(dil, w, h, R, false);
-  const mask = new Uint8Array(w * h); let n = 0;
-  for (let i = 0; i < w * h; i++) if (clo[i] && !full[i]) { mask[i] = 1; n++; }
-  return { n, mask };
-}
-// dilatazione/erosione separabile con un quadrato di lato 2R+1
-function morph(src, w, h, R, dilate) {
-  const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let v = dilate ? 0 : 1;
-    for (let k = -R; k <= R; k++) { const xx = Math.min(w - 1, Math.max(0, x + k)); const s = src[y * w + xx]; if (dilate ? s : !s) { v = dilate ? 1 : 0; break; } }
-    tmp[y * w + x] = v;
-  }
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    let v = dilate ? 0 : 1;
-    for (let k = -R; k <= R; k++) { const yy = Math.min(h - 1, Math.max(0, y + k)); const s = tmp[yy * w + x]; if (dilate ? s : !s) { v = dilate ? 1 : 0; break; } }
-    out[y * w + x] = v;
-  }
-  return out;
 }
 
 export function benchCase(c, outDir) {
@@ -82,30 +57,6 @@ export function benchCase(c, outDir) {
     }
     return m;
   };
-  // stiramento: per ogni triangolo la mappa affine riposo→fotogramma; anisotropia σ1/σ2 pesata sull'area
-  const stretch = (rest, cur) => {
-    let tot = 0, bad = 0; const perSlot = {};
-    for (const [name, R] of Object.entries(rest)) {
-      const C = cur[name]; if (!C) continue;
-      let st = 0, sb = 0;
-      for (let k = 0; k < R.tris.length; k += 3) {
-        const [i, j, l] = [R.tris[k] * 2, R.tris[k + 1] * 2, R.tris[k + 2] * 2];
-        const ax = R.v[j] - R.v[i], ay = R.v[j + 1] - R.v[i + 1], bx = R.v[l] - R.v[i], by = R.v[l + 1] - R.v[i + 1];
-        const cx = C.v[j] - C.v[i], cy = C.v[j + 1] - C.v[i + 1], dx = C.v[l] - C.v[i], dy = C.v[l + 1] - C.v[i + 1];
-        const det = ax * by - ay * bx, area = Math.abs(det) / 2; if (area < 1e-6) continue;
-        // M = [c d] * inv([a b])
-        const m00 = (cx * by - dx * ay) / det, m01 = (dx * ax - cx * bx) / det, m10 = (cy * by - dy * ay) / det, m11 = (dy * ax - cy * bx) / det;
-        const E = (m00 * m00 + m10 * m10 + m01 * m01 + m11 * m11) / 2, D = Math.abs(m00 * m11 - m01 * m10);
-        const disc = Math.sqrt(Math.max(0, E * E - D * D)), s1 = Math.sqrt(E + disc), s2 = Math.sqrt(Math.max(1e-9, E - disc));
-        const distorted = s1 / s2 > 1.6 || s2 < 0.55 || Math.sign(m00 * m11 - m01 * m10) !== Math.sign(1); // anche triangoli ribaltati
-        st += area; if (distorted) sb += area;
-      }
-      tot += st; bad += sb; perSlot[name] = st ? sb / st : 0;
-    }
-    const worst = Object.entries(perSlot).sort((x, y) => y[1] - x[1])[0] || ["", 0];
-    return { frac: tot ? bad / tot : 0, worst };
-  };
-
   // riposo contro l'originale
   const rest = pose(null, 0);
   let fig = 0, diff = 0, unc = 0, extra = 0;
@@ -149,37 +100,7 @@ export function benchCase(c, outDir) {
       sk.updateWorldTransform();
       for (const e of ends) { const b = sk.findBone(e); pts[e].push([b.worldX, b.worldY]); }
     }
-    traj[a] = {};
-    for (const e of ends) {
-      const P = pts[e];
-      let len = 0; for (let i = 1; i < P.length; i++) len += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
-      // il percorso si divide nei tratti tra due soste (minimi di velocità); per ogni tratto lungo,
-      // arco = scostamento massimo dalla corda / corda. Conta la parte di percorso fatta "a binario".
-      const sp = []; for (let i = 1; i < P.length; i++) sp.push(Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-      const cuts = [0];
-      for (let i = 1; i < sp.length - 1; i++) if (sp[i] <= sp[i - 1] && sp[i] < sp[i + 1] && sp[i] < 0.35 * Math.max(...sp)) cuts.push(i);
-      cuts.push(P.length - 1);
-      let straightLen = 0, longLen = 0, arcSum = 0;
-      for (let k = 0; k < cuts.length - 1; k++) {
-        const i0 = cuts[k], i1 = cuts[k + 1];
-        const [ax, ay] = P[i0], [bx, by] = P[i1], cl = Math.hypot(bx - ax, by - ay);
-        let segLen = 0; for (let i = i0 + 1; i <= i1; i++) segLen += sp[i - 1];
-        if (cl < 40) continue;
-        let dev = 0; for (let i = i0; i <= i1; i++) dev = Math.max(dev, Math.abs((P[i][0] - ax) * (by - ay) - (P[i][1] - ay) * (bx - ax)) / cl);
-        longLen += segLen; arcSum += (dev / cl) * segLen;
-        if (dev / cl < 0.06) straightLen += segLen;
-      }
-      const far = longLen, dev = arcSum, cl = longLen || 1;
-      const acc = []; for (let i = 1; i < P.length - 1; i++) acc.push(Math.hypot(P[i + 1][0] - 2 * P[i][0] + P[i - 1][0], P[i + 1][1] - 2 * P[i][1] + P[i - 1][1]));
-      // scatto: salto di velocità in un fotogramma rispetto alla velocità massima (le pause non contano)
-      let vmax = 1e-9; for (let i = 1; i < P.length; i++) vmax = Math.max(vmax, Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
-      traj[a][e] = { tragitto: Math.round(len), arco: far > 30 ? +(dev / cl).toFixed(2) : null, binario: far > 30 ? +(straightLen / far).toFixed(2) : 0, scatto: +(Math.max(0, ...acc) / vmax).toFixed(2) };
-    }
-  }
-  const binari = [], scatti = [];
-  for (const [a, m] of Object.entries(traj)) for (const [e, v] of Object.entries(m)) {
-    if (v.binario > 0.5) binari.push(`${a}/${e} ${Math.round(100 * v.binario)}%`);
-    if (v.scatto > 1.1 && v.tragitto > 40) scatti.push(`${a}/${e} ${v.scatto}`);
+    traj[a] = Object.fromEntries(ends.map((e) => [e, trajectoryStats(pts[e])]));
   }
   const worstTear = frames.reduce((m, f) => (f.tears > m.tears ? f : m), frames[0]);
   const worstDrag = frames.reduce((m, f) => (f.drag > m.drag ? f : m), frames[0]);
@@ -198,10 +119,12 @@ export function benchCase(c, outDir) {
       const fs_ = frames.filter((f) => f.anim === a);
       return [a, { tears: Math.max(...fs_.map((f) => f.tears)), drag: +(100 * Math.max(...fs_.map((f) => f.drag))).toFixed(1) }];
     })),
-    trajectories: { straight: binari, jerks: scatti, detail: traj },
+    trajectories: traj,
     bones: rig.json.bones.length,
     warnings: r.report.warnings || []
   };
+  res.verdict = constructionVerdict(res);
+  res.rules = CONSTRUCTION_RULES_VERSION;
 
   // foglio di controllo: originale | riposo | strappo peggiore (buchi in magenta) | trascinamento peggiore | apertura picco
   const ap = frames.filter((f) => f.anim === "apertura").sort((a, b) => b.drag - a.drag)[0];

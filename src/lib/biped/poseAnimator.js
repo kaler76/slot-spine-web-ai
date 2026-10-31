@@ -28,6 +28,9 @@ export const EASE = {
   hold: "stepped"
 };
 
+/** Curva dell'asse x quando lo spostamento è anche verticale (arco, regola C8). */
+const ARC_X = { inOut: [0.33, 0.33, 0.67, 0.67], out: [0.45, 0, 0.55, 1], in: [0.3, 0.3, 0.7, 0.7], snap: [0.15, 0.7, 0.35, 1] };
+
 /** Rotazione anatomica di riposo di ogni articolazione, dalla posa del kit. */
 export function restAnatomy(json) {
   const out = {};
@@ -173,7 +176,13 @@ export function buildAnimation(rig, spec) {
       if (nx) {
         const e = EASE[k.ease || "inOut"];
         if (e === "stepped") o.curve = "stepped";
-        else if (e) o.curve = ch === "rotate" ? bez(e, k.t, nx.t, k.v, nx.v) : [...bez(e, k.t, nx.t, k.v.x, nx.v.x), ...bez(e, k.t, nx.t, k.v.y, nx.v.y)];
+        else if (e) {
+          // C8 (constructionRules): se uno spostamento muove sia x sia y, l'asse x usa una curva diversa
+          // (più distesa) da y: il percorso diventa un ARCO invece di una retta "a binario"
+          const both = ch === "translate" && Math.abs(nx.v.x - k.v.x) > 1e-3 && Math.abs(nx.v.y - k.v.y) > 1e-3;
+          const ex = both ? (k.easeX ? EASE[k.easeX] : ARC_X[k.ease || "inOut"]) : e;
+          o.curve = ch === "rotate" ? bez(e, k.t, nx.t, k.v, nx.v) : [...(ex ? bez(ex, k.t, nx.t, k.v.x, nx.v.x) : bez([0.33, 0.33, 0.67, 0.67], k.t, nx.t, k.v.x, nx.v.x)), ...bez(e, k.t, nx.t, k.v.y, nx.v.y)];
+        }
       }
       return o;
     });
