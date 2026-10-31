@@ -111,7 +111,7 @@ export function buildBipedSkeleton(kit) {
         // articolazioni, senza giunture (braccio intero con la manica, busto con il respiro)
         const skin = [...part.skin];
         let rules = [];
-        if (part.chainSkin) rules.push({ chain: part.chainSkin.bones, root: part.chainSkin.root, rootReach: part.chainSkin.rootReach, rootMax: part.chainSkin.rootMax, blend: part.chainSkin.blend });
+        if (part.chainSkin) rules.push({ chain: part.chainSkin.bones, root: part.chainSkin.root, rootReach: part.chainSkin.rootReach, rootMax: part.chainSkin.rootMax, blend: part.chainSkin.blend, smooth: part.chainSkin.smooth ?? 0 });
         if (part.sleeve) {
           // MANICA dentro la mesh del braccio: catena di ossa figlie dell'avambraccio lungo l'orlo che
           // pende; pesa solo sulla stoffa lontana dall'avambraccio e dalla mano (il braccio resta braccio)
@@ -312,13 +312,15 @@ export function skinnedMesh(part, boneNames, world, S, bones, grid, rules = []) 
   for (let r = 1; r < rows - 1; r++) for (let c = 1; c < cols - 1; c++) order.push([r, c]);
   const index = new Map(order.map(([r, c], i) => [r * cols + c, i]));
   const uvs = [], vertices = [], weights = [];
+  // 1) pesi grezzi per ogni nodo della griglia
+  const raw = new Map();
   for (const [r, c] of order) {
     const u = c / (cols - 1), v = r / (rows - 1);
     const sp = S({ x: part.x + u * part.width, y: part.y + v * part.height });
     // regole: certe ossa (manica) pesano solo lontano da altre (avambraccio, mano), con passaggio morbido
     const gate = (nm) => {
       let g = 1;
-      for (const r of rules) if (r.bones.includes(nm)) for (const a of r.awayFrom) {
+      for (const r of rules) if (r.bones) for (const nm2 of r.bones) if (nm2 === nm) for (const a of r.awayFrom) {
         const sa = segs.find((q) => q.nm === a.bone);
         if (!sa) continue;
         const d = dist(sa, sp.x, sp.y);
@@ -327,13 +329,33 @@ export function skinnedMesh(part, boneNames, world, S, bones, grid, rules = []) 
       return g;
     };
     const chainRule = rules.find((r) => r.chain);
-    let infl = chainRule
+    const infl = chainRule
       ? chainWeights(chainRule, sp)
       : segs.map((sg) => ({ sg, w: gate(sg.nm) / Math.pow(dist(sg, sp.x, sp.y) / scale + 1, 4) })).filter((i) => i.w > 0);
+    const sum = infl.reduce((x, i) => x + i.w, 0) || 1;
+    raw.set(r * cols + c, { u, v, sp, w: new Map(infl.map((i) => [i.sg.nm, i.w / sum])) });
+  }
+  // 2) SMOOTH come nel Weights view di Spine: media con i vicini lungo i lati della mesh (qui la griglia),
+  //    poi 3) PRUNE: via i pesi sotto soglia (ridistribuiti) e al massimo 3 ossa per vertice
+  const passes = rules.find((r) => r.chain)?.smooth ?? 0;
+  for (let k = 0; k < passes; k++) {
+    const next = new Map();
+    for (const [key, n] of raw) {
+      const r = Math.floor(key / cols), c = key % cols, acc = new Map(), add = (m, f) => { for (const [b, w] of m) acc.set(b, (acc.get(b) || 0) + w * f); };
+      add(n.w, 0.5);
+      const nb = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].filter(([y, x]) => y >= 0 && x >= 0 && y < rows && x < cols);
+      for (const [y, x] of nb) add(raw.get(y * cols + x).w, 0.5 / nb.length);
+      next.set(key, { ...n, w: acc });
+    }
+    for (const [key, n] of next) raw.set(key, n);
+  }
+  for (const [r, c] of order) {
+    const n = raw.get(r * cols + c), { u, v, sp } = n;
+    let infl = [...n.w].map(([nm, w]) => ({ sg: segs.find((q) => q.nm === nm), w })).filter((i) => i.w > 0);
     infl.sort((a, b) => b.w - a.w);
     infl = infl.slice(0, 3);
     let sum = infl.reduce((a, i) => a + i.w, 0);
-    infl = infl.filter((i) => i.w / sum >= 0.03);
+    infl = infl.filter((i) => i.w / sum >= (passes ? 0.05 : 0.03));
     sum = infl.reduce((a, i) => a + i.w, 0);
     uvs.push(round(u, 5), round(v, 5));
     vertices.push(infl.length);
