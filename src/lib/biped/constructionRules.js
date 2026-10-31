@@ -81,9 +81,9 @@ export const CONSTRUCTION_RULES = [
   },
   {
     id: "C10",
-    regola: "BOCCA: larga quanto la distanza fra il dentro dei due occhi (pupille: angoli della bocca sotto le pupille) e centrata sulla verticale del centro del NASO, misurato sulla posa. Una sola scala per tutte le bocche della tavola, presa dalle labbra della bocca neutra.",
-    perche: "Utente, 31 ott, sul Francese: la bocca della risata era troppo larga e non in asse col naso (il +12% fisso deciso a occhio su Zeus non era una regola).",
-    dove: "kitImport.js faceAndKit (R-B1 larghezza, R-B2 asse del naso)",
+    regola: "BOCCA: larga quanto la distanza fra il dentro dei due occhi (pupille: angoli della bocca sotto le pupille) e centrata sulla verticale del centro del NASO, misurato sulla posa. Una sola scala per tutte le bocche della tavola, presa dalle labbra della bocca neutra. ALTEZZA: con i baffi il labbro alto è attaccato al bordo basso dei baffi; senza baffi la linea della bocca è a 2,5 cm reali dalla base del naso (0,40 · distanza pupille, che vale ~6,3 cm).",
+    perche: "Utente, 31 ott, sul Francese: la bocca della risata era troppo larga, non in asse col naso e staccata dai baffi (il +12% fisso deciso a occhio su Zeus non era una regola).",
+    dove: "kitImport.js faceAndKit (R-B1 larghezza, R-B2 asse del naso, R-B3 altezza: baffi o 2,5 cm dal naso)",
     misura: []
   },
   {

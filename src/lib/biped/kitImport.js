@@ -655,13 +655,63 @@ function faceAndKit({ ref, faceSheet, f, report, opt, s, torso, head, roles, P, 
       }
       return bx;
     })();
-    report.face.mouthRule = { pupilGap: Math.round(pupilGap), noseX: Math.round(noseX), eyesMid: Math.round(mid), scale: +kMouth.toFixed(3), prevScale: +(s * MK * 1.12).toFixed(3) };
+    //  R-B3 ALTEZZA (utente, 31 ott): con i BAFFI le labbra stanno attaccate alla parte bassa dei baffi
+    //       (il bordo alto del labbro tocca il loro bordo inferiore); SENZA baffi, nella vita reale la
+    //       bocca è a circa 2,5 cm dalla base del naso: con la distanza fra le pupille ≈ 6,3 cm, la linea
+    //       della bocca sta 0,40 · distanza pupille sotto la base del naso.
+    const lum = (i) => 0.3 * ref.rgba[i] + 0.59 * ref.rgba[i + 1] + 0.11 * ref.rgba[i + 2];
+    const band = Math.max(2, Math.round(0.35 * half));
+    // pelle di riferimento: guance subito sotto gli occhi (sopra baffi e riccioli)
+    const skin = (() => {
+      const acc = [0, 0, 0]; let n = 0;
+      for (const sx of [-1, 1]) for (let y = Math.round(eyeY + 0.25 * half); y <= Math.round(eyeY + 0.45 * half); y++)
+        for (let x = Math.round(noseX + sx * 0.75 * half - 3); x <= Math.round(noseX + sx * 0.75 * half + 3); x++) {
+          const i = (y * ref.width + x) * 4; acc[0] += ref.rgba[i]; acc[1] += ref.rgba[i + 1]; acc[2] += ref.rgba[i + 2]; n++;
+        }
+      return acc.map((v) => v / (n || 1));
+    })();
+    // pixel di baffi (scuri o bianchi, comunque lontani dalla pelle); le labbra rosse non contano
+    const hairPx = (x, y) => {
+      const i = (y * ref.width + x) * 4, r = ref.rgba[i], g = ref.rgba[i + 1], b = ref.rgba[i + 2];
+      if (g > r + 40 && g > b + 40) return false;
+      const lip = r > g + 45 && r > b + 35 && lum(i) > 70;
+      return !lip && Math.abs(r - skin[0]) + Math.abs(g - skin[1]) + Math.abs(b - skin[2]) > 110;
+    };
+    const bx0 = Math.round(noseX - 0.5 * half), bx1 = Math.round(noseX + 0.5 * half);
+    const rowHair = (y) => { let h = 0, n = 0; for (let x = bx0; x <= bx1; x += 2) { n++; if (hairPx(x, y)) h++; } return h / n; };
+    // baffi: prima riga (scendendo dagli occhi) con almeno metà della fascia centrale "pelo"; finiscono
+    // dove la fascia torna pelle/labbra per 3 righe. La loro cima è la base del naso.
+    let moustacheTop = null, moustacheBottom = null;
+    for (let y = Math.round(eyeY + 0.5 * half); y <= Math.round(eyeY + 2.2 * half); y++) if (rowHair(y) >= 0.5) { moustacheTop = y; break; }
+    if (moustacheTop != null) {
+      let miss = 0, y = moustacheTop;
+      for (; y <= moustacheTop + 1.4 * half; y++) { if (rowHair(y) >= 0.5) { moustacheBottom = y; miss = 0; } else if (++miss >= 3) break; }
+      if (moustacheBottom - moustacheTop < 0.12 * half) moustacheTop = moustacheBottom = null;
+    }
+    // base del naso: cima dei baffi, altrimenti la riga più scura (narici) sulla verticale del naso
+    let noseBase = moustacheTop ?? eyeY + 1.2 * half;
+    if (moustacheTop == null) {
+      let darkest = Infinity;
+      for (let y = Math.round(eyeY + 0.6 * half); y <= Math.round(eyeY + 2.0 * half); y++) {
+        let L = 0, n = 0;
+        for (let x = Math.round(noseX - 0.25 * half); x <= Math.round(noseX + 0.25 * half); x++) { L += lum((y * ref.width + x) * 4); n++; }
+        if (n && L / n < darkest) { darkest = L / n; noseBase = y; }
+      }
+    }
+    const mouthLineNoBeard = noseBase + 0.4 * pupilGap;
+    report.face.mouthRule = { pupilGap: Math.round(pupilGap), noseX: Math.round(noseX), eyesMid: Math.round(mid), noseBase: Math.round(noseBase), moustacheBottom, mouthLine: moustacheBottom == null ? Math.round(mouthLineNoBeard) : null, scale: +kMouth.toFixed(3), prevScale: +(s * MK * 1.12).toFixed(3) };
     row2.slice(0, 5).forEach((p, i) => {
       const sp = scalePiece(p, kMouth);
       const c = coloredCore(sp);
       // centrata sulle LABBRA (R7b) e sulla verticale del naso (R-B2)
       const x = Math.round(noseX - (c ? c.cx : sp.width / 2));
-      const y = c && mouthCenterY != null ? Math.round(mouthCenterY - c.cy) : Math.round(best.y);
+      // R-B3: labbro alto attaccato ai baffi (2 px sotto il loro bordo, per non lasciare fessure), oppure
+      // linea della bocca a 2,5 cm reali dalla base del naso; ripiego: labbra trovate nella posa
+      const y = c
+        ? moustacheBottom != null
+          ? Math.round(moustacheBottom - 2 - (c.cy - c.h / 2))
+          : opt.mouthFromRef && mouthCenterY != null ? Math.round(mouthCenterY - c.cy) : Math.round(mouthLineNoBeard - c.cy)
+        : Math.round(best.y);
       // con il viso in mesh la bocca è sopra la barba ORIGINALE: si tiene solo l'interno della bocca
       // (ellisse sfumata attorno a labbra e denti), non i baffi e la barba disegnati nella tavola
       if (c && opt.faceMesh !== false) {

@@ -132,6 +132,8 @@ test("R7 prompt delle tavole e avvisi di progetto", () => {
   assert.match(p.neutro, /fitted sleeves/);
   assert.match(p.kit_corpo, /cuff included in the forearm/);
   assert.match(p.kit_viso, /moustache and beard stay on the head/);
+  const c10 = CONSTRUCTION_RULES.find((r) => r.id === "C10").regola;
+  assert.match(c10, /pupille/); assert.match(c10, /NASO/); assert.match(c10, /baffi/); assert.match(c10, /2,5 cm/);
   assert.deepEqual(p.warnings, []);
   const maga = designWarnings("a sorceress with very long wavy hair, wide flowing bell sleeves and a purple cape, holding a staff");
   assert.ok(maga.length >= 4, maga.join(" | "));
